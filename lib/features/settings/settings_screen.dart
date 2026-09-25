@@ -7,6 +7,7 @@ import '../../app/app.dart';
 import '../../app/environment.dart';
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
+import '../../core/app_update/app_update_service.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
@@ -23,13 +24,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool notifications = true;
   bool rescue = false;
   bool _settingsLoaded = false;
+  bool _updateCheckInProgress = false;
+  late AppUpdateService _appUpdateService;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_updateServiceAttached) {
+      _appUpdateService = RelioDependencyScope.of(context).appUpdateService;
+      _appUpdateService.addListener(_handleUpdateChanged);
+      _updateServiceAttached = true;
+    }
     if (_settingsLoaded) return;
     _settingsLoaded = true;
     unawaited(_loadLocalSettings());
+  }
+
+  bool _updateServiceAttached = false;
+
+  void _handleUpdateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    if (_updateServiceAttached) {
+      _appUpdateService.removeListener(_handleUpdateChanged);
+    }
+    super.dispose();
+  }
+
+  Future<void> _checkForUpdate() async {
+    setState(() => _updateCheckInProgress = true);
+    final snapshot = await _appUpdateService.checkForUpdate(manual: true);
+    if (!mounted) return;
+    setState(() => _updateCheckInProgress = false);
+    final message = switch (snapshot.status) {
+      AppUpdateStatus.checked ||
+      AppUpdateStatus.noUpdate => 'ตรวจสอบอัปเดตแล้ว',
+      AppUpdateStatus.updateAvailable || AppUpdateStatus.updateStarted =>
+        'พบอัปเดตใหม่ โปรดยืนยันการติดตั้งจาก Android',
+      AppUpdateStatus.unavailable => 'ยังไม่พร้อมใช้งาน โปรดลองภายหลัง',
+      AppUpdateStatus.error => 'ตรวจสอบอัปเดตไม่สำเร็จ',
+      _ => 'ฟีเจอร์นี้ใช้เฉพาะ RELIO Test',
+    };
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String get _updateSubtitle {
+    final snapshot = _appUpdateService.snapshot;
+    return switch (snapshot.status) {
+      AppUpdateStatus.checking => 'กำลังตรวจสอบ…',
+      AppUpdateStatus.checked ||
+      AppUpdateStatus.noUpdate => 'ตรวจสอบล่าสุดแล้ว',
+      AppUpdateStatus.updateAvailable ||
+      AppUpdateStatus.updateStarted => 'มี build ใหม่ให้ติดตั้ง',
+      AppUpdateStatus.unavailable =>
+        'ยังไม่ได้ตั้งค่า Firebase App Distribution',
+      AppUpdateStatus.error => 'ตรวจสอบไม่สำเร็จ',
+      _ =>
+        'เวอร์ชัน ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
+    };
   }
 
   Future<void> _loadLocalSettings() async {
@@ -135,6 +192,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'ดูคิวข้อมูลในเครื่อง',
             onTap: () => context.push('/sync'),
           ),
+          if (RelioBuildInfo.isTest) ...[
+            const SizedBox(height: 8),
+            RelioSettingTile(
+              icon: Icons.system_update_outlined,
+              title: 'ตรวจสอบอัปเดต',
+              subtitle: _updateSubtitle,
+              trailing: _updateCheckInProgress
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+              onTap: _updateCheckInProgress ? null : _checkForUpdate,
+            ),
+          ],
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.developer_mode_outlined,

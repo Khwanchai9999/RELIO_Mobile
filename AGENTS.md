@@ -3,7 +3,7 @@
 ## Purpose
 
 This directory is the Android-first Flutter implementation of RELIO Mobile
-v0.8. It is a separate project from the sibling React/Vite
+v0.8.5. It is a separate project from the sibling React/Vite
 `RELIO_SOS` prototype. Do not rewrite the React project or move Flutter files
 into it.
 
@@ -128,8 +128,9 @@ performing them.
 ## Change boundaries
 
 - Do not add a background worker, cloud-first UI, live credentials, or live
-  uploads in v0.8. The foreground/lifecycle SyncEngine is optional and
-  ownership-gated.
+  uploads in v0.8.5. The foreground/lifecycle SyncEngine is optional and
+  ownership-gated. Firebase App Distribution full self-update implementation
+  must never ship inside the PROD Google Play build; it is QA-only.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and
   future cloud queue.
 - UI must not call Drift-generated tables or the Nearby plugin directly.

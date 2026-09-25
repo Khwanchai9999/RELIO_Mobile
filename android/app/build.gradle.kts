@@ -69,11 +69,19 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // QA selects its dedicated TEST signing config at the flavor
+            // level. DEV/PROD release signing remains intentionally unset
+            // until their release keys are explicitly configured.
         }
     }
+}
+
+dependencies {
+    // API-only is safe in every variant. It is a no-op when the full SDK is
+    // absent, which keeps DEV and PROD free of self-update implementation.
+    implementation("com.google.firebase:firebase-appdistribution-api:16.0.0-beta20")
+    // The full SDK is intentionally QA-only. Never add this to PROD/Play.
+    add("qaImplementation", "com.google.firebase:firebase-appdistribution:16.0.0-beta20")
 }
 
 kotlin {

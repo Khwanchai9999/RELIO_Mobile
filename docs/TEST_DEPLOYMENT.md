@@ -1,4 +1,4 @@
-# RELIO Test Deployment — v0.8.0
+# RELIO Test Deployment — v0.8.5
 
 เอกสารนี้อธิบายการแจก Android TEST build ของ RELIO ผ่าน Firebase App
 Distribution เท่านั้น โดย Supabase ยังคงเป็น cloud backend ของแอป และไม่ได้
@@ -33,9 +33,10 @@ DEV และ TEST เป็นคนละแอป จึงมี SQLite/app 
 6. สร้าง tester group เช่น `relio-testers` ใน Firebase console หรือเพิ่ม
    tester emails ตามระบบของทีม
 
-Firebase CLI distribution ใช้ Firebase App ID, release notes และ testers/groups;
-โปรเจกต์นี้จึงไม่เพิ่ม Firebase runtime plugin หรือ `google-services.json`
-เพียงเพื่ออัปโหลด TEST APK
+Firebase CLI distribution ใช้ Firebase App ID, release notes และ testers/groups
+สำหรับการอัปโหลด ส่วน Android runtime ใช้ API-only library ทุก variant และ
+full App Distribution SDK เฉพาะ `qaImplementation`; ไม่สร้างค่า Firebase หรือ
+`google-services.json` ปลอมใน repository
 
 ## Quality gate และการแจก
 
@@ -53,8 +54,9 @@ Firebase CLI distribution ใช้ Firebase App ID, release notes และ tes
 4. รัน `flutter test`
 5. สร้าง TEST APK ด้วย Android flavor ภายในชื่อ `qa` (`--flavor qa`; AGP 9
    ไม่อนุญาตชื่อ flavor ที่ขึ้นต้นด้วย `test`)
-6. ตรวจ APK และคัดลอกไป `dist\relio-test-0.5.2+7.apk`
-7. ใช้ release notes จาก `release_notes\0.8.0.md` เมื่อมีไฟล์ release notes ของ
+6. ตรวจ package/version/signature และคัดลอกไป
+   `dist\relio-test-0.8.5+11.apk`
+7. ใช้ release notes จาก `release_notes\0.8.5.md` เมื่อมีไฟล์ release notes ของ
    milestone นี้
 8. อัปโหลดเมื่อ Firebase CLI, `FIREBASE_APP_ID` และ tester/group config พร้อม
 
@@ -135,11 +137,22 @@ Nearby, Chat, SOS, media และ location
 
 ## Firebase live status
 
-v0.8.0 เตรียม local pipeline และ Firebase CLI integration แล้ว แต่จะไม่ invent
-Firebase project ID, App ID, tester email หรือ credential ใด ๆ การ upload จริง
-จะทำได้เมื่อผู้ใช้ตั้งค่าบัญชีและ Firebase project เอง
+v0.8.5 เพิ่ม official QA-only in-app update bridge และ machine check ที่ยืนยันว่า
+full App Distribution SDK อยู่ใน QA เท่านั้น แต่จะไม่ invent Firebase project ID,
+App ID, tester email หรือ credential ใด ๆ การ upload จริงจะทำได้เมื่อผู้ใช้ตั้งค่า
+บัญชีและ Firebase project เอง
+
+ตรวจ isolation ได้ด้วย:
+
+```powershell
+.\scripts\verify-qa-update-isolation.ps1
+```
+
+รายละเอียด update architecture และ first-install/update flow อยู่ที่
+[docs/QA_UPDATE_SYSTEM.md](QA_UPDATE_SYSTEM.md)
 
 Official references:
 
 - [Firebase CLI distribution](https://firebase.google.com/docs/app-distribution/android/distribute-cli)
 - [Firebase tester setup](https://firebase.google.com/docs/app-distribution/get-set-up-as-a-tester)
+- [Firebase Android in-app alerts](https://firebase.google.com/docs/app-distribution/set-up-alerts?platform=android)

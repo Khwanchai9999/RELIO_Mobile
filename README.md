@@ -1,13 +1,14 @@
-# RELIO Mobile — v0.8.0
+# RELIO Mobile — v0.8.5
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
-`RELIO_SOS` React/Vite prototype. v0.8 keeps the offline-first local core,
-ownership-gated cloud boundary, and adds a bounded Nearby relay foundation.
+`RELIO_SOS` React/Vite prototype. v0.8.5 keeps the offline-first local core,
+ownership-gated cloud boundary, bounded Nearby relay foundation, and adds a
+QA-only Firebase App Distribution wireless update path.
 
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.8.0)
+## Current scope (v0.8.5)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -29,6 +30,10 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   Supabase upload or physical-device sync was performed for v0.6
 - Supabase adapter configuration, error mapping, RLS, and private Storage path
   hardening are prepared for live verification; credentials remain absent
+- QA-only official Firebase App Distribution alert/update bridge with a
+  throttled startup/foreground check and a manual TEST Settings action
+- Full App Distribution self-update implementation is excluded from DEV and
+  PROD; all variants keep only the API-only no-op library
 
 - Welcome, login/register prototype, offline entry, and permission explainer
 - Home dashboard with separate Internet and Nearby connectivity status
@@ -133,10 +138,10 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current test-pipeline build is version `0.7.0+9`; production remains
+The current test-pipeline build is version `0.8.5+11`; production remains
 reserved as `com.relio.relio_mobile`.
 
-## Test distribution (v0.8.0 pipeline)
+## Test distribution and wireless updates (v0.8.5 pipeline)
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
 `com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
@@ -151,6 +156,11 @@ The pipeline runs format, analyze, tests, and a signed TEST APK build before any
 Firebase upload. Missing Firebase configuration produces a ready artifact and
 `FIREBASE LIVE DISTRIBUTION — DEFERRED`; it never invents IDs or credentials.
 See [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
+
+The QA variant contains the full Firebase App Distribution Android SDK for the
+official tester alert/update flow. DEV and PROD contain only the safe API-only
+stub; the full self-update implementation is excluded from the PROD Play
+build. See [docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
 
 ## Architecture
 

@@ -3,11 +3,11 @@ enum RelioEnvironment { development, test, production }
 abstract final class RelioBuildInfo {
   static const versionName = String.fromEnvironment(
     'RELIO_VERSION',
-    defaultValue: '0.8.0',
+    defaultValue: '0.8.5',
   );
   static const buildNumber = String.fromEnvironment(
     'RELIO_BUILD',
-    defaultValue: '10',
+    defaultValue: '11',
   );
   static const environmentName = String.fromEnvironment(
     'RELIO_ENV',
@@ -37,4 +37,6 @@ abstract final class RelioBuildInfo {
   static String get aboutLabel =>
       '$appName • Version $versionName • Build $buildNumber'
       '${isTest ? ' • Environment: TEST' : ''}';
+
+  static String get buildLabel => '$versionName+$buildNumber';
 }

@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 
 import 'database/app_database.dart';
+import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
 import 'cloud/supabase_cloud_data_source.dart';
@@ -26,6 +27,7 @@ class RelioDependencies {
     LocationService? locationService,
     MediaStorageService? mediaStorage,
     CloudDataSource? cloudDataSource,
+    AppUpdateService? appUpdateService,
   }) : database = database ?? AppDatabase(),
        useMockTransport = useMockTransport ?? _defaultMockTransport,
        transport =
@@ -80,6 +82,7 @@ class RelioDependencies {
       identity: identity,
       mediaStorage: mediaStorageService,
     );
+    this.appUpdateService = appUpdateService ?? AppUpdateService();
   }
 
   final AppDatabase database;
@@ -96,6 +99,7 @@ class RelioDependencies {
   late final SyncEngine syncEngine;
   late final CloudDataSource cloudDataSource;
   late final AuthService authService;
+  late final AppUpdateService appUpdateService;
   Future<void>? _initialization;
 
   Future<void> initialize() => _initialization ??= _initialize();
@@ -117,12 +121,16 @@ class RelioDependencies {
     // Startup sync runs asynchronously; rendering the local app never waits
     // for Cloud, and SyncEngine will only claim owned queue items.
     unawaited(syncEngine.run());
+    // QA update checks use the official tester flow. The service throttles
+    // automatic checks and never runs in DEV or PROD.
+    unawaited(appUpdateService.checkForUpdate());
   }
 
   Future<void> dispose() async {
     await relayEngine.dispose();
     await nearbyService.close();
     await syncEngine.dispose();
+    appUpdateService.dispose();
     await cloudDataSource.dispose();
     await database.close();
   }

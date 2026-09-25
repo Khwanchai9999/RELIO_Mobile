@@ -13,6 +13,12 @@ $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the active workspace: $projectRoot"
 }
+if (-not $env:JAVA_HOME) {
+    $androidStudioJava = 'C:\Program Files\Android\Android Studio\jbr\bin\java.exe'
+    if (Test-Path -LiteralPath $androidStudioJava) {
+        $env:JAVA_HOME = Split-Path (Split-Path $androidStudioJava -Parent) -Parent
+    }
+}
 
 function Invoke-QualityStep {
     param([string]$Label, [string]$Command, [scriptblock]$Action)
@@ -23,7 +29,7 @@ function Invoke-QualityStep {
     }
 }
 
-Write-Host 'RELIO Test deployment pipeline'
+Write-Host 'RELIO Test deployment pipeline v0.8.5'
 Write-Host 'Quality gate runs before any APK upload.'
 & "$PSScriptRoot\preflight.ps1" -RequireTestSigning
 
@@ -38,6 +44,10 @@ $defines = @(
     "--dart-define=RELIO_BUILD=$buildNumber"
 )
 
+if ($versionName -ne '0.8.5' -or [int]$buildNumber -lt 11) {
+    throw "TEST deployment requires version 0.8.5+11 or newer; found $version."
+}
+
 # ขั้นนี้ตั้งใจรัน quality gate ก่อน build และ upload
 # ถ้า format, analyze หรือ test ไม่ผ่าน จะหยุดทันทีเพื่อไม่ปล่อย APK ที่มีปัญหา
 Invoke-QualityStep 'กำลังตรวจ dart format...' 'dart format' {
@@ -49,6 +59,9 @@ Invoke-QualityStep 'กำลังตรวจ flutter analyze...' 'flutter ana
 Invoke-QualityStep 'กำลังรัน flutter test...' 'flutter test' {
     & flutter test --no-pub
 }
+Invoke-QualityStep 'กำลังตรวจ QA/PROD Firebase SDK isolation...' 'verify-qa-update-isolation.ps1' {
+    & "$PSScriptRoot\verify-qa-update-isolation.ps1"
+}
 
 Invoke-QualityStep 'กำลังสร้าง RELIO Test APK...' 'flutter build apk' {
     & flutter build apk --no-pub --flavor qa --release @defines
@@ -58,6 +71,85 @@ $builtApk = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-qa-release
 if (-not (Test-Path -LiteralPath $builtApk)) {
     throw "Expected TEST APK was not created: $builtApk"
 }
+
+$localPropertiesPath = Join-Path $projectRoot 'android\local.properties'
+$localSdkRoot = $null
+if (Test-Path -LiteralPath $localPropertiesPath) {
+    $sdkMatch = [regex]::Match(
+        (Get-Content -Raw -LiteralPath $localPropertiesPath),
+        '(?m)^sdk\.dir=(.+)$'
+    )
+    if ($sdkMatch.Success) {
+        $localSdkRoot = [regex]::Unescape($sdkMatch.Groups[1].Value.Trim())
+    }
+}
+$sdkRoots = @($env:ANDROID_SDK_ROOT, $env:ANDROID_HOME, $localSdkRoot) |
+    Where-Object { $_ } |
+    Select-Object -Unique
+
+$aapt2Path = $null
+$aapt2Command = Get-Command aapt2 -ErrorAction SilentlyContinue
+if ($aapt2Command) { $aapt2Path = $aapt2Command.Source }
+if (-not $aapt2Path) {
+    foreach ($sdkRoot in $sdkRoots) {
+        $candidate = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'build-tools') -Filter 'aapt2.exe' -File -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($candidate) { $aapt2Path = $candidate.FullName; break }
+    }
+}
+if (-not $aapt2Path) {
+    throw 'aapt2 was not found; QA APK package/version verification cannot continue.'
+}
+$badging = & $aapt2Path dump badging $builtApk 2>&1
+if ($LASTEXITCODE -ne 0) { throw 'aapt2 could not inspect the QA APK.' }
+$packageLine = $badging | Select-String '^package:' | Select-Object -First 1
+if (-not $packageLine -or $packageLine.Line -notmatch "name='com\.relio\.relio_mobile\.test'" -or
+    $packageLine.Line -notmatch "versionCode='$buildNumber'" -or
+    $packageLine.Line -notmatch "versionName='$versionName'") {
+    throw "QA APK metadata did not match package com.relio.relio_mobile.test version $version."
+}
+Write-Host "Verified QA package, versionName, and versionCode: com.relio.relio_mobile.test $version"
+
+$apksignerPath = $null
+$apksignerCommand = Get-Command apksigner -ErrorAction SilentlyContinue
+if ($apksignerCommand) { $apksignerPath = $apksignerCommand.Source }
+if (-not $apksignerPath) {
+    foreach ($sdkRoot in $sdkRoots) {
+        $candidate = Get-ChildItem -LiteralPath (Join-Path $sdkRoot 'build-tools') -Filter 'apksigner.bat' -File -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if ($candidate) { $apksignerPath = $candidate.FullName; break }
+    }
+}
+if (-not $apksignerPath) { throw 'apksigner was not found; QA signing verification cannot continue.' }
+& $apksignerPath verify $builtApk
+if ($LASTEXITCODE -ne 0) { throw 'QA APK signature verification failed.' }
+
+$keyPropertiesPath = Join-Path $projectRoot 'android\key.properties'
+$keyProperties = Get-Content -Raw -LiteralPath $keyPropertiesPath
+$keyAliasMatch = [regex]::Match($keyProperties, '(?m)^keyAlias=(.+)$')
+$storePasswordMatch = [regex]::Match($keyProperties, '(?m)^storePassword=(.+)$')
+$keytoolPath = $null
+$keytoolCommand = Get-Command keytool -ErrorAction SilentlyContinue
+if ($keytoolCommand) { $keytoolPath = $keytoolCommand.Source }
+if (-not $keytoolPath -and $env:JAVA_HOME) {
+    $javaKeytool = Join-Path $env:JAVA_HOME 'bin\keytool.exe'
+    if (Test-Path -LiteralPath $javaKeytool) { $keytoolPath = $javaKeytool }
+}
+if (-not $keyAliasMatch.Success -or -not $storePasswordMatch.Success -or -not $keytoolPath) {
+    throw 'TEST signing metadata could not be verified without exposing credentials.'
+}
+$keystorePath = Join-Path $projectRoot 'android\relio-test.keystore'
+$keystoreCertificate = & $keytoolPath -list -v -alias $keyAliasMatch.Groups[1].Value.Trim() -keystore $keystorePath -storepass $storePasswordMatch.Groups[1].Value.Trim() 2>$null
+$apkCertificate = & $apksignerPath verify --print-certs $builtApk 2>$null
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the QA APK certificate.' }
+$expectedFingerprint = [regex]::Match(($keystoreCertificate -join "`n"), '(?i)SHA256:\s*([0-9A-F:]+)').Groups[1].Value
+$actualFingerprint = [regex]::Match(($apkCertificate -join "`n"), '(?i)SHA-256 digest:\s*([0-9A-F:]+)').Groups[1].Value
+if (-not $expectedFingerprint -or -not $actualFingerprint -or
+    $expectedFingerprint.Replace(':', '').ToUpperInvariant() -ne
+    $actualFingerprint.Replace(':', '').ToUpperInvariant()) {
+    throw 'QA APK certificate does not match the preserved TEST keystore.'
+}
+Write-Host 'Verified QA APK signature matches the preserved TEST keystore.'
 
 $distRoot = Join-Path $projectRoot 'dist'
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
@@ -93,8 +185,11 @@ $testersValue = if ($Testers) { $Testers } else { $env:FIREBASE_TESTERS }
 $firebase = Get-Command firebase -ErrorAction SilentlyContinue
 if (-not $firebase -or -not $appId -or (-not $groupsValue -and -not $testersValue)) {
     Write-Host 'FIREBASE LIVE DISTRIBUTION — DEFERRED'
-    Write-Host 'Set up Firebase CLI authentication, FIREBASE_APP_ID, and FIREBASE_GROUPS or FIREBASE_TESTERS to upload.'
+    Write-Host 'QA APK is ready. Set up Firebase CLI authentication, FIREBASE_APP_ID, and FIREBASE_GROUPS or FIREBASE_TESTERS to upload.'
     exit 0
+}
+if ($appId -notmatch '^1:\d+:android:[A-Za-z0-9_-]+$') {
+    throw 'FIREBASE_APP_ID has an invalid Firebase Android App ID format.'
 }
 
 $uploadArgs = @(
@@ -112,3 +207,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Firebase App Distribution upload failed with exit code $LASTEXITCODE."
 }
 Write-Host 'FIREBASE LIVE DISTRIBUTION — VERIFIED'
+Write-Host 'Firebase CLI returned release links above when available (firebase_console_uri/testing_uri/binary_download_uri).'

@@ -162,7 +162,7 @@ These checks are **DEFERRED — NOT YET PERFORMED**. They require live project
 credentials and network access and are not required to use the automated/mock
 path. Physical radio, GPS, and OEM checks remain deferred as well.
 
-## K. TEST DISTRIBUTION GATE — DEFERRED
+## K. TEST DISTRIBUTION AND WIRELESS UPDATE GATE — DEFERRED
 
 Before a TEST upload, a developer should:
 
@@ -173,6 +173,14 @@ Before a TEST upload, a developer should:
    version/build.
 5. Distribute the next TEST build and confirm Android updates the same TEST app
    without clearing its local SQLite data.
+
+6. Open Settings in RELIO Test and press `ตรวจสอบอัปเดต`; confirm the official
+   Firebase tester sign-in/update dialog appears only after a real release is
+   available and the tester explicitly confirms installation.
+7. Return to background and foreground; confirm automatic checks are throttled
+   and do not show repeated dialogs during the cooldown.
+8. After the update, verify messages, SOS data, attachments, sync queue, relay
+   packets, forwarding history, and settings remain available locally.
 
 These distribution steps are not claimed as manually completed by Codex.
 
