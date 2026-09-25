@@ -27,6 +27,8 @@ class Messages extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
   TextColumn get deliveryStatus => text()();
+  TextColumn get cloudSyncStatus =>
+      text().withDefault(const Constant('notQueued'))();
   BoolColumn get isOutgoing => boolean()();
   TextColumn get localFilePath => text().nullable()();
   RealColumn get latitude => real().nullable()();
@@ -62,6 +64,7 @@ class SyncQueue extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
   DateTimeColumn get nextAttemptAt => dateTime().nullable()();
+  TextColumn get ownerUserId => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -106,6 +109,10 @@ class Attachments extends Table {
   IntColumn get byteSize => integer()();
   IntColumn get bytesTransferred => integer().withDefault(const Constant(0))();
   TextColumn get transferStatus => text()();
+  TextColumn get cloudMetadataStatus =>
+      text().withDefault(const Constant('notQueued'))();
+  TextColumn get cloudFileStatus =>
+      text().withDefault(const Constant('notQueued'))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
   IntColumn get width => integer().nullable()();
@@ -135,7 +142,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -145,6 +152,22 @@ class AppDatabase extends _$AppDatabase {
         await migrator.createTable(attachments);
         await migrator.addColumn(sosEvents, sosEvents.locationAccuracy);
         await migrator.addColumn(sosEvents, sosEvents.locationCapturedAt);
+      }
+      if (from < 3) {
+        await migrator.addColumn(messages, messages.cloudSyncStatus);
+        await migrator.addColumn(syncQueue, syncQueue.ownerUserId);
+        await migrator.addColumn(attachments, attachments.cloudMetadataStatus);
+        await migrator.addColumn(attachments, attachments.cloudFileStatus);
+        await customStatement('''
+          UPDATE sync_queue
+          SET operation = CASE entity_type
+            WHEN 'message' THEN 'messageUpsert'
+            WHEN 'sos_event' THEN 'sosUpsert'
+            WHEN 'attachment' THEN 'attachmentMetadataUpsert'
+            ELSE operation
+          END
+          WHERE operation = 'cloud_sync'
+        ''');
       }
     },
     beforeOpen: (OpeningDetails details) async {

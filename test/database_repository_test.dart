@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
+import 'package:relio_mobile/core/sync/sync_types.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 void main() {
@@ -36,7 +37,13 @@ void main() {
       final stored = await repositories.messages.listMessages('peer-1');
       expect(stored.single.text, 'offline hello');
       expect(stored.single.id, message.id);
-      expect(await repositories.syncQueue.pendingCount(), 1);
+      expect(await repositories.syncQueue.pendingCount(), 2);
+      expect(
+        (await repositories.syncQueue.listPending()).where(
+          (item) => item.operation == SyncOperation.messageUpsert.value,
+        ),
+        hasLength(1),
+      );
       expect(
         (await repositories.conversations.listConversations())
             .single

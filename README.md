@@ -1,13 +1,14 @@
-# RELIO Mobile — v0.5.2
+# RELIO Mobile — v0.6.0
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
-`RELIO_SOS` React/Vite prototype. v0.5 keeps the v0.4 offline-first local core
-and adds an optional Supabase Auth + Cloud Data + private Storage foundation.
+`RELIO_SOS` React/Vite prototype. v0.6 keeps the offline-first local core and
+adds an ownership-gated, queue-driven Supabase sync engine on top of the v0.5
+Auth + Cloud Data + private Storage foundation.
 
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.5.2)
+## Current scope (v0.6.0)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -17,7 +18,16 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - Versioned SQL migrations with normalized tables, RLS policies, and private
   `relio-media` storage
 - Developer-only `/developer/cloud` diagnostics
-- Local `sync_queue` remains truthful preparation only; no automatic worker
+- `SyncEngine` processes only queue items owned by the currently authenticated
+  Supabase user; owner mismatch or unknown ownership stays local
+- Guest/signed-out data is never auto-assigned to a later account. Explicit
+  adoption is available as `นำข้อมูลออฟไลน์นี้ไปซิงก์กับบัญชีนี้`
+- Automatic sync retries at startup, foreground resume, Cloud/auth readiness,
+  and new queue items; manual `ซิงก์ตอนนี้` is also available
+- SQLite remains authoritative. Cloud failures preserve local data and queue
+  ownership through retry and crash recovery
+- `FakeCloudDataSource` is the default automated verification path; no live
+  Supabase upload or physical-device sync was performed for v0.6
 
 - Welcome, login/register prototype, offline entry, and permission explainer
 - Home dashboard with separate Internet and Nearby connectivity status
@@ -26,12 +36,12 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 2 with conversations, messages, attachments,
+- Drift database schema version 3 with conversations, messages, attachments,
   nearby devices, sync queue, SOS events, and app settings tables
 - Repository-owned persistence for conversations, messages, SOS, queue items,
   nearby peer metadata, and the stable local device identity
-- Local outgoing message lifecycle: pending → nearbySent → delivered; `synced`
-  remains reserved for a future cloud adapter
+- Local outgoing message lifecycle: pending → nearbySent → delivered; Cloud
+  sync is tracked separately through `cloudSyncStatus`
 - Chat and conversation list driven by local database streams; SOS state and
   sync queue counts persist locally
 - `NearbyTransport` abstraction, deterministic `MockNearbyTransport`, and the
@@ -118,10 +128,10 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current test-pipeline build is version `0.5.2+7`; production remains
+The current test-pipeline build is version `0.6.0+8`; production remains
 reserved as `com.relio.relio_mobile`.
 
-## Test distribution (v0.5.2)
+## Test distribution (v0.5.2 pipeline)
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
 `com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
@@ -176,7 +186,10 @@ validation, persistence, and acknowledgements without containing SQL.
 The database is authoritative for core local application state. An outgoing
 message is inserted as `pending` before Nearby is attempted. Accepted transport
 delivery moves it to `nearbySent`; a remote ACK moves it to `delivered`. Cloud
-sync is not implemented, so messages are not automatically marked `synced`.
+queue items are written after local persistence, and `SyncEngine` claims only
+rows whose `ownerUserId` exactly matches the current authenticated Cloud user.
+Guest rows remain local until explicit adoption; they are never auto-assigned
+after login.
 When a peer is unavailable, the message remains stored as `pending` for an
 explicit retry after reconnection. Incoming messages are validated, deduped by
 `messageId`, persisted, and acknowledged before the database stream updates
@@ -187,8 +200,8 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 
 ## Roadmap
 
-- **v0.5:** Supabase Auth + Cloud Data + Storage Foundation (current)
-- **v0.6:** queue-driven cloud synchronization and conflict policy
+- **v0.5:** Supabase Auth + Cloud Data + Storage Foundation
+- **v0.6:** ownership-gated queue-driven cloud synchronization (current)
 - **Later:** conflict handling, encrypted payloads, relay, background services,
   live location, and push notifications
 - **v1.0:** production security review, observability, accessibility audit,

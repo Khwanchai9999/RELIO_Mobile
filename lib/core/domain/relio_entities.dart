@@ -48,6 +48,8 @@ class RelioMediaAttachment {
     this.durationMs,
     this.errorCode,
     this.checksumSha256,
+    this.cloudMetadataStatus = 'notQueued',
+    this.cloudFileStatus = 'notQueued',
   });
 
   final String id;
@@ -68,6 +70,8 @@ class RelioMediaAttachment {
   final int? durationMs;
   final String? errorCode;
   final String? checksumSha256;
+  final String cloudMetadataStatus;
+  final String cloudFileStatus;
 
   double? get progress => byteSize <= 0
       ? null
@@ -155,6 +159,7 @@ class RelioQueueItem {
     required this.entityId,
     required this.operation,
     required this.status,
+    required this.ownerUserId,
     required this.attemptCount,
     required this.lastError,
     required this.createdAt,
@@ -167,6 +172,7 @@ class RelioQueueItem {
   final String entityId;
   final String operation;
   final String status;
+  final String? ownerUserId;
   final int attemptCount;
   final String? lastError;
   final DateTime createdAt;

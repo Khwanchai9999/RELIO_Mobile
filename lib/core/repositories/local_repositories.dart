@@ -7,6 +7,7 @@ import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import '../database/app_database.dart';
 import '../domain/relio_entities.dart';
+import '../sync/sync_types.dart';
 
 abstract interface class ConversationRepository {
   Stream<List<RelioConversation>> watchConversations();
@@ -76,6 +77,7 @@ abstract interface class MessageRepository {
     required String localPath,
   });
   Future<void> updateDeliveryStatus(String messageId, DeliveryStatus status);
+  Future<void> updateCloudSyncStatus(String messageId, String status);
   Future<void> markFailed(String messageId, String error);
 }
 
@@ -103,6 +105,8 @@ abstract interface class AttachmentRepository {
   });
   Future<void> markCompleted(String id, {String? localPath});
   Future<void> markFailed(String id, String errorCode);
+  Future<void> updateCloudMetadataStatus(String id, String status);
+  Future<void> updateCloudFileStatus(String id, String status);
   Future<List<RelioMediaAttachment>> listStaleTransfers();
 }
 
@@ -136,17 +140,35 @@ abstract interface class SOSRepository {
 
 abstract interface class SyncQueueRepository {
   Stream<int> watchPendingCount();
+  Stream<SyncQueueSummary> watchSummary();
   Future<int> pendingCount();
   Future<RelioQueueItem> enqueue({
     required String entityType,
     required String entityId,
     required String operation,
+    String? ownerUserId,
   });
+  Future<List<RelioQueueItem>> listAll();
+  Future<List<RelioQueueItem>> listEligible(DateTime now);
+  Future<bool> hasCompleted({
+    required String entityId,
+    required String operation,
+  });
+  Future<RelioQueueItem?> claim(String id, DateTime now);
   Future<List<RelioQueueItem>> listPending();
   Future<void> markProcessing(String id);
   Future<void> markCompleted(String id);
   Future<void> markFailed(String id, String error);
+  Future<void> markRetryable(
+    String id, {
+    required String error,
+    required DateTime nextAttemptAt,
+  });
+  Future<void> markWaiting(String id, String reason);
   Future<void> incrementAttempt(String id, {String? error});
+  Future<void> recoverStaleProcessing(DateTime cutoff);
+  Future<void> retry(String id);
+  Future<void> adoptUnowned(String ownerUserId);
 }
 
 abstract interface class NearbyDeviceRepository {
@@ -371,28 +393,36 @@ class DriftMessageRepository implements MessageRepository {
   }) async {
     final now = DateTime.now();
     final id = const Uuid().v4();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: id,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: MessageType.text.name,
-            content: text,
-            createdAt: now,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.pending.name,
-            isOutgoing: true,
-          ),
-        );
-    await conversations.updateLastActivity(conversationId, now);
-    await queue.enqueue(
-      entityType: 'message',
-      entityId: id,
-      operation: 'cloud_sync',
-    );
+    await db.transaction(() async {
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: id,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: MessageType.text.name,
+              content: text,
+              createdAt: now,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.pending.name,
+              cloudSyncStatus: const Value('pending'),
+              isOutgoing: true,
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, now);
+      await queue.enqueue(
+        entityType: SyncEntityType.conversation.value,
+        entityId: conversationId,
+        operation: SyncOperation.conversationUpsert.value,
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.message.value,
+        entityId: id,
+        operation: SyncOperation.messageUpsert.value,
+      );
+    });
     return RelioMessage(
       id: id,
       conversationId: conversationId,
@@ -461,30 +491,38 @@ class DriftMessageRepository implements MessageRepository {
   }) async {
     final now = DateTime.now();
     final id = const Uuid().v4();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: id,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: MessageType.location.name,
-            content: 'ตำแหน่งที่แชร์',
-            createdAt: now,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.pending.name,
-            isOutgoing: true,
-            latitude: Value(location.latitude),
-            longitude: Value(location.longitude),
-          ),
-        );
-    await conversations.updateLastActivity(conversationId, now);
-    await queue.enqueue(
-      entityType: 'message',
-      entityId: id,
-      operation: 'cloud_sync',
-    );
+    await db.transaction(() async {
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: id,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: MessageType.location.name,
+              content: 'ตำแหน่งที่แชร์',
+              createdAt: now,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.pending.name,
+              cloudSyncStatus: const Value('pending'),
+              isOutgoing: true,
+              latitude: Value(location.latitude),
+              longitude: Value(location.longitude),
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, now);
+      await queue.enqueue(
+        entityType: SyncEntityType.conversation.value,
+        entityId: conversationId,
+        operation: SyncOperation.conversationUpsert.value,
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.message.value,
+        entityId: id,
+        operation: SyncOperation.messageUpsert.value,
+      );
+    });
     return (await getMessage(id))!;
   }
 
@@ -534,30 +572,48 @@ class DriftMessageRepository implements MessageRepository {
   }) async {
     final now = DateTime.now();
     final id = messageId ?? const Uuid().v4();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: id,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: type.name,
-            content: fileName,
-            createdAt: now,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.pending.name,
-            isOutgoing: true,
-            localFilePath: Value(localPath),
-            nearbyMessageId: Value(attachmentId),
-          ),
-        );
-    await conversations.updateLastActivity(conversationId, now);
-    await queue.enqueue(
-      entityType: 'message',
-      entityId: id,
-      operation: 'cloud_sync',
-    );
+    await db.transaction(() async {
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: id,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: type.name,
+              content: fileName,
+              createdAt: now,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.pending.name,
+              cloudSyncStatus: const Value('pending'),
+              isOutgoing: true,
+              localFilePath: Value(localPath),
+              nearbyMessageId: Value(attachmentId),
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, now);
+      await queue.enqueue(
+        entityType: SyncEntityType.conversation.value,
+        entityId: conversationId,
+        operation: SyncOperation.conversationUpsert.value,
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.message.value,
+        entityId: id,
+        operation: SyncOperation.messageUpsert.value,
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.attachment.value,
+        entityId: attachmentId,
+        operation: SyncOperation.attachmentMetadataUpsert.value,
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.attachment.value,
+        entityId: attachmentId,
+        operation: SyncOperation.attachmentUpload.value,
+      );
+    });
     return (await getMessage(id))!;
   }
 
@@ -611,6 +667,18 @@ class DriftMessageRepository implements MessageRepository {
   }
 
   @override
+  Future<void> updateCloudSyncStatus(String messageId, String status) async {
+    await (db.update(
+      db.messages,
+    )..where((row) => row.id.equals(messageId))).write(
+      MessagesCompanion(
+        cloudSyncStatus: Value(status),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
   Future<void> markFailed(String messageId, String error) async {
     await updateDeliveryStatus(messageId, DeliveryStatus.failed);
   }
@@ -626,6 +694,7 @@ class DriftMessageRepository implements MessageRepository {
     outgoing: row.isOutgoing,
     type: _messageType(row.messageType),
     status: _deliveryStatus(row.deliveryStatus),
+    cloudSyncStatus: row.cloudSyncStatus,
     localFilePath: row.localFilePath,
     latitude: row.latitude,
     longitude: row.longitude,
@@ -727,6 +796,26 @@ class DriftAttachmentRepository implements AttachmentRepository {
   }
 
   @override
+  Future<void> updateCloudMetadataStatus(String id, String status) async {
+    await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
+      AttachmentsCompanion(
+        cloudMetadataStatus: Value(status),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> updateCloudFileStatus(String id, String status) async {
+    await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
+      AttachmentsCompanion(
+        cloudFileStatus: Value(status),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
   Future<void> markFailed(String id, String errorCode) => updateProgress(
     id,
     status: MediaTransferState.failed,
@@ -771,6 +860,8 @@ class DriftAttachmentRepository implements AttachmentRepository {
     durationMs: row.durationMs,
     errorCode: row.errorCode,
     checksumSha256: row.checksumSha256,
+    cloudMetadataStatus: row.cloudMetadataStatus,
+    cloudFileStatus: row.cloudFileStatus,
   );
 }
 
@@ -866,32 +957,34 @@ class DriftSosRepository implements SOSRepository {
     DateTime? locationCapturedAt,
   }) async {
     final now = DateTime.now();
-    await (db.update(db.sosEvents)..where((row) => row.isActive.equals(true)))
-        .write(const SosEventsCompanion(isActive: Value(false)));
     final id = const Uuid().v4();
-    await db
-        .into(db.sosEvents)
-        .insert(
-          SosEventsCompanion.insert(
-            id: id,
-            ownerDeviceId: ownerDeviceId,
-            ownerUserId: ownerUserId,
-            message: Value(message),
-            latitude: Value(latitude),
-            longitude: Value(longitude),
-            locationAccuracy: Value(locationAccuracy),
-            locationCapturedAt: Value(locationCapturedAt),
-            createdAt: now,
-            updatedAt: now,
-            isActive: true,
-            deliveryStatus: DeliveryStatus.pending.name,
-          ),
-        );
-    await queue.enqueue(
-      entityType: 'sos_event',
-      entityId: id,
-      operation: 'cloud_sync',
-    );
+    await db.transaction(() async {
+      await (db.update(db.sosEvents)..where((row) => row.isActive.equals(true)))
+          .write(const SosEventsCompanion(isActive: Value(false)));
+      await db
+          .into(db.sosEvents)
+          .insert(
+            SosEventsCompanion.insert(
+              id: id,
+              ownerDeviceId: ownerDeviceId,
+              ownerUserId: ownerUserId,
+              message: Value(message),
+              latitude: Value(latitude),
+              longitude: Value(longitude),
+              locationAccuracy: Value(locationAccuracy),
+              locationCapturedAt: Value(locationCapturedAt),
+              createdAt: now,
+              updatedAt: now,
+              isActive: true,
+              deliveryStatus: DeliveryStatus.pending.name,
+            ),
+          );
+      await queue.enqueue(
+        entityType: SyncEntityType.sosEvent.value,
+        entityId: id,
+        operation: SyncOperation.sosUpsert.value,
+      );
+    });
     return RelioSosEvent(
       id: id,
       ownerDeviceId: ownerDeviceId,
@@ -910,12 +1003,19 @@ class DriftSosRepository implements SOSRepository {
 
   @override
   Future<void> deactivate(String id) async {
-    await (db.update(db.sosEvents)..where((row) => row.id.equals(id))).write(
-      SosEventsCompanion(
-        isActive: const Value(false),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+    await db.transaction(() async {
+      await (db.update(db.sosEvents)..where((row) => row.id.equals(id))).write(
+        SosEventsCompanion(
+          isActive: const Value(false),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+      await queue.enqueue(
+        entityType: SyncEntityType.sosEvent.value,
+        entityId: id,
+        operation: SyncOperation.sosUpsert.value,
+      );
+    });
   }
 
   RelioSosEvent _map(SosEvent row) => RelioSosEvent(
@@ -935,29 +1035,82 @@ class DriftSosRepository implements SOSRepository {
 }
 
 class DriftSyncQueueRepository implements SyncQueueRepository {
-  DriftSyncQueueRepository(this.db);
+  DriftSyncQueueRepository(this.db, {this.ownerUserIdProvider});
+
   final AppDatabase db;
+  final String? Function()? ownerUserIdProvider;
 
   @override
   Stream<int> watchPendingCount() =>
-      (db.selectOnly(db.syncQueue)
-            ..addColumns([db.syncQueue.id.count()])
-            ..where(db.syncQueue.status.equals('pending')))
-          .watchSingle()
-          .map((row) => row.read(db.syncQueue.id.count()) ?? 0);
+      watchSummary().map((summary) => summary.pending);
 
   @override
-  Future<int> pendingCount() async => (await (db.select(
-    db.syncQueue,
-  )..where((row) => row.status.equals('pending'))).get()).length;
+  Stream<SyncQueueSummary> watchSummary() =>
+      (db.select(db.syncQueue)
+            ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+          .watch()
+          .map(_summarize);
+
+  @override
+  Future<int> pendingCount() async => (await listAll())
+      .where((item) => item.status == SyncQueueStatus.pending.value)
+      .length;
 
   @override
   Future<RelioQueueItem> enqueue({
     required String entityType,
     required String entityId,
     required String operation,
+    String? ownerUserId,
   }) async {
+    if (SyncOperation.parse(operation) == null) {
+      throw ArgumentError.value(
+        operation,
+        'operation',
+        'Unsupported sync operation',
+      );
+    }
+    final effectiveOwnerUserId = ownerUserId ?? ownerUserIdProvider?.call();
     final now = DateTime.now();
+    final existing =
+        await (db.select(db.syncQueue)
+              ..where(
+                (row) =>
+                    row.entityType.equals(entityType) &
+                    row.entityId.equals(entityId) &
+                    row.operation.equals(operation) &
+                    row.status.equals(SyncQueueStatus.completed.value).not(),
+              )
+              ..orderBy([(row) => OrderingTerm.desc(row.createdAt)])
+              ..limit(1))
+            .getSingleOrNull();
+    if (existing != null) {
+      // Coalesce repeated local edits, but never change an existing owner's scope.
+      await (db.update(
+        db.syncQueue,
+      )..where((row) => row.id.equals(existing.id))).write(
+        SyncQueueCompanion(
+          status: Value(SyncQueueStatus.pending.value),
+          attemptCount: const Value(0),
+          lastError: const Value<String?>(null),
+          nextAttemptAt: const Value<DateTime?>(null),
+          // An existing Guest row stays unowned until explicit adoption.
+          ownerUserId: const Value.absent(),
+          updatedAt: Value(now),
+        ),
+      );
+      return _map(
+        existing.copyWith(
+          status: SyncQueueStatus.pending.value,
+          attemptCount: 0,
+          lastError: const Value<String?>(null),
+          nextAttemptAt: const Value<DateTime?>(null),
+          ownerUserId: Value<String?>(existing.ownerUserId),
+          updatedAt: now,
+        ),
+      );
+    }
+
     final id = const Uuid().v4();
     await db
         .into(db.syncQueue)
@@ -967,7 +1120,8 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
             entityType: entityType,
             entityId: entityId,
             operation: operation,
-            status: 'pending',
+            status: SyncQueueStatus.pending.value,
+            ownerUserId: Value<String?>(effectiveOwnerUserId),
             createdAt: now,
             updatedAt: now,
           ),
@@ -977,7 +1131,8 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
       entityType: entityType,
       entityId: entityId,
       operation: operation,
-      status: 'pending',
+      status: SyncQueueStatus.pending.value,
+      ownerUserId: effectiveOwnerUserId,
       attemptCount: 0,
       lastError: null,
       createdAt: now,
@@ -987,26 +1142,125 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
   }
 
   @override
-  Future<List<RelioQueueItem>> listPending() async =>
+  Future<List<RelioQueueItem>> listAll() async =>
+      (await (db.select(
+            db.syncQueue,
+          )..orderBy([(row) => OrderingTerm.asc(row.createdAt)])).get())
+          .map(_map)
+          .toList(growable: false);
+
+  @override
+  Future<List<RelioQueueItem>> listEligible(DateTime now) async =>
       (await (db.select(db.syncQueue)
-                ..where((row) => row.status.equals('pending'))
+                ..where(
+                  (row) =>
+                      row.status.equals(SyncQueueStatus.pending.value) &
+                      (row.nextAttemptAt.isNull() |
+                          row.nextAttemptAt.isSmallerOrEqualValue(now)),
+                )
                 ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
               .get())
           .map(_map)
           .toList(growable: false);
 
   @override
-  Future<void> markProcessing(String id) => _writeStatus(id, 'processing');
+  Future<bool> hasCompleted({
+    required String entityId,
+    required String operation,
+  }) async =>
+      (await (db.select(db.syncQueue)
+            ..where(
+              (row) =>
+                  row.entityId.equals(entityId) &
+                  row.operation.equals(operation) &
+                  row.status.equals(SyncQueueStatus.completed.value),
+            )
+            ..limit(1))
+          .getSingleOrNull()) !=
+      null;
 
   @override
-  Future<void> markCompleted(String id) => _writeStatus(id, 'completed');
+  Future<RelioQueueItem?> claim(String id, DateTime now) async {
+    final row =
+        await (db.select(db.syncQueue)..where(
+              (item) =>
+                  item.id.equals(id) &
+                  item.status.equals(SyncQueueStatus.pending.value) &
+                  (item.nextAttemptAt.isNull() |
+                      item.nextAttemptAt.isSmallerOrEqualValue(now)),
+            ))
+            .getSingleOrNull();
+    if (row == null) return null;
+    await (db.update(db.syncQueue)..where((item) => item.id.equals(id))).write(
+      SyncQueueCompanion(
+        status: Value(SyncQueueStatus.processing.value),
+        attemptCount: Value(row.attemptCount + 1),
+        updatedAt: Value(now),
+      ),
+    );
+    return _map(
+      row.copyWith(
+        status: SyncQueueStatus.processing.value,
+        attemptCount: row.attemptCount + 1,
+        updatedAt: now,
+      ),
+    );
+  }
+
+  @override
+  Future<List<RelioQueueItem>> listPending() => listEligible(DateTime.now());
+
+  @override
+  Future<void> markProcessing(String id) =>
+      _writeStatus(id, SyncQueueStatus.processing.value);
+
+  @override
+  Future<void> markCompleted(String id) async {
+    await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
+      SyncQueueCompanion(
+        status: Value(SyncQueueStatus.completed.value),
+        lastError: const Value<String?>(null),
+        nextAttemptAt: const Value<DateTime?>(null),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
 
   @override
   Future<void> markFailed(String id, String error) async {
     await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
       SyncQueueCompanion(
-        status: const Value('failed'),
+        status: Value(SyncQueueStatus.failed.value),
         lastError: Value(error),
+        nextAttemptAt: const Value<DateTime?>(null),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> markRetryable(
+    String id, {
+    required String error,
+    required DateTime nextAttemptAt,
+  }) async {
+    await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
+      SyncQueueCompanion(
+        status: Value(SyncQueueStatus.pending.value),
+        lastError: Value(error),
+        nextAttemptAt: Value(nextAttemptAt),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> markWaiting(String id, String reason) async {
+    await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
+      SyncQueueCompanion(
+        status: Value(SyncQueueStatus.pending.value),
+        lastError: Value(reason),
+        nextAttemptAt: const Value<DateTime?>(null),
         updatedAt: Value(DateTime.now()),
       ),
     );
@@ -1026,6 +1280,59 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
     );
   }
 
+  @override
+  Future<void> recoverStaleProcessing(DateTime cutoff) async {
+    // คืนงานที่ค้าง processing จาก process ก่อนหน้าให้เริ่มใหม่ได้
+    await (db.update(db.syncQueue)..where(
+          (row) =>
+              row.status.equals(SyncQueueStatus.processing.value) &
+              row.updatedAt.isSmallerThanValue(cutoff),
+        ))
+        .write(
+          SyncQueueCompanion(
+            status: Value(SyncQueueStatus.pending.value),
+            lastError: const Value('recovered_stale_processing'),
+            nextAttemptAt: const Value<DateTime?>(null),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  }
+
+  @override
+  Future<void> retry(String id) async {
+    await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
+      SyncQueueCompanion(
+        status: Value(SyncQueueStatus.pending.value),
+        attemptCount: const Value(0),
+        lastError: const Value<String?>(null),
+        nextAttemptAt: const Value<DateTime?>(null),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  @override
+  Future<void> adoptUnowned(String ownerUserId) async {
+    await (db.update(db.syncQueue)..where(
+          (row) =>
+              row.ownerUserId.isNull() &
+              row.status.isIn([
+                SyncQueueStatus.pending.value,
+                SyncQueueStatus.failed.value,
+              ]),
+        ))
+        .write(
+          SyncQueueCompanion(
+            ownerUserId: Value<String?>(ownerUserId),
+            status: Value(SyncQueueStatus.pending.value),
+            attemptCount: const Value(0),
+            lastError: const Value<String?>(null),
+            nextAttemptAt: const Value<DateTime?>(null),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  }
+
   Future<void> _writeStatus(String id, String status) async {
     await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
       SyncQueueCompanion(
@@ -1035,12 +1342,38 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
     );
   }
 
+  SyncQueueSummary _summarize(List<SyncQueueData> rows) {
+    var pending = 0;
+    var processing = 0;
+    var completed = 0;
+    var failed = 0;
+    for (final row in rows) {
+      switch (row.status) {
+        case 'pending':
+          pending++;
+        case 'processing':
+          processing++;
+        case 'completed':
+          completed++;
+        case 'failed':
+          failed++;
+      }
+    }
+    return SyncQueueSummary(
+      pending: pending,
+      processing: processing,
+      completed: completed,
+      failed: failed,
+    );
+  }
+
   RelioQueueItem _map(SyncQueueData row) => RelioQueueItem(
     id: row.id,
     entityType: row.entityType,
     entityId: row.entityId,
     operation: row.operation,
     status: row.status,
+    ownerUserId: row.ownerUserId,
     attemptCount: row.attemptCount,
     lastError: row.lastError,
     createdAt: row.createdAt,
@@ -1174,8 +1507,11 @@ class RelioSettingsRepository {
 }
 
 class RelioRepositories {
-  RelioRepositories(this.database)
-    : syncQueue = DriftSyncQueueRepository(database),
+  RelioRepositories(this.database, {String? Function()? ownerUserIdProvider})
+    : syncQueue = DriftSyncQueueRepository(
+        database,
+        ownerUserIdProvider: ownerUserIdProvider,
+      ),
       conversations = DriftConversationRepository(database),
       nearbyDevices = DriftNearbyDeviceRepository(database),
       settings = RelioSettingsRepository(database),

@@ -1,4 +1,4 @@
-# RELIO v0.5 Manual Device Tests
+# RELIO v0.6 Manual Device Tests
 
 ## DEFERRED MANUAL VERIFICATION — NOT PERFORMED
 
@@ -107,7 +107,23 @@ With two real Android phones and Internet/mobile data disabled:
 5. If a last-known location is used, confirm it is identified as latest rather
    than current and no live tracking is implied.
 
-## H. Supabase live verification — DEFERRED
+## H. SyncEngine ownership verification — DEFERRED
+
+Use a disposable test Supabase project only after credentials are explicitly
+configured. These checks have not been performed:
+
+1. Create a message while signed in as Account A, sign out, sign in as B, and
+   confirm the queue remains owned by A and is not uploaded as B.
+2. Create Guest Mode history, sign in, and confirm it stays local until the
+   user explicitly chooses `นำข้อมูลออฟไลน์นี้ไปซิงก์กับบัญชีนี้`.
+3. Turn Cloud offline, create authenticated data, restore connectivity, and
+   confirm startup/resume/manual Sync Now retry without deleting SQLite data.
+4. Queue an attachment and confirm its parent ownership and private storage
+   path cannot cross accounts.
+
+These checks are **DEFERRED — NOT YET PERFORMED**.
+
+## I. Supabase live verification — DEFERRED
 
 Only after a disposable Supabase project is configured with dart-defines:
 
@@ -127,7 +143,7 @@ These checks are **DEFERRED — NOT YET PERFORMED**. They require live project
 credentials and network access and are not required to use the automated/mock
 path. Physical radio, GPS, and OEM checks remain deferred as well.
 
-## I. TEST DISTRIBUTION GATE — DEFERRED
+## J. TEST DISTRIBUTION GATE — DEFERRED
 
 Before a TEST upload, a developer should:
 

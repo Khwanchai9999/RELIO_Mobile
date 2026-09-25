@@ -1,4 +1,4 @@
-# Supabase setup — RELIO v0.5
+# Supabase setup — RELIO v0.6
 
 Supabase is an optional cloud destination. Drift/SQLite remains authoritative
 for chat, SOS, Nearby, media, and settings when the app is offline or no
@@ -31,4 +31,7 @@ either define is missing or a service-role key is detected.
 6. Verify profile, message, SOS, and storage operations only after local/mock
    tests pass.
 
-Live project verification is `DEFERRED` when credentials are not supplied.
+The v0.6 SyncEngine still requires the ownership gate: it uploads only queue
+rows owned by the currently authenticated user, never auto-adopts Guest Mode
+history, and preserves local data on sign-out or Cloud failure. Live project
+verification and uploads are `DEFERRED` when credentials are not supplied.

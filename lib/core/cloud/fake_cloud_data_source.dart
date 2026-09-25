@@ -6,8 +6,23 @@ import '../media/media_storage_service.dart';
 import 'cloud_data_source.dart';
 import 'cloud_models.dart';
 
+enum FakeCloudFailure {
+  none,
+  offline,
+  timeout,
+  temporaryServer,
+  rateLimit,
+  unauthenticated,
+  permissionDenied,
+  uploadFailure,
+}
+
 class FakeCloudDataSource implements CloudDataSource {
-  FakeCloudDataSource({this.configured = true, this.offline = false});
+  FakeCloudDataSource({
+    this.configured = true,
+    this.offline = false,
+    this.failureMode = FakeCloudFailure.none,
+  });
 
   @override
   final SupabaseConfig configuration = const SupabaseConfig(
@@ -16,6 +31,7 @@ class FakeCloudDataSource implements CloudDataSource {
   );
   final bool configured;
   bool offline;
+  FakeCloudFailure failureMode;
   CloudState _state = CloudState.signedOut;
   AuthState _authState = AuthState.guest;
   CloudIdentity? _identity;
@@ -46,11 +62,31 @@ class FakeCloudDataSource implements CloudDataSource {
         code: 'notConfigured',
       );
     }
-    if (offline) {
-      throw const CloudException(
-        'ออฟไลน์ ไม่สามารถเชื่อมต่อคลาวด์ได้',
-        code: 'offline',
-      );
+    final failure = offline ? FakeCloudFailure.offline : failureMode;
+    if (failure != FakeCloudFailure.none &&
+        failure != FakeCloudFailure.uploadFailure) {
+      final (message, code) = switch (failure) {
+        FakeCloudFailure.offline => (
+          'ออฟไลน์ ไม่สามารถเชื่อมต่อคลาวด์ได้',
+          'offline',
+        ),
+        FakeCloudFailure.timeout => ('Cloud timeout', 'timeout'),
+        FakeCloudFailure.temporaryServer => (
+          'Cloud server ชั่วคราวขัดข้อง',
+          'server',
+        ),
+        FakeCloudFailure.rateLimit => ('Cloud rate limit', 'rateLimit'),
+        FakeCloudFailure.unauthenticated => (
+          'ต้องเข้าสู่ระบบก่อนใช้งานคลาวด์',
+          'signedOut',
+        ),
+        FakeCloudFailure.permissionDenied => (
+          'ไม่มีสิทธิ์เขียน Cloud',
+          'permissionDenied',
+        ),
+        FakeCloudFailure.none || FakeCloudFailure.uploadFailure => ('', ''),
+      };
+      throw CloudException(message, code: code);
     }
   }
 
@@ -210,6 +246,9 @@ class FakeCloudDataSource implements CloudDataSource {
     required String storagePath,
   }) async {
     _requireAuth();
+    if (failureMode == FakeCloudFailure.uploadFailure) {
+      throw const CloudException('อัปโหลดไฟล์ไม่สำเร็จ', code: 'storage');
+    }
     files[storagePath] = await File(localPath).readAsBytes();
     return storagePath;
   }
@@ -236,5 +275,14 @@ class FakeCloudDataSource implements CloudDataSource {
   Future<void> dispose() async {
     await _cloudStates.close();
     await _authStates.close();
+  }
+
+  void resetCloudState() {
+    messages.clear();
+    conversations.clear();
+    attachments.clear();
+    sosEvents.clear();
+    files.clear();
+    failureMode = FakeCloudFailure.none;
   }
 }

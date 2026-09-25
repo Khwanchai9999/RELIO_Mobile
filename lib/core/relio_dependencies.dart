@@ -14,6 +14,7 @@ import 'nearby/nearby_service.dart';
 import 'nearby/nearby_transport.dart';
 import 'permissions/permission_service.dart';
 import 'repositories/local_repositories.dart';
+import 'sync/sync_engine.dart';
 
 class RelioDependencies {
   RelioDependencies({
@@ -30,7 +31,6 @@ class RelioDependencies {
            ((useMockTransport ?? _defaultMockTransport)
                ? MockNearbyTransport(autoAcknowledge: true)
                : AndroidNearbyTransport()) {
-    repositories = RelioRepositories(this.database);
     this.locationService =
         locationService ??
         (this.transport is! MockNearbyTransport &&
@@ -42,6 +42,10 @@ class RelioDependencies {
     mediaStorageService = mediaStorage ?? MediaStorageService();
     this.cloudDataSource = cloudDataSource ?? SupabaseCloudDataSource();
     authService = CloudAuthService(this.cloudDataSource);
+    repositories = RelioRepositories(
+      this.database,
+      ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
+    );
     identity = RelioDeviceIdentityRepository(this.database);
     permissionService = PermissionService();
     nearbyService = NearbyService(
@@ -55,6 +59,12 @@ class RelioDependencies {
       attachments: repositories.attachments,
       mediaStorage: mediaStorageService,
     );
+    syncEngine = SyncEngine(
+      repositories: repositories,
+      cloud: this.cloudDataSource,
+      identity: identity,
+      mediaStorage: mediaStorageService,
+    );
   }
 
   final AppDatabase database;
@@ -66,6 +76,7 @@ class RelioDependencies {
   late final LocationService locationService;
   late final MediaStorageService mediaStorageService;
   late final NearbyService nearbyService;
+  late final SyncEngine syncEngine;
   late final CloudDataSource cloudDataSource;
   late final AuthService authService;
   Future<void>? _initialization;
@@ -84,10 +95,15 @@ class RelioDependencies {
       // healthy when credentials are absent or the network is unavailable.
     }
     await nearbyService.initialize();
+    await syncEngine.initialize();
+    // Startup sync runs asynchronously; rendering the local app never waits
+    // for Cloud, and SyncEngine will only claim owned queue items.
+    unawaited(syncEngine.run());
   }
 
   Future<void> dispose() async {
     await nearbyService.close();
+    await syncEngine.dispose();
     await database.close();
   }
 }

@@ -594,6 +594,18 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _cloudSyncStatusMeta = const VerificationMeta(
+    'cloudSyncStatus',
+  );
+  @override
+  late final GeneratedColumn<String> cloudSyncStatus = GeneratedColumn<String>(
+    'cloud_sync_status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('notQueued'),
+  );
   static const VerificationMeta _isOutgoingMeta = const VerificationMeta(
     'isOutgoing',
   );
@@ -685,6 +697,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     createdAt,
     updatedAt,
     deliveryStatus,
+    cloudSyncStatus,
     isOutgoing,
     localFilePath,
     latitude,
@@ -783,6 +796,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
       );
     } else if (isInserting) {
       context.missing(_deliveryStatusMeta);
+    }
+    if (data.containsKey('cloud_sync_status')) {
+      context.handle(
+        _cloudSyncStatusMeta,
+        cloudSyncStatus.isAcceptableOrUnknown(
+          data['cloud_sync_status']!,
+          _cloudSyncStatusMeta,
+        ),
+      );
     }
     if (data.containsKey('is_outgoing')) {
       context.handle(
@@ -885,6 +907,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}delivery_status'],
       )!,
+      cloudSyncStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cloud_sync_status'],
+      )!,
       isOutgoing: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_outgoing'],
@@ -932,6 +958,7 @@ class Message extends DataClass implements Insertable<Message> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String deliveryStatus;
+  final String cloudSyncStatus;
   final bool isOutgoing;
   final String? localFilePath;
   final double? latitude;
@@ -949,6 +976,7 @@ class Message extends DataClass implements Insertable<Message> {
     required this.createdAt,
     required this.updatedAt,
     required this.deliveryStatus,
+    required this.cloudSyncStatus,
     required this.isOutgoing,
     this.localFilePath,
     this.latitude,
@@ -971,6 +999,7 @@ class Message extends DataClass implements Insertable<Message> {
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     map['delivery_status'] = Variable<String>(deliveryStatus);
+    map['cloud_sync_status'] = Variable<String>(cloudSyncStatus);
     map['is_outgoing'] = Variable<bool>(isOutgoing);
     if (!nullToAbsent || localFilePath != null) {
       map['local_file_path'] = Variable<String>(localFilePath);
@@ -1006,6 +1035,7 @@ class Message extends DataClass implements Insertable<Message> {
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       deliveryStatus: Value(deliveryStatus),
+      cloudSyncStatus: Value(cloudSyncStatus),
       isOutgoing: Value(isOutgoing),
       localFilePath: localFilePath == null && nullToAbsent
           ? const Value.absent()
@@ -1043,6 +1073,7 @@ class Message extends DataClass implements Insertable<Message> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       deliveryStatus: serializer.fromJson<String>(json['deliveryStatus']),
+      cloudSyncStatus: serializer.fromJson<String>(json['cloudSyncStatus']),
       isOutgoing: serializer.fromJson<bool>(json['isOutgoing']),
       localFilePath: serializer.fromJson<String?>(json['localFilePath']),
       latitude: serializer.fromJson<double?>(json['latitude']),
@@ -1067,6 +1098,7 @@ class Message extends DataClass implements Insertable<Message> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'deliveryStatus': serializer.toJson<String>(deliveryStatus),
+      'cloudSyncStatus': serializer.toJson<String>(cloudSyncStatus),
       'isOutgoing': serializer.toJson<bool>(isOutgoing),
       'localFilePath': serializer.toJson<String?>(localFilePath),
       'latitude': serializer.toJson<double?>(latitude),
@@ -1087,6 +1119,7 @@ class Message extends DataClass implements Insertable<Message> {
     DateTime? createdAt,
     DateTime? updatedAt,
     String? deliveryStatus,
+    String? cloudSyncStatus,
     bool? isOutgoing,
     Value<String?> localFilePath = const Value.absent(),
     Value<double?> latitude = const Value.absent(),
@@ -1106,6 +1139,7 @@ class Message extends DataClass implements Insertable<Message> {
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     deliveryStatus: deliveryStatus ?? this.deliveryStatus,
+    cloudSyncStatus: cloudSyncStatus ?? this.cloudSyncStatus,
     isOutgoing: isOutgoing ?? this.isOutgoing,
     localFilePath: localFilePath.present
         ? localFilePath.value
@@ -1141,6 +1175,9 @@ class Message extends DataClass implements Insertable<Message> {
       deliveryStatus: data.deliveryStatus.present
           ? data.deliveryStatus.value
           : this.deliveryStatus,
+      cloudSyncStatus: data.cloudSyncStatus.present
+          ? data.cloudSyncStatus.value
+          : this.cloudSyncStatus,
       isOutgoing: data.isOutgoing.present
           ? data.isOutgoing.value
           : this.isOutgoing,
@@ -1173,6 +1210,7 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deliveryStatus: $deliveryStatus, ')
+          ..write('cloudSyncStatus: $cloudSyncStatus, ')
           ..write('isOutgoing: $isOutgoing, ')
           ..write('localFilePath: $localFilePath, ')
           ..write('latitude: $latitude, ')
@@ -1195,6 +1233,7 @@ class Message extends DataClass implements Insertable<Message> {
     createdAt,
     updatedAt,
     deliveryStatus,
+    cloudSyncStatus,
     isOutgoing,
     localFilePath,
     latitude,
@@ -1216,6 +1255,7 @@ class Message extends DataClass implements Insertable<Message> {
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.deliveryStatus == this.deliveryStatus &&
+          other.cloudSyncStatus == this.cloudSyncStatus &&
           other.isOutgoing == this.isOutgoing &&
           other.localFilePath == this.localFilePath &&
           other.latitude == this.latitude &&
@@ -1235,6 +1275,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<String> deliveryStatus;
+  final Value<String> cloudSyncStatus;
   final Value<bool> isOutgoing;
   final Value<String?> localFilePath;
   final Value<double?> latitude;
@@ -1253,6 +1294,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.deliveryStatus = const Value.absent(),
+    this.cloudSyncStatus = const Value.absent(),
     this.isOutgoing = const Value.absent(),
     this.localFilePath = const Value.absent(),
     this.latitude = const Value.absent(),
@@ -1272,6 +1314,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     required DateTime createdAt,
     required DateTime updatedAt,
     required String deliveryStatus,
+    this.cloudSyncStatus = const Value.absent(),
     required bool isOutgoing,
     this.localFilePath = const Value.absent(),
     this.latitude = const Value.absent(),
@@ -1299,6 +1342,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<String>? deliveryStatus,
+    Expression<String>? cloudSyncStatus,
     Expression<bool>? isOutgoing,
     Expression<String>? localFilePath,
     Expression<double>? latitude,
@@ -1318,6 +1362,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (deliveryStatus != null) 'delivery_status': deliveryStatus,
+      if (cloudSyncStatus != null) 'cloud_sync_status': cloudSyncStatus,
       if (isOutgoing != null) 'is_outgoing': isOutgoing,
       if (localFilePath != null) 'local_file_path': localFilePath,
       if (latitude != null) 'latitude': latitude,
@@ -1340,6 +1385,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<String>? deliveryStatus,
+    Value<String>? cloudSyncStatus,
     Value<bool>? isOutgoing,
     Value<String?>? localFilePath,
     Value<double?>? latitude,
@@ -1359,6 +1405,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deliveryStatus: deliveryStatus ?? this.deliveryStatus,
+      cloudSyncStatus: cloudSyncStatus ?? this.cloudSyncStatus,
       isOutgoing: isOutgoing ?? this.isOutgoing,
       localFilePath: localFilePath ?? this.localFilePath,
       latitude: latitude ?? this.latitude,
@@ -1399,6 +1446,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     }
     if (deliveryStatus.present) {
       map['delivery_status'] = Variable<String>(deliveryStatus.value);
+    }
+    if (cloudSyncStatus.present) {
+      map['cloud_sync_status'] = Variable<String>(cloudSyncStatus.value);
     }
     if (isOutgoing.present) {
       map['is_outgoing'] = Variable<bool>(isOutgoing.value);
@@ -1441,6 +1491,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('deliveryStatus: $deliveryStatus, ')
+          ..write('cloudSyncStatus: $cloudSyncStatus, ')
           ..write('isOutgoing: $isOutgoing, ')
           ..write('localFilePath: $localFilePath, ')
           ..write('latitude: $latitude, ')
@@ -2013,6 +2064,17 @@ class $SyncQueueTable extends SyncQueue
         type: DriftSqlType.dateTime,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _ownerUserIdMeta = const VerificationMeta(
+    'ownerUserId',
+  );
+  @override
+  late final GeneratedColumn<String> ownerUserId = GeneratedColumn<String>(
+    'owner_user_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -2025,6 +2087,7 @@ class $SyncQueueTable extends SyncQueue
     createdAt,
     updatedAt,
     nextAttemptAt,
+    ownerUserId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2115,6 +2178,15 @@ class $SyncQueueTable extends SyncQueue
         ),
       );
     }
+    if (data.containsKey('owner_user_id')) {
+      context.handle(
+        _ownerUserIdMeta,
+        ownerUserId.isAcceptableOrUnknown(
+          data['owner_user_id']!,
+          _ownerUserIdMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -2164,6 +2236,10 @@ class $SyncQueueTable extends SyncQueue
         DriftSqlType.dateTime,
         data['${effectivePrefix}next_attempt_at'],
       ),
+      ownerUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_user_id'],
+      ),
     );
   }
 
@@ -2184,6 +2260,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? nextAttemptAt;
+  final String? ownerUserId;
   const SyncQueueData({
     required this.id,
     required this.entityType,
@@ -2195,6 +2272,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     required this.createdAt,
     required this.updatedAt,
     this.nextAttemptAt,
+    this.ownerUserId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2212,6 +2290,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || nextAttemptAt != null) {
       map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt);
+    }
+    if (!nullToAbsent || ownerUserId != null) {
+      map['owner_user_id'] = Variable<String>(ownerUserId);
     }
     return map;
   }
@@ -2232,6 +2313,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       nextAttemptAt: nextAttemptAt == null && nullToAbsent
           ? const Value.absent()
           : Value(nextAttemptAt),
+      ownerUserId: ownerUserId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(ownerUserId),
     );
   }
 
@@ -2251,6 +2335,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       nextAttemptAt: serializer.fromJson<DateTime?>(json['nextAttemptAt']),
+      ownerUserId: serializer.fromJson<String?>(json['ownerUserId']),
     );
   }
   @override
@@ -2267,6 +2352,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'nextAttemptAt': serializer.toJson<DateTime?>(nextAttemptAt),
+      'ownerUserId': serializer.toJson<String?>(ownerUserId),
     };
   }
 
@@ -2281,6 +2367,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<DateTime?> nextAttemptAt = const Value.absent(),
+    Value<String?> ownerUserId = const Value.absent(),
   }) => SyncQueueData(
     id: id ?? this.id,
     entityType: entityType ?? this.entityType,
@@ -2294,6 +2381,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     nextAttemptAt: nextAttemptAt.present
         ? nextAttemptAt.value
         : this.nextAttemptAt,
+    ownerUserId: ownerUserId.present ? ownerUserId.value : this.ownerUserId,
   );
   SyncQueueData copyWithCompanion(SyncQueueCompanion data) {
     return SyncQueueData(
@@ -2313,6 +2401,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       nextAttemptAt: data.nextAttemptAt.present
           ? data.nextAttemptAt.value
           : this.nextAttemptAt,
+      ownerUserId: data.ownerUserId.present
+          ? data.ownerUserId.value
+          : this.ownerUserId,
     );
   }
 
@@ -2328,7 +2419,8 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
           ..write('lastError: $lastError, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
-          ..write('nextAttemptAt: $nextAttemptAt')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('ownerUserId: $ownerUserId')
           ..write(')'))
         .toString();
   }
@@ -2345,6 +2437,7 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     createdAt,
     updatedAt,
     nextAttemptAt,
+    ownerUserId,
   );
   @override
   bool operator ==(Object other) =>
@@ -2359,7 +2452,8 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
           other.lastError == this.lastError &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
-          other.nextAttemptAt == this.nextAttemptAt);
+          other.nextAttemptAt == this.nextAttemptAt &&
+          other.ownerUserId == this.ownerUserId);
 }
 
 class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
@@ -2373,6 +2467,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<DateTime?> nextAttemptAt;
+  final Value<String?> ownerUserId;
   final Value<int> rowid;
   const SyncQueueCompanion({
     this.id = const Value.absent(),
@@ -2385,6 +2480,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.nextAttemptAt = const Value.absent(),
+    this.ownerUserId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SyncQueueCompanion.insert({
@@ -2398,6 +2494,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     required DateTime createdAt,
     required DateTime updatedAt,
     this.nextAttemptAt = const Value.absent(),
+    this.ownerUserId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        entityType = Value(entityType),
@@ -2417,6 +2514,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<DateTime>? nextAttemptAt,
+    Expression<String>? ownerUserId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2430,6 +2528,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
+      if (ownerUserId != null) 'owner_user_id': ownerUserId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2445,6 +2544,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<DateTime?>? nextAttemptAt,
+    Value<String?>? ownerUserId,
     Value<int>? rowid,
   }) {
     return SyncQueueCompanion(
@@ -2458,6 +2558,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      ownerUserId: ownerUserId ?? this.ownerUserId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2495,6 +2596,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     if (nextAttemptAt.present) {
       map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt.value);
     }
+    if (ownerUserId.present) {
+      map['owner_user_id'] = Variable<String>(ownerUserId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2514,6 +2618,7 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('ownerUserId: $ownerUserId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -3654,6 +3759,30 @@ class $AttachmentsTable extends Attachments
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _cloudMetadataStatusMeta =
+      const VerificationMeta('cloudMetadataStatus');
+  @override
+  late final GeneratedColumn<String> cloudMetadataStatus =
+      GeneratedColumn<String>(
+        'cloud_metadata_status',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultValue: const Constant('notQueued'),
+      );
+  static const VerificationMeta _cloudFileStatusMeta = const VerificationMeta(
+    'cloudFileStatus',
+  );
+  @override
+  late final GeneratedColumn<String> cloudFileStatus = GeneratedColumn<String>(
+    'cloud_file_status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('notQueued'),
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3740,6 +3869,8 @@ class $AttachmentsTable extends Attachments
     byteSize,
     bytesTransferred,
     transferStatus,
+    cloudMetadataStatus,
+    cloudFileStatus,
     createdAt,
     updatedAt,
     width,
@@ -3850,6 +3981,24 @@ class $AttachmentsTable extends Attachments
     } else if (isInserting) {
       context.missing(_transferStatusMeta);
     }
+    if (data.containsKey('cloud_metadata_status')) {
+      context.handle(
+        _cloudMetadataStatusMeta,
+        cloudMetadataStatus.isAcceptableOrUnknown(
+          data['cloud_metadata_status']!,
+          _cloudMetadataStatusMeta,
+        ),
+      );
+    }
+    if (data.containsKey('cloud_file_status')) {
+      context.handle(
+        _cloudFileStatusMeta,
+        cloudFileStatus.isAcceptableOrUnknown(
+          data['cloud_file_status']!,
+          _cloudFileStatusMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -3952,6 +4101,14 @@ class $AttachmentsTable extends Attachments
         DriftSqlType.string,
         data['${effectivePrefix}transfer_status'],
       )!,
+      cloudMetadataStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cloud_metadata_status'],
+      )!,
+      cloudFileStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cloud_file_status'],
+      )!,
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -4001,6 +4158,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
   final int byteSize;
   final int bytesTransferred;
   final String transferStatus;
+  final String cloudMetadataStatus;
+  final String cloudFileStatus;
   final DateTime createdAt;
   final DateTime updatedAt;
   final int? width;
@@ -4020,6 +4179,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
     required this.byteSize,
     required this.bytesTransferred,
     required this.transferStatus,
+    required this.cloudMetadataStatus,
+    required this.cloudFileStatus,
     required this.createdAt,
     required this.updatedAt,
     this.width,
@@ -4044,6 +4205,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
     map['byte_size'] = Variable<int>(byteSize);
     map['bytes_transferred'] = Variable<int>(bytesTransferred);
     map['transfer_status'] = Variable<String>(transferStatus);
+    map['cloud_metadata_status'] = Variable<String>(cloudMetadataStatus);
+    map['cloud_file_status'] = Variable<String>(cloudFileStatus);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     if (!nullToAbsent || width != null) {
@@ -4079,6 +4242,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
       byteSize: Value(byteSize),
       bytesTransferred: Value(bytesTransferred),
       transferStatus: Value(transferStatus),
+      cloudMetadataStatus: Value(cloudMetadataStatus),
+      cloudFileStatus: Value(cloudFileStatus),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
       width: width == null && nullToAbsent
@@ -4116,6 +4281,10 @@ class Attachment extends DataClass implements Insertable<Attachment> {
       byteSize: serializer.fromJson<int>(json['byteSize']),
       bytesTransferred: serializer.fromJson<int>(json['bytesTransferred']),
       transferStatus: serializer.fromJson<String>(json['transferStatus']),
+      cloudMetadataStatus: serializer.fromJson<String>(
+        json['cloudMetadataStatus'],
+      ),
+      cloudFileStatus: serializer.fromJson<String>(json['cloudFileStatus']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
       width: serializer.fromJson<int?>(json['width']),
@@ -4140,6 +4309,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
       'byteSize': serializer.toJson<int>(byteSize),
       'bytesTransferred': serializer.toJson<int>(bytesTransferred),
       'transferStatus': serializer.toJson<String>(transferStatus),
+      'cloudMetadataStatus': serializer.toJson<String>(cloudMetadataStatus),
+      'cloudFileStatus': serializer.toJson<String>(cloudFileStatus),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
       'width': serializer.toJson<int?>(width),
@@ -4162,6 +4333,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
     int? byteSize,
     int? bytesTransferred,
     String? transferStatus,
+    String? cloudMetadataStatus,
+    String? cloudFileStatus,
     DateTime? createdAt,
     DateTime? updatedAt,
     Value<int?> width = const Value.absent(),
@@ -4183,6 +4356,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
     byteSize: byteSize ?? this.byteSize,
     bytesTransferred: bytesTransferred ?? this.bytesTransferred,
     transferStatus: transferStatus ?? this.transferStatus,
+    cloudMetadataStatus: cloudMetadataStatus ?? this.cloudMetadataStatus,
+    cloudFileStatus: cloudFileStatus ?? this.cloudFileStatus,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
     width: width.present ? width.value : this.width,
@@ -4214,6 +4389,12 @@ class Attachment extends DataClass implements Insertable<Attachment> {
       transferStatus: data.transferStatus.present
           ? data.transferStatus.value
           : this.transferStatus,
+      cloudMetadataStatus: data.cloudMetadataStatus.present
+          ? data.cloudMetadataStatus.value
+          : this.cloudMetadataStatus,
+      cloudFileStatus: data.cloudFileStatus.present
+          ? data.cloudFileStatus.value
+          : this.cloudFileStatus,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       width: data.width.present ? data.width.value : this.width,
@@ -4242,6 +4423,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
           ..write('byteSize: $byteSize, ')
           ..write('bytesTransferred: $bytesTransferred, ')
           ..write('transferStatus: $transferStatus, ')
+          ..write('cloudMetadataStatus: $cloudMetadataStatus, ')
+          ..write('cloudFileStatus: $cloudFileStatus, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('width: $width, ')
@@ -4266,6 +4449,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
     byteSize,
     bytesTransferred,
     transferStatus,
+    cloudMetadataStatus,
+    cloudFileStatus,
     createdAt,
     updatedAt,
     width,
@@ -4289,6 +4474,8 @@ class Attachment extends DataClass implements Insertable<Attachment> {
           other.byteSize == this.byteSize &&
           other.bytesTransferred == this.bytesTransferred &&
           other.transferStatus == this.transferStatus &&
+          other.cloudMetadataStatus == this.cloudMetadataStatus &&
+          other.cloudFileStatus == this.cloudFileStatus &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt &&
           other.width == this.width &&
@@ -4310,6 +4497,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
   final Value<int> byteSize;
   final Value<int> bytesTransferred;
   final Value<String> transferStatus;
+  final Value<String> cloudMetadataStatus;
+  final Value<String> cloudFileStatus;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   final Value<int?> width;
@@ -4330,6 +4519,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
     this.byteSize = const Value.absent(),
     this.bytesTransferred = const Value.absent(),
     this.transferStatus = const Value.absent(),
+    this.cloudMetadataStatus = const Value.absent(),
+    this.cloudFileStatus = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.width = const Value.absent(),
@@ -4351,6 +4542,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
     required int byteSize,
     this.bytesTransferred = const Value.absent(),
     required String transferStatus,
+    this.cloudMetadataStatus = const Value.absent(),
+    this.cloudFileStatus = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
     this.width = const Value.absent(),
@@ -4382,6 +4575,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
     Expression<int>? byteSize,
     Expression<int>? bytesTransferred,
     Expression<String>? transferStatus,
+    Expression<String>? cloudMetadataStatus,
+    Expression<String>? cloudFileStatus,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
     Expression<int>? width,
@@ -4403,6 +4598,9 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
       if (byteSize != null) 'byte_size': byteSize,
       if (bytesTransferred != null) 'bytes_transferred': bytesTransferred,
       if (transferStatus != null) 'transfer_status': transferStatus,
+      if (cloudMetadataStatus != null)
+        'cloud_metadata_status': cloudMetadataStatus,
+      if (cloudFileStatus != null) 'cloud_file_status': cloudFileStatus,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (width != null) 'width': width,
@@ -4426,6 +4624,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
     Value<int>? byteSize,
     Value<int>? bytesTransferred,
     Value<String>? transferStatus,
+    Value<String>? cloudMetadataStatus,
+    Value<String>? cloudFileStatus,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
     Value<int?>? width,
@@ -4447,6 +4647,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
       byteSize: byteSize ?? this.byteSize,
       bytesTransferred: bytesTransferred ?? this.bytesTransferred,
       transferStatus: transferStatus ?? this.transferStatus,
+      cloudMetadataStatus: cloudMetadataStatus ?? this.cloudMetadataStatus,
+      cloudFileStatus: cloudFileStatus ?? this.cloudFileStatus,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       width: width ?? this.width,
@@ -4494,6 +4696,14 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
     if (transferStatus.present) {
       map['transfer_status'] = Variable<String>(transferStatus.value);
     }
+    if (cloudMetadataStatus.present) {
+      map['cloud_metadata_status'] = Variable<String>(
+        cloudMetadataStatus.value,
+      );
+    }
+    if (cloudFileStatus.present) {
+      map['cloud_file_status'] = Variable<String>(cloudFileStatus.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -4535,6 +4745,8 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
           ..write('byteSize: $byteSize, ')
           ..write('bytesTransferred: $bytesTransferred, ')
           ..write('transferStatus: $transferStatus, ')
+          ..write('cloudMetadataStatus: $cloudMetadataStatus, ')
+          ..write('cloudFileStatus: $cloudFileStatus, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('width: $width, ')
@@ -4839,6 +5051,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       required DateTime createdAt,
       required DateTime updatedAt,
       required String deliveryStatus,
+      Value<String> cloudSyncStatus,
       required bool isOutgoing,
       Value<String?> localFilePath,
       Value<double?> latitude,
@@ -4859,6 +5072,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<String> deliveryStatus,
+      Value<String> cloudSyncStatus,
       Value<bool> isOutgoing,
       Value<String?> localFilePath,
       Value<double?> latitude,
@@ -4920,6 +5134,11 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<String> get deliveryStatus => $composableBuilder(
     column: $table.deliveryStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get cloudSyncStatus => $composableBuilder(
+    column: $table.cloudSyncStatus,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -5013,6 +5232,11 @@ class $$MessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get cloudSyncStatus => $composableBuilder(
+    column: $table.cloudSyncStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isOutgoing => $composableBuilder(
     column: $table.isOutgoing,
     builder: (column) => ColumnOrderings(column),
@@ -5093,6 +5317,11 @@ class $$MessagesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get cloudSyncStatus => $composableBuilder(
+    column: $table.cloudSyncStatus,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<bool> get isOutgoing => $composableBuilder(
     column: $table.isOutgoing,
     builder: (column) => column,
@@ -5162,6 +5391,7 @@ class $$MessagesTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<String> deliveryStatus = const Value.absent(),
+                Value<String> cloudSyncStatus = const Value.absent(),
                 Value<bool> isOutgoing = const Value.absent(),
                 Value<String?> localFilePath = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
@@ -5180,6 +5410,7 @@ class $$MessagesTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deliveryStatus: deliveryStatus,
+                cloudSyncStatus: cloudSyncStatus,
                 isOutgoing: isOutgoing,
                 localFilePath: localFilePath,
                 latitude: latitude,
@@ -5200,6 +5431,7 @@ class $$MessagesTableTableManager
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 required String deliveryStatus,
+                Value<String> cloudSyncStatus = const Value.absent(),
                 required bool isOutgoing,
                 Value<String?> localFilePath = const Value.absent(),
                 Value<double?> latitude = const Value.absent(),
@@ -5218,6 +5450,7 @@ class $$MessagesTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 deliveryStatus: deliveryStatus,
+                cloudSyncStatus: cloudSyncStatus,
                 isOutgoing: isOutgoing,
                 localFilePath: localFilePath,
                 latitude: latitude,
@@ -5506,6 +5739,7 @@ typedef $$SyncQueueTableCreateCompanionBuilder =
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<DateTime?> nextAttemptAt,
+      Value<String?> ownerUserId,
       Value<int> rowid,
     });
 typedef $$SyncQueueTableUpdateCompanionBuilder =
@@ -5520,6 +5754,7 @@ typedef $$SyncQueueTableUpdateCompanionBuilder =
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<DateTime?> nextAttemptAt,
+      Value<String?> ownerUserId,
       Value<int> rowid,
     });
 
@@ -5579,6 +5814,11 @@ class $$SyncQueueTableFilterComposer
 
   ColumnFilters<DateTime> get nextAttemptAt => $composableBuilder(
     column: $table.nextAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -5641,6 +5881,11 @@ class $$SyncQueueTableOrderingComposer
     column: $table.nextAttemptAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$SyncQueueTableAnnotationComposer
@@ -5687,6 +5932,11 @@ class $$SyncQueueTableAnnotationComposer
     column: $table.nextAttemptAt,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
+    builder: (column) => column,
+  );
 }
 
 class $$SyncQueueTableTableManager
@@ -5730,6 +5980,7 @@ class $$SyncQueueTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<String?> ownerUserId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SyncQueueCompanion(
                 id: id,
@@ -5742,6 +5993,7 @@ class $$SyncQueueTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 nextAttemptAt: nextAttemptAt,
+                ownerUserId: ownerUserId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -5756,6 +6008,7 @@ class $$SyncQueueTableTableManager
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<String?> ownerUserId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SyncQueueCompanion.insert(
                 id: id,
@@ -5768,6 +6021,7 @@ class $$SyncQueueTableTableManager
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 nextAttemptAt: nextAttemptAt,
+                ownerUserId: ownerUserId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -6334,6 +6588,8 @@ typedef $$AttachmentsTableCreateCompanionBuilder =
       required int byteSize,
       Value<int> bytesTransferred,
       required String transferStatus,
+      Value<String> cloudMetadataStatus,
+      Value<String> cloudFileStatus,
       required DateTime createdAt,
       required DateTime updatedAt,
       Value<int?> width,
@@ -6356,6 +6612,8 @@ typedef $$AttachmentsTableUpdateCompanionBuilder =
       Value<int> byteSize,
       Value<int> bytesTransferred,
       Value<String> transferStatus,
+      Value<String> cloudMetadataStatus,
+      Value<String> cloudFileStatus,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
       Value<int?> width,
@@ -6427,6 +6685,16 @@ class $$AttachmentsTableFilterComposer
 
   ColumnFilters<String> get transferStatus => $composableBuilder(
     column: $table.transferStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get cloudMetadataStatus => $composableBuilder(
+    column: $table.cloudMetadataStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get cloudFileStatus => $composableBuilder(
+    column: $table.cloudFileStatus,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6530,6 +6798,16 @@ class $$AttachmentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get cloudMetadataStatus => $composableBuilder(
+    column: $table.cloudMetadataStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get cloudFileStatus => $composableBuilder(
+    column: $table.cloudFileStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -6616,6 +6894,16 @@ class $$AttachmentsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get cloudMetadataStatus => $composableBuilder(
+    column: $table.cloudMetadataStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get cloudFileStatus => $composableBuilder(
+    column: $table.cloudFileStatus,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -6684,6 +6972,8 @@ class $$AttachmentsTableTableManager
                 Value<int> byteSize = const Value.absent(),
                 Value<int> bytesTransferred = const Value.absent(),
                 Value<String> transferStatus = const Value.absent(),
+                Value<String> cloudMetadataStatus = const Value.absent(),
+                Value<String> cloudFileStatus = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
                 Value<int?> width = const Value.absent(),
@@ -6704,6 +6994,8 @@ class $$AttachmentsTableTableManager
                 byteSize: byteSize,
                 bytesTransferred: bytesTransferred,
                 transferStatus: transferStatus,
+                cloudMetadataStatus: cloudMetadataStatus,
+                cloudFileStatus: cloudFileStatus,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 width: width,
@@ -6726,6 +7018,8 @@ class $$AttachmentsTableTableManager
                 required int byteSize,
                 Value<int> bytesTransferred = const Value.absent(),
                 required String transferStatus,
+                Value<String> cloudMetadataStatus = const Value.absent(),
+                Value<String> cloudFileStatus = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
                 Value<int?> width = const Value.absent(),
@@ -6746,6 +7040,8 @@ class $$AttachmentsTableTableManager
                 byteSize: byteSize,
                 bytesTransferred: bytesTransferred,
                 transferStatus: transferStatus,
+                cloudMetadataStatus: cloudMetadataStatus,
+                cloudFileStatus: cloudFileStatus,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 width: width,
