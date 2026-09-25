@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:minSdkVersion="31" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:minSdkVersion="32" android:usesPermissionFlags="neverForLocation" />
     <application
-        android:label="RELIO"
+        android:label="${appLabel}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

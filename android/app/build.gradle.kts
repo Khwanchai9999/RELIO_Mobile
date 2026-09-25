@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -8,6 +10,8 @@ android {
     namespace = "com.relio.relio_mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    flavorDimensions += "environment"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,6 +27,44 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["appLabel"] = "RELIO"
+    }
+
+    signingConfigs {
+        val testKeyPropertiesFile = rootProject.file("key.properties")
+        if (testKeyPropertiesFile.exists()) {
+            val testKeyProperties = Properties()
+            testKeyPropertiesFile.inputStream().use { testKeyProperties.load(it) }
+            create("test") {
+                keyAlias = testKeyProperties.getProperty("keyAlias")
+                keyPassword = testKeyProperties.getProperty("keyPassword")
+                storeFile = rootProject.file(
+                    testKeyProperties.getProperty("storeFile"),
+                )
+                storePassword = testKeyProperties.getProperty("storePassword")
+            }
+        }
+    }
+
+    productFlavors {
+        create("dev") {
+            dimension = "environment"
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "RELIO Dev"
+        }
+        // AGP 9 reserves flavor names that start with "test"; qa is the
+        // internal Android variant name for the RELIO TEST environment.
+        create("qa") {
+            dimension = "environment"
+            applicationIdSuffix = ".test"
+            manifestPlaceholders["appLabel"] = "RELIO Test"
+            val testSigningConfig = signingConfigs.findByName("test")
+            if (testSigningConfig != null) signingConfig = testSigningConfig
+        }
+        create("prod") {
+            dimension = "environment"
+            manifestPlaceholders["appLabel"] = "RELIO"
+        }
     }
 
     buildTypes {

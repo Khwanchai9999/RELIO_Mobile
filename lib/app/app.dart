@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/relio_dependencies.dart';
+import 'environment.dart';
 import 'router.dart';
 import 'theme/relio_theme.dart';
 
@@ -160,7 +161,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
       child: RelioDependencyScope(
         dependencies: _dependencies,
         child: MaterialApp.router(
-          title: 'RELIO',
+          title: RelioBuildInfo.appName,
           debugShowCheckedModeBanner: false,
           theme: RelioTheme.light(),
           darkTheme: RelioTheme.dark(),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app.dart';
+import '../../app/environment.dart';
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/relio_dependencies.dart';
@@ -152,7 +153,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           RelioSettingTile(
             icon: Icons.info_outline,
             title: 'เกี่ยวกับ RELIO',
-            subtitle: 'เวอร์ชัน 0.5.1 (build 6)',
+            subtitle: RelioBuildInfo.aboutLabel,
           ),
         ],
       ),

@@ -71,6 +71,14 @@ into it.
   Explain what the block does and why, using technical English terms such as
   ThemeMode, Repository, SQLite, Nearby, ACK, or SyncEngine when useful. Do not
   comment every line, obvious syntax, or generated files.
+- Never distribute a TEST APK if `format`, `flutter analyze`, `flutter test`,
+  or the TEST build fails. Never commit signing secrets, keystores, Firebase
+  credentials, tokens, or service-account files.
+- Keep DEV, TEST, and PROD packaging separate. Production ID/signing must not
+  be reused casually for TEST builds. Firebase App Distribution is only a test
+  delivery channel; Supabase remains the RELIO backend.
+- USB smoke testing may occur before distribution. Do not implement a custom,
+  silent, or insecure APK self-updater.
 - Preserve Thai copy and accessibility labels when changing UI.
 - Export one default component per screen file when adding new screen modules.
 
@@ -91,7 +99,7 @@ Run these from `RELIO_Mobile` after changes:
 dart format lib test
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
 ```
 
 Drift generated files are produced by build_runner and must not be edited by

@@ -35,6 +35,7 @@ migrate_working_dir/
 dist/
 .gradle/
 android/.gradle/
+android/build/
 android/key.properties
 **/key.properties
 *.jks

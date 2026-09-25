@@ -126,3 +126,17 @@ Only after a disposable Supabase project is configured with dart-defines:
 These checks are **DEFERRED — NOT YET PERFORMED**. They require live project
 credentials and network access and are not required to use the automated/mock
 path. Physical radio, GPS, and OEM checks remain deferred as well.
+
+## I. TEST DISTRIBUTION GATE — DEFERRED
+
+Before a TEST upload, a developer should:
+
+1. Run the automated quality gate and build `RELIO Test`.
+2. Install the TEST APK through USB once and complete a smoke test.
+3. Upload only the approved artifact through Firebase App Distribution.
+4. Install it from the Firebase tester experience and verify the displayed
+   version/build.
+5. Distribute the next TEST build and confirm Android updates the same TEST app
+   without clearing its local SQLite data.
+
+These distribution steps are not claimed as manually completed by Codex.

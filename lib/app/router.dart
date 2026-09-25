@@ -14,6 +14,7 @@ import '../features/settings/settings_screen.dart';
 import '../features/sos/sos_screens.dart';
 import '../features/sync/sync_screen.dart';
 import 'app.dart';
+import 'environment.dart';
 
 GoRouter createRelioRouter() {
   return GoRouter(
@@ -60,10 +61,14 @@ GoRouter createRelioRouter() {
       ),
       GoRoute(
         path: '/developer/nearby',
+        redirect: (_, _) =>
+            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
         builder: (_, _) => const NearbyDiagnosticsScreen(),
       ),
       GoRoute(
         path: '/developer/cloud',
+        redirect: (_, _) =>
+            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
         builder: (_, _) => const CloudDiagnosticsScreen(),
       ),
     ],

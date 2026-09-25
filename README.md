@@ -1,4 +1,4 @@
-# RELIO Mobile — v0.5.1
+# RELIO Mobile — v0.5.2
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
 `RELIO_SOS` React/Vite prototype. v0.5 keeps the v0.4 offline-first local core
@@ -7,7 +7,7 @@ and adds an optional Supabase Auth + Cloud Data + private Storage foundation.
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.5.1)
+## Current scope (v0.5.2)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -88,10 +88,10 @@ SDK 36. Android Studio's bundled JDK 21 is recommended.
 
 ```bash
 flutter pub get
-flutter run
+flutter run --flavor dev --dart-define=RELIO_ENV=development
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
 ```
 
 After Drift schema changes, generate sources with:
@@ -118,8 +118,24 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current hotfix build is version `0.5.1+6`; the application ID remains
-`com.relio.relio_mobile`.
+The current test-pipeline build is version `0.5.2+7`; production remains
+reserved as `com.relio.relio_mobile`.
+
+## Test distribution (v0.5.2)
+
+RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
+`com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
+key once, then run the fail-fast deployment pipeline from the active workspace:
+
+```powershell
+.\scripts\setup-test-signing.ps1
+.\scripts\deploy-test.ps1
+```
+
+The pipeline runs format, analyze, tests, and a signed TEST APK build before any
+Firebase upload. Missing Firebase configuration produces a ready artifact and
+`FIREBASE LIVE DISTRIBUTION — DEFERRED`; it never invents IDs or credentials.
+See [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
 
 ## Architecture
 
