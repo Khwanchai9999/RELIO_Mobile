@@ -145,6 +145,17 @@ class MediaStorageService {
 
   Future<bool> fileExists(String filePath) => File(filePath).exists();
 
+  /// Cloud uploads may read only files RELIO copied into its managed root.
+  /// This prevents a queue row from turning an arbitrary local path into a
+  /// Cloud upload.
+  Future<bool> isManagedFile(String filePath) async {
+    final root = await _root();
+    final rootPath = path.canonicalize(root.path);
+    final fileCanonical = path.canonicalize(File(filePath).path);
+    return path.isWithin(rootPath, fileCanonical) &&
+        await File(fileCanonical).exists();
+  }
+
   Future<void> deleteManagedFile(String filePath) async {
     final root = await _root();
     final file = File(filePath);

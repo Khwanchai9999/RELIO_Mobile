@@ -41,4 +41,5 @@ abstract interface class CloudDataSource {
     required String fileName,
     required String mimeType,
   });
+  Future<void> dispose();
 }

@@ -104,6 +104,7 @@ class RelioDependencies {
   Future<void> dispose() async {
     await nearbyService.close();
     await syncEngine.dispose();
+    await cloudDataSource.dispose();
     await database.close();
   }
 }

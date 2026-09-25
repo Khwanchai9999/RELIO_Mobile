@@ -1,14 +1,14 @@
-# RELIO Mobile — v0.6.0
+# RELIO Mobile — v0.7.0
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
-`RELIO_SOS` React/Vite prototype. v0.6 keeps the offline-first local core and
-adds an ownership-gated, queue-driven Supabase sync engine on top of the v0.5
-Auth + Cloud Data + private Storage foundation.
+`RELIO_SOS` React/Vite prototype. v0.7 keeps the offline-first local core and
+hardens the v0.6 ownership-gated, queue-driven Supabase sync engine for a
+future disposable live test project.
 
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.6.0)
+## Current scope (v0.7.0)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -28,6 +28,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   ownership through retry and crash recovery
 - `FakeCloudDataSource` is the default automated verification path; no live
   Supabase upload or physical-device sync was performed for v0.6
+- Supabase adapter configuration, error mapping, RLS, and private Storage path
+  hardening are prepared for live verification; credentials remain absent
 
 - Welcome, login/register prototype, offline entry, and permission explainer
 - Home dashboard with separate Internet and Nearby connectivity status
@@ -128,7 +130,7 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current test-pipeline build is version `0.6.0+8`; production remains
+The current test-pipeline build is version `0.7.0+9`; production remains
 reserved as `com.relio.relio_mobile`.
 
 ## Test distribution (v0.5.2 pipeline)
@@ -201,7 +203,8 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 ## Roadmap
 
 - **v0.5:** Supabase Auth + Cloud Data + Storage Foundation
-- **v0.6:** ownership-gated queue-driven cloud synchronization (current)
+- **v0.6:** ownership-gated queue-driven cloud synchronization
+- **v0.7:** live Supabase integration preparation and Cloud hardening (current)
 - **Later:** conflict handling, encrypted payloads, relay, background services,
   live location, and push notifications
 - **v1.0:** production security review, observability, accessibility audit,

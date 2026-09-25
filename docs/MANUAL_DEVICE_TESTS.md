@@ -1,4 +1,4 @@
-# RELIO v0.6 Manual Device Tests
+# RELIO v0.7 Manual Device Tests
 
 ## DEFERRED MANUAL VERIFICATION — NOT PERFORMED
 
@@ -123,7 +123,26 @@ configured. These checks have not been performed:
 
 These checks are **DEFERRED — NOT YET PERFORMED**.
 
-## I. Supabase live verification — DEFERRED
+## I. v0.7 live adapter verification — DEFERRED
+
+After a disposable Supabase project is explicitly configured, verify the
+following with two non-production test accounts:
+
+1. Confirm repeated adapter initialization restores one session without
+   duplicate auth listeners.
+2. Confirm malformed URLs, service-role keys, and secret-like keys stay in
+   `notConfigured` and never make a request.
+3. Confirm owner conversations can write their own messages, while another
+   account cannot update or read them unless the documented membership policy
+   permits it.
+4. Confirm Storage rejects another user's path, accepts only `relio-media`,
+   and preserves the private bucket boundary.
+5. Confirm auth, RLS, Storage, timeout, and server failures surface stable
+   safe diagnostics without payload text or exact SOS coordinates.
+
+These checks are **DEFERRED — NOT YET PERFORMED**.
+
+## J. Supabase live verification — DEFERRED
 
 Only after a disposable Supabase project is configured with dart-defines:
 
@@ -143,7 +162,7 @@ These checks are **DEFERRED — NOT YET PERFORMED**. They require live project
 credentials and network access and are not required to use the automated/mock
 path. Physical radio, GPS, and OEM checks remain deferred as well.
 
-## J. TEST DISTRIBUTION GATE — DEFERRED
+## K. TEST DISTRIBUTION GATE — DEFERRED
 
 Before a TEST upload, a developer should:
 

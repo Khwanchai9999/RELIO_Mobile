@@ -261,6 +261,49 @@ void main() {
     expect(harness.cloud.messages, hasLength(1));
     expect(harness.cloud.messages[message.id]?.id, message.id);
   });
+
+  test(
+    'attachment sync uses a verified owner path and managed local file',
+    () async {
+      final harness = await SyncHarness.create();
+      addTearDown(harness.dispose);
+      final identity = await harness.cloud.register(
+        email: 'media@example.com',
+        password: 'password',
+      );
+      final message = await harness.createMessage(senderId: 'local-label');
+      final file = File('${harness.tempDirectory.path}/photo.jpg');
+      await file.writeAsBytes([1, 2, 3]);
+      final attachment = await harness.repositories.attachments.createPending(
+        id: 'attachment-a',
+        messageId: message.id,
+        transferId: 'transfer-a',
+        mediaType: MediaType.image,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        localPath: file.path,
+        byteSize: 3,
+      );
+      await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.attachment.value,
+        entityId: attachment.id,
+        operation: SyncOperation.attachmentMetadataUpsert.value,
+      );
+      await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.attachment.value,
+        entityId: attachment.id,
+        operation: SyncOperation.attachmentUpload.value,
+      );
+
+      await harness.engine.initialize();
+      await harness.engine.run();
+
+      final path =
+          'users/${identity.userId}/messages/${message.id}/attachment-a-photo.jpg';
+      expect(harness.cloud.attachments[attachment.id]?.storagePath, path);
+      expect(harness.cloud.files[path], [1, 2, 3]);
+    },
+  );
 }
 
 class SyncHarness {

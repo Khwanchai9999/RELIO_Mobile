@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../media/media_storage_service.dart';
 import 'cloud_data_source.dart';
 import 'cloud_models.dart';
+import 'cloud_storage_policy.dart';
 
 enum FakeCloudFailure {
   none,
@@ -43,6 +44,10 @@ class FakeCloudDataSource implements CloudDataSource {
   final attachments = <String, CloudAttachmentDto>{};
   final sosEvents = <String, CloudSosDto>{};
   final files = <String, Uint8List>{};
+  final _conversationOwners = <String, String>{};
+  final _messageOwners = <String, String>{};
+  final _attachmentOwners = <String, String>{};
+  final _sosOwners = <String, String>{};
 
   @override
   CloudState get cloudState => configured ? _state : CloudState.notConfigured;
@@ -170,18 +175,29 @@ class FakeCloudDataSource implements CloudDataSource {
   @override
   Future<void> upsertMessage(CloudMessageDto message) async {
     _requireAuth();
+    if (message.senderId != _identity!.userId ||
+        (_messageOwners[message.id] != null &&
+            _messageOwners[message.id] != _identity!.userId)) {
+      throw const CloudException(
+        'ข้อความไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
     messages[message.id] = message;
+    _messageOwners[message.id] = _identity!.userId;
   }
 
   @override
   Future<CloudMessageDto?> fetchMessage(String id) async {
     _requireAuth();
+    _requireRecordOwner(_messageOwners[id]);
     return messages[id];
   }
 
   @override
   Future<List<CloudMessageDto>> fetchMessages(String conversationId) async {
     _requireAuth();
+    _requireRecordOwner(_conversationOwners[conversationId]);
     return messages.values
         .where((item) => item.conversationId == conversationId)
         .toList();
@@ -190,42 +206,75 @@ class FakeCloudDataSource implements CloudDataSource {
   @override
   Future<void> upsertConversation(CloudConversationDto conversation) async {
     _requireAuth();
+    if (_conversationOwners[conversation.id] != null &&
+        _conversationOwners[conversation.id] != _identity!.userId) {
+      throw const CloudException(
+        'บทสนทนาไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
     conversations[conversation.id] = conversation;
+    _conversationOwners[conversation.id] = _identity!.userId;
   }
 
   @override
   Future<CloudConversationDto?> fetchConversation(String id) async {
     _requireAuth();
+    _requireRecordOwner(_conversationOwners[id]);
     return conversations[id];
   }
 
   @override
   Future<void> upsertAttachment(CloudAttachmentDto attachment) async {
     _requireAuth();
+    if (!CloudStoragePathPolicy.isOwnedBy(
+          attachment.storagePath,
+          _identity!.userId,
+        ) ||
+        (_messageOwners[attachment.messageId] != null &&
+            _messageOwners[attachment.messageId] != _identity!.userId) ||
+        (_attachmentOwners[attachment.id] != null &&
+            _attachmentOwners[attachment.id] != _identity!.userId)) {
+      throw const CloudException(
+        'ไฟล์แนบไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
     attachments[attachment.id] = attachment;
+    _attachmentOwners[attachment.id] = _identity!.userId;
   }
 
   @override
   Future<CloudAttachmentDto?> fetchAttachment(String id) async {
     _requireAuth();
+    _requireRecordOwner(_attachmentOwners[id]);
     return attachments[id];
   }
 
   @override
   Future<void> upsertSos(CloudSosDto sos) async {
     _requireAuth();
+    if (_sosOwners[sos.id] != null && _sosOwners[sos.id] != _identity!.userId) {
+      throw const CloudException(
+        'ข้อมูล SOS ไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
     sosEvents[sos.id] = sos;
+    _sosOwners[sos.id] = _identity!.userId;
   }
 
   @override
   Future<CloudSosDto?> fetchSos(String id) async {
     _requireAuth();
+    _requireRecordOwner(_sosOwners[id]);
     return sosEvents[id];
   }
 
   @override
   Future<void> deactivateSos(String id) async {
     _requireAuth();
+    _requireRecordOwner(_sosOwners[id]);
     final current = sosEvents[id];
     if (current != null) {
       sosEvents[id] = CloudSosDto(
@@ -246,6 +295,12 @@ class FakeCloudDataSource implements CloudDataSource {
     required String storagePath,
   }) async {
     _requireAuth();
+    if (!CloudStoragePathPolicy.isOwnedBy(storagePath, _identity!.userId)) {
+      throw const CloudException(
+        'เส้นทางไฟล์คลาวด์ไม่ปลอดภัย',
+        code: 'invalidPath',
+      );
+    }
     if (failureMode == FakeCloudFailure.uploadFailure) {
       throw const CloudException('อัปโหลดไฟล์ไม่สำเร็จ', code: 'storage');
     }
@@ -261,6 +316,12 @@ class FakeCloudDataSource implements CloudDataSource {
     required String mimeType,
   }) async {
     _requireAuth();
+    if (!CloudStoragePathPolicy.isOwnedBy(storagePath, _identity!.userId)) {
+      throw const CloudException(
+        'เส้นทางไฟล์คลาวด์ไม่ปลอดภัย',
+        code: 'invalidPath',
+      );
+    }
     final bytes = files[storagePath];
     if (bytes == null) {
       throw const CloudException('ไม่พบไฟล์บนคลาวด์', code: 'notFound');
@@ -272,9 +333,19 @@ class FakeCloudDataSource implements CloudDataSource {
     );
   }
 
+  @override
   Future<void> dispose() async {
     await _cloudStates.close();
     await _authStates.close();
+  }
+
+  void _requireRecordOwner(String? ownerUserId) {
+    if (ownerUserId != null && ownerUserId != _identity!.userId) {
+      throw const CloudException(
+        'ข้อมูลไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
   }
 
   void resetCloudState() {
@@ -283,6 +354,10 @@ class FakeCloudDataSource implements CloudDataSource {
     attachments.clear();
     sosEvents.clear();
     files.clear();
+    _conversationOwners.clear();
+    _messageOwners.clear();
+    _attachmentOwners.clear();
+    _sosOwners.clear();
     failureMode = FakeCloudFailure.none;
   }
 }

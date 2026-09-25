@@ -22,10 +22,15 @@ class SupabaseConfig {
       anonKey = const String.fromEnvironment('SUPABASE_ANON_KEY');
   final String url;
   final String anonKey;
-  bool get isConfigured =>
-      url.startsWith('https://') &&
-      anonKey.isNotEmpty &&
-      !anonKey.contains('service_role');
+  bool get isConfigured {
+    final normalizedUrl = url.trim();
+    final normalizedKey = anonKey.trim();
+    return normalizedUrl.startsWith('https://') &&
+        Uri.tryParse(normalizedUrl)?.host.isNotEmpty == true &&
+        normalizedKey.isNotEmpty &&
+        !normalizedKey.toLowerCase().contains('service_role') &&
+        !normalizedKey.toLowerCase().contains('secret');
+  }
 }
 
 class CloudException implements Exception {

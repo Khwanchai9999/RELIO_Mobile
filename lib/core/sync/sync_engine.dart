@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../cloud/cloud_data_source.dart';
 import '../cloud/cloud_models.dart';
+import '../cloud/cloud_storage_policy.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
 import '../repositories/local_repositories.dart';
@@ -395,7 +396,7 @@ class SyncEngine {
             code: 'invalidLocalData',
           );
         }
-        if (!await mediaStorage.fileExists(attachment.localPath)) {
+        if (!await mediaStorage.isManagedFile(attachment.localPath)) {
           throw const CloudException(
             'ไม่พบไฟล์สื่อในเครื่อง',
             code: 'missingLocalFile',
@@ -422,13 +423,13 @@ class SyncEngine {
     transferStatus: attachment.transferStatus.name,
   );
 
-  String _storagePath(RelioMediaAttachment attachment, String userId) {
-    final safeName = attachment.fileName.replaceAll(
-      RegExp(r'[^a-zA-Z0-9._-]'),
-      '_',
-    );
-    return 'users/$userId/messages/${attachment.messageId}/${attachment.id}-$safeName';
-  }
+  String _storagePath(RelioMediaAttachment attachment, String userId) =>
+      CloudStoragePathPolicy.forAttachment(
+        userId: userId,
+        messageId: attachment.messageId,
+        attachmentId: attachment.id,
+        fileName: attachment.fileName,
+      );
 
   Future<void> _markLocalSuccess(RelioQueueItem item) async {
     switch (SyncOperation.parse(item.operation)) {

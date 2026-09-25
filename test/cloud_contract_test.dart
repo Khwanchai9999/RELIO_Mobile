@@ -98,7 +98,7 @@ void main() {
 CloudMessageDto _message() => CloudMessageDto(
   id: 'message-1',
   conversationId: 'conversation-1',
-  senderId: 'user-1',
+  senderId: 'fake-1',
   senderDeviceId: 'device-1',
   messageType: 'text',
   content: 'hello',

@@ -5,7 +5,9 @@ import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import '../media/media_storage_service.dart';
 import 'cloud_data_source.dart';
+import 'cloud_error_mapper.dart';
 import 'cloud_models.dart';
+import 'cloud_storage_policy.dart';
 
 class SupabaseCloudDataSource implements CloudDataSource {
   SupabaseCloudDataSource({SupabaseConfig? configuration})
@@ -18,6 +20,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
   CloudState _state = CloudState.notConfigured;
   AuthState _authState = AuthState.guest;
   CloudIdentity? _identity;
+  Future<void>? _initialization;
+  bool _initialized = false;
   final _cloudStates = StreamController<CloudState>.broadcast();
   final _authStates = StreamController<AuthState>.broadcast();
 
@@ -33,17 +37,23 @@ class SupabaseCloudDataSource implements CloudDataSource {
   Stream<AuthState> watchAuthState() => _authStates.stream;
 
   @override
-  Future<void> initialize() async {
+  Future<void> initialize() {
+    if (_initialized) return Future<void>.value();
+    return _initialization ??= _initialize().whenComplete(() {
+      _initialization = null;
+    });
+  }
+
+  Future<void> _initialize() async {
     if (!configuration.isConfigured) {
       _state = CloudState.notConfigured;
+      _initialized = true;
       return;
     }
     try {
-      // The SDK's initialize call is idempotent and its `instance` getter
-      // asserts before initialization, so do not probe instance first.
       await Supabase.initialize(
-        url: configuration.url,
-        publishableKey: configuration.anonKey,
+        url: configuration.url.trim(),
+        publishableKey: configuration.anonKey.trim(),
         debug: false,
       );
       _client = Supabase.instance.client;
@@ -63,13 +73,11 @@ class SupabaseCloudDataSource implements CloudDataSource {
       _state = _identity == null ? CloudState.signedOut : CloudState.ready;
       _authStates.add(_authState);
       _cloudStates.add(_state);
+      _initialized = true;
     } catch (error) {
       _state = CloudState.error;
       _cloudStates.add(_state);
-      throw CloudException(
-        'เริ่มต้นบริการคลาวด์ไม่สำเร็จ',
-        code: 'initialization',
-      );
+      throw CloudErrorMapper.map(error, fallbackCode: 'initialization');
     }
   }
 
@@ -85,7 +93,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   void _requireAuth() {
-    if (_identity == null) {
+    if (_identity == null || _authState != AuthState.authenticated) {
       throw const CloudException(
         'ต้องเข้าสู่ระบบก่อนใช้งานคลาวด์',
         code: 'signedOut',
@@ -102,13 +110,11 @@ class SupabaseCloudDataSource implements CloudDataSource {
         );
 
   CloudException _failure(Object error, [String code = 'network']) =>
-      CloudException('การเชื่อมต่อคลาวด์ไม่สำเร็จ', code: code);
+      CloudErrorMapper.map(error, fallbackCode: code);
 
   void _validateStoragePath(String storagePath) {
-    final expectedPrefix = 'users/${_identity!.userId}/messages/';
-    if (!storagePath.startsWith(expectedPrefix) ||
-        storagePath.contains('..') ||
-        storagePath.contains('\\')) {
+    if (_identity == null ||
+        !CloudStoragePathPolicy.isOwnedBy(storagePath, _identity!.userId)) {
       throw const CloudException(
         'เส้นทางไฟล์คลาวด์ไม่ปลอดภัย',
         code: 'invalidPath',
@@ -133,7 +139,24 @@ class SupabaseCloudDataSource implements CloudDataSource {
       if (identity == null) {
         throw const CloudException('สร้างบัญชีไม่สำเร็จ', code: 'auth');
       }
+      if (response.session == null || client.auth.currentUser == null) {
+        // Do not treat an email-confirmation response as an authenticated
+        // owner; queue rows must remain local until a real session exists.
+        _identity = null;
+        _authState = AuthState.guest;
+        _state = CloudState.signedOut;
+        _authStates.add(_authState);
+        _cloudStates.add(_state);
+        throw const CloudException(
+          'กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ',
+          code: 'emailConfirmationRequired',
+        );
+      }
       _identity = identity;
+      _authState = AuthState.authenticated;
+      _state = CloudState.ready;
+      _authStates.add(_authState);
+      _cloudStates.add(_state);
       await upsertProfile(displayName: displayName ?? email.split('@').first);
       return identity;
     } catch (error) {
@@ -160,6 +183,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
       _identity = identity;
       _authState = AuthState.authenticated;
       _state = CloudState.ready;
+      _authStates.add(_authState);
+      _cloudStates.add(_state);
       return identity;
     } catch (error) {
       if (error is CloudException) rethrow;
@@ -169,6 +194,16 @@ class SupabaseCloudDataSource implements CloudDataSource {
 
   @override
   Future<void> signOut() async {
+    if (!configuration.isConfigured || _identity == null) {
+      _identity = null;
+      _authState = AuthState.guest;
+      _state = configuration.isConfigured
+          ? CloudState.signedOut
+          : CloudState.notConfigured;
+      _authStates.add(_authState);
+      _cloudStates.add(_state);
+      return;
+    }
     try {
       await (await _ready()).auth.signOut();
     } catch (error) {
@@ -178,6 +213,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
     _identity = null;
     _authState = AuthState.guest;
     _state = CloudState.signedOut;
+    _authStates.add(_authState);
+    _cloudStates.add(_state);
   }
 
   @override
@@ -202,6 +239,12 @@ class SupabaseCloudDataSource implements CloudDataSource {
   @override
   Future<void> upsertMessage(CloudMessageDto message) async {
     _requireAuth();
+    if (message.senderId != _identity!.userId) {
+      throw const CloudException(
+        'ข้อความไม่ได้เป็นของบัญชีปัจจุบัน',
+        code: 'permissionDenied',
+      );
+    }
     try {
       await (await _ready()).from('messages').upsert(message.toJson());
     } catch (error) {
@@ -385,6 +428,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
     }
   }
 
+  @override
   Future<void> dispose() async {
     await _authSubscription?.cancel();
     await _cloudStates.close();

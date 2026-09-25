@@ -3,7 +3,7 @@
 ## Purpose
 
 This directory is the Android-first Flutter implementation of RELIO Mobile
-v0.6. It is a separate project from the sibling React/Vite
+v0.7. It is a separate project from the sibling React/Vite
 `RELIO_SOS` prototype. Do not rewrite the React project or move Flutter files
 into it.
 
@@ -62,7 +62,9 @@ into it.
 - SOS/location data and attachments use the same ownership gate. Do not put
   exact locations, message content, tokens, passwords, private keys, or local
   secrets in normal logs or diagnostics.
-- `FakeCloudDataSource` remains the default automated verification path. Do not
+- `FakeCloudDataSource` remains the default automated verification path and
+  must enforce the same account isolation and Storage path rules as the live
+  adapter. Do not
   perform live Supabase uploads during implementation without an explicitly
   configured disposable test environment and clearly test data.
 - Android app runtime uses `AndroidNearbyTransport` by default once Flutter is
@@ -119,20 +121,24 @@ hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.
 
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
-and two-phone checks are `DEFERRED MANUAL VERIFICATION` for v0.6. Keep them in
+and two-phone checks are `DEFERRED MANUAL VERIFICATION` for v0.7. Keep them in
 `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
 performing them.
 
 ## Change boundaries
 
-- Do not add a background worker, cloud-first UI, or live credentials in v0.6.
-  The foreground/lifecycle SyncEngine is optional and ownership-gated.
+- Do not add a background worker, cloud-first UI, live credentials, or live
+  uploads in v0.7. The foreground/lifecycle SyncEngine is optional and
+  ownership-gated.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and
   future cloud queue.
 - UI must not call Drift-generated tables or the Nearby plugin directly.
 - Plugin-specific Nearby types remain inside `AndroidNearbyTransport`.
 - `sync_queue` is SQLite-authoritative. Queue processing must preserve
   `ownerUserId`, retry locally, and never upload across accounts.
+- Supabase adapter changes must preserve safe error mapping, RLS ownership, and
+  managed local-media boundaries. Reconciliation/pull is architecture only;
+  do not silently overwrite newer local rows.
 - Direct peer communication only. Relay, TTL, and seen-message caches are not
   implemented.
 - Relay, TTL, seen-message caches, background services, push notifications,

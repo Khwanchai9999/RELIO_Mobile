@@ -1,4 +1,4 @@
-# Supabase setup — RELIO v0.6
+# Supabase setup — RELIO v0.7
 
 Supabase is an optional cloud destination. Drift/SQLite remains authoritative
 for chat, SOS, Nearby, media, and settings when the app is offline or no
@@ -23,8 +23,8 @@ either define is missing or a service-role key is detected.
 ## Supabase dashboard checklist
 
 1. Enable email/password authentication.
-2. Apply `0001_initial_schema.sql`, `0002_rls_policies.sql`, and
-   `0003_storage.sql`.
+2. Apply `0001_initial_schema.sql`, `0002_rls_policies.sql`,
+   `0003_storage.sql`, and `0004_v07_hardening.sql`.
 3. Confirm `relio-media` is private.
 4. Confirm RLS is enabled on every public table and test with a normal user.
 5. Create a disposable test account; do not use personal production data.
@@ -35,3 +35,8 @@ The v0.6 SyncEngine still requires the ownership gate: it uploads only queue
 rows owned by the currently authenticated user, never auto-adopts Guest Mode
 history, and preserves local data on sign-out or Cloud failure. Live project
 verification and uploads are `DEFERRED` when credentials are not supplied.
+
+The v0.7 adapter additionally rejects malformed configuration, maps live SDK
+errors to safe stable codes, validates the current-user Storage path, and
+accepts local attachment files only from RELIO's managed media root. These
+checks are covered by fake/in-memory tests before any live project is used.
