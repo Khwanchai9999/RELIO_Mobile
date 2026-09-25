@@ -1,6 +1,6 @@
 # RELIO Nearby Protocol v1
 
-## v0.5 cloud boundary
+## v0.8 cloud boundary
 
 Nearby remains a direct peer/offline protocol. Supabase is not a transport
 replacement and does not change packet versioning. Cloud metadata and media
@@ -8,7 +8,8 @@ operations use the separate `CloudDataSource` boundary after local persistence;
 Nearby packets continue to use protocol version 1 and must work without a
 network connection.
 
-This document describes the direct-peer protocol used by RELIO Mobile v0.4.
+This document describes the direct-peer and bounded relay protocol used by RELIO
+Mobile v0.8.
 Physical radio behavior is still `DEFERRED MANUAL VERIFICATION`.
 
 ## Envelope
@@ -18,7 +19,8 @@ Every payload is UTF-8 JSON with `protocolVersion` (`1`), a UUID `packetId`,
 validated packet-specific `payload` object.
 
 Supported types are `hello`, `textMessage`, `deviceStatus`, `ack`, `sos`,
-`mediaMetadata`, `mediaAck`, and `locationMessage`.
+`mediaMetadata`, `mediaAck`, `locationMessage`, additive `relayEnvelope`, and
+`relayAck`.
 Unknown packet types, missing fields, wrong field types, malformed JSON, and
 unsupported protocol versions fail safely and are logged as protocol errors.
 
@@ -56,6 +58,18 @@ event. Missing location is valid; no fake coordinates are generated.
 optional accuracy, and the capture timestamp. It is an offline location card,
 not a map link.
 
+`hello.capabilities` advertises `relay-v1` when the node can store and forward
+bounded envelopes. `relayEnvelope` carries a `RelayEnvelope` with a relay
+packet ID separate from its inner payload ID, origin/destination device IDs,
+payload type/ID, creation and expiry times, hop count/max hops, priority, and
+previous-hop metadata. v0.8 accepts only text, location, and SOS payloads;
+media metadata and binary media are not relayable. A relay node stores the
+envelope and sends a hop ACK before forwarding one selected eligible peer.
+Private text is materialized only at the destination. SOS may be consumed by
+relay nodes for safety presentation while retaining the original SOS identity
+and location capture metadata. `relayAck` reports `stored`, `delivered`,
+`expired`, or `blocked`; `stored` is not final delivery.
+
 `mediaMetadata` carries message/attachment/transfer IDs, media type, original
 display filename, MIME type, byte size, and optional dimensions/duration. It
 never carries binary content. The sender first starts the Nearby file payload,
@@ -82,8 +96,8 @@ intended peer is not connected, it remains `pending`. A direct send failure is
 stored as `failed`; the chat UI exposes an explicit retry. There is no infinite
 retry loop or background service.
 
-v0.4 supports direct peer communication only. It does not implement cloud
-sync, Supabase, relay, TTL, seen-message caches, live location, background
-Nearby services, map SDKs, or complex encryption. New packet types remain on
-protocol v1; older peers fail safely on unknown types and continue decoding
-the existing v1 packet types.
+v0.8 supports a bounded direct-peer relay path only. It does not implement
+unrestricted flooding, Internet gateway behavior, background Nearby services,
+route metrics, CRDT reconciliation, or complex encryption. New packet types
+remain on protocol v1; older peers fail safely on unknown types and continue
+decoding the existing v1 packet types.

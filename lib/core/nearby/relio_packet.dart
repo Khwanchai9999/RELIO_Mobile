@@ -14,6 +14,8 @@ enum RelioPacketType {
   mediaMetadata,
   mediaAck,
   locationMessage,
+  relayEnvelope,
+  relayAck,
 }
 
 class RelioPacketException implements Exception {
@@ -48,7 +50,12 @@ class RelioPacket {
     required String senderUserId,
     required String displayName,
     DeviceStatus status = DeviceStatus.normal,
-    List<String> capabilities = const ['textMessage', 'deviceStatus', 'ack'],
+    List<String> capabilities = const [
+      'textMessage',
+      'deviceStatus',
+      'ack',
+      'relay-v1',
+    ],
   }) => RelioPacket(
     protocolVersion: 1,
     packetId: const Uuid().v4(),
@@ -252,6 +259,36 @@ class RelioPacket {
     },
   );
 
+  factory RelioPacket.relayEnvelope({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String relayPacketId,
+    required Map<String, Object?> relayPayload,
+  }) => RelioPacket(
+    protocolVersion: 1,
+    packetId: relayPacketId,
+    type: RelioPacketType.relayEnvelope,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: DateTime.now().toUtc(),
+    payload: relayPayload,
+  );
+
+  factory RelioPacket.relayAck({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String relayPacketId,
+    required String status,
+  }) => RelioPacket(
+    protocolVersion: 1,
+    packetId: const Uuid().v4(),
+    type: RelioPacketType.relayAck,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: DateTime.now().toUtc(),
+    payload: {'relayPacketId': relayPacketId, 'status': status},
+  );
+
   Map<String, Object?> toJson() => {
     'protocolVersion': protocolVersion,
     'packetId': packetId,
@@ -379,6 +416,40 @@ class RelioPacket {
         _requiredNumber('longitude');
         _optionalNumber('accuracyMeters');
         _payloadString('capturedAt');
+      case RelioPacketType.relayEnvelope:
+        _payloadString('protocol');
+        if (payload['protocol'] != 'relay-v1') {
+          throw const RelioPacketException('Unsupported relay protocol.');
+        }
+        _payloadString('packetId');
+        _payloadString('originDeviceId');
+        _payloadString('destinationDeviceId');
+        _payloadString('payloadType');
+        _payloadString('payloadId');
+        _payloadString('createdAt');
+        _payloadString('expiresAt');
+        final hopCount = payload['hopCount'];
+        final maxHops = payload['maxHops'];
+        final priority = payload['priority'];
+        if (hopCount is! int || maxHops is! int || priority is! int) {
+          throw const RelioPacketException('Invalid relay hop fields.');
+        }
+        if (payload['payload'] is! Map) {
+          throw const RelioPacketException('Invalid relay payload.');
+        }
+      case RelioPacketType.relayAck:
+        _payloadString('relayPacketId');
+        final relayStatus = _payloadString('status');
+        if (!{
+          'stored',
+          'delivered',
+          'expired',
+          'blocked',
+        }.contains(relayStatus)) {
+          throw RelioPacketException(
+            'Unknown relay acknowledgement: $relayStatus',
+          );
+        }
     }
   }
 

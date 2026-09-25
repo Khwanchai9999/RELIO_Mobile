@@ -1,4 +1,4 @@
-# Cloud architecture — RELIO v0.6
+# Cloud architecture — RELIO v0.8
 
 The cloud layer is an adapter, not a replacement for the offline core:
 
@@ -43,7 +43,9 @@ Remote IDs reuse local UUIDs. Media metadata is stored in Postgres while binary
 files use the private `relio-media` bucket under a user-owned path. No media is
 Base64 encoded into Nearby JSON and no cloud path is treated as local truth.
 
-Bidirectional conflict resolution, cloud subscriptions, relay, background
-services, and live media download remain deferred. Live Supabase/device sync is
-also deferred until a disposable test project and manual verification are
-explicitly configured.
+Relay is a separate Nearby destination. A foreign `relay-v1` envelope is kept
+in the local relay tables and is never inserted into `sync_queue`; it cannot be
+uploaded as the currently signed-in account. Bidirectional conflict resolution,
+cloud subscriptions, background services, and live media download remain
+deferred. Live Supabase/device sync is also deferred until a disposable test
+project and manual verification are explicitly configured.

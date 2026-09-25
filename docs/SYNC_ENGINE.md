@@ -1,4 +1,4 @@
-# RELIO v0.6 SyncEngine
+# RELIO v0.8 SyncEngine
 
 `SyncEngine` is the local-first outbox processor for the optional Cloud
 destination. SQLite remains authoritative:
@@ -41,3 +41,7 @@ still retaining their owner and payload.
 FakeCloudDataSource is the default automated path. Live Supabase uploads,
 physical radio behavior, and real account-switch verification remain deferred
 manual checks; no live upload is performed by the automated suite.
+
+Nearby relay is outside this Cloud outbox. A relayed foreign packet is stored
+in the relay tables only; it never becomes a `sync_queue` row and cannot be
+uploaded under the currently authenticated account.

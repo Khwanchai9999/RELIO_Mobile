@@ -1,4 +1,4 @@
-# Supabase setup — RELIO v0.7
+# Supabase setup — RELIO v0.8
 
 Supabase is an optional cloud destination. Drift/SQLite remains authoritative
 for chat, SOS, Nearby, media, and settings when the app is offline or no

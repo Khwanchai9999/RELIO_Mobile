@@ -3,7 +3,7 @@
 ## Purpose
 
 This directory is the Android-first Flutter implementation of RELIO Mobile
-v0.7. It is a separate project from the sibling React/Vite
+v0.8. It is a separate project from the sibling React/Vite
 `RELIO_SOS` prototype. Do not rewrite the React project or move Flutter files
 into it.
 
@@ -121,14 +121,14 @@ hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.
 
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
-and two-phone checks are `DEFERRED MANUAL VERIFICATION` for v0.7. Keep them in
+and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.8. Keep them in
 `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
 performing them.
 
 ## Change boundaries
 
 - Do not add a background worker, cloud-first UI, live credentials, or live
-  uploads in v0.7. The foreground/lifecycle SyncEngine is optional and
+  uploads in v0.8. The foreground/lifecycle SyncEngine is optional and
   ownership-gated.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and
   future cloud queue.
@@ -139,11 +139,13 @@ performing them.
 - Supabase adapter changes must preserve safe error mapping, RLS ownership, and
   managed local-media boundaries. Reconciliation/pull is architecture only;
   do not silently overwrite newer local rows.
-- Direct peer communication only. Relay, TTL, and seen-message caches are not
+- Relay is limited to the `relay-v1` store-and-forward envelope. It supports
+  bounded text, location, and SOS hops with persistent deduplication and
+  forward history; it does not flood, relay media, or run as a background
+  daemon.
+- Background services, push notifications, live location, map SDKs, cloud
+  media, video transcoding, and a complex encryption protocol are not
   implemented.
-- Relay, TTL, seen-message caches, background services, push notifications,
-  live location, map SDKs, cloud media, video transcoding, and a complex
-  encryption protocol are not implemented.
 - Do not silently replace mock data with remote data.
 - Do not remove pending/sent/synced status visibility from message UI.
 - Do not make broad destructive changes to either project.

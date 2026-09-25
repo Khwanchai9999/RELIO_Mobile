@@ -14,6 +14,8 @@ import 'nearby/nearby_service.dart';
 import 'nearby/nearby_transport.dart';
 import 'permissions/permission_service.dart';
 import 'repositories/local_repositories.dart';
+import 'relay/relay_engine.dart';
+import 'relay/relay_repository.dart';
 import 'sync/sync_engine.dart';
 
 class RelioDependencies {
@@ -48,6 +50,18 @@ class RelioDependencies {
     );
     identity = RelioDeviceIdentityRepository(this.database);
     permissionService = PermissionService();
+    relayRepository = DriftRelayRepository(this.database);
+    relayEngine = RelayEngine(
+      transport: this.transport,
+      identity: identity,
+      repository: relayRepository,
+      messages: repositories.messages,
+      conversations: repositories.conversations,
+      sos: repositories.sos,
+      connectedPeers: () => nearbyService.connectedPeers,
+      deviceIdForEndpoint: (endpointId) =>
+          nearbyService.deviceIdForEndpoint(endpointId),
+    );
     nearbyService = NearbyService(
       transport: this.transport,
       messages: repositories.messages,
@@ -58,6 +72,7 @@ class RelioDependencies {
       settings: repositories.settings,
       attachments: repositories.attachments,
       mediaStorage: mediaStorageService,
+      relayEngine: relayEngine,
     );
     syncEngine = SyncEngine(
       repositories: repositories,
@@ -76,6 +91,8 @@ class RelioDependencies {
   late final LocationService locationService;
   late final MediaStorageService mediaStorageService;
   late final NearbyService nearbyService;
+  late final RelayRepository relayRepository;
+  late final RelayEngine relayEngine;
   late final SyncEngine syncEngine;
   late final CloudDataSource cloudDataSource;
   late final AuthService authService;
@@ -95,6 +112,7 @@ class RelioDependencies {
       // healthy when credentials are absent or the network is unavailable.
     }
     await nearbyService.initialize();
+    await relayEngine.initialize();
     await syncEngine.initialize();
     // Startup sync runs asynchronously; rendering the local app never waits
     // for Cloud, and SyncEngine will only claim owned queue items.
@@ -102,6 +120,7 @@ class RelioDependencies {
   }
 
   Future<void> dispose() async {
+    await relayEngine.dispose();
     await nearbyService.close();
     await syncEngine.dispose();
     await cloudDataSource.dispose();

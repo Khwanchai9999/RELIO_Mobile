@@ -125,6 +125,39 @@ class Attachments extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class RelayPackets extends Table {
+  TextColumn get packetId => text()();
+  TextColumn get originDeviceId => text()();
+  TextColumn get destinationDeviceId => text()();
+  TextColumn get payloadType => text()();
+  TextColumn get payloadId => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get expiresAt => dateTime()();
+  IntColumn get hopCount => integer()();
+  IntColumn get maxHops => integer()();
+  IntColumn get priority => integer()();
+  TextColumn get previousHopDeviceId => text().nullable()();
+  TextColumn get protocol => text()();
+  TextColumn get payloadJson => text()();
+  TextColumn get state => text()();
+  DateTimeColumn get storedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {packetId};
+}
+
+class RelayForwardHistory extends Table {
+  TextColumn get packetId => text()();
+  TextColumn get targetDeviceId => text()();
+  TextColumn get targetEndpointId => text()();
+  TextColumn get status => text()();
+  IntColumn get attemptCount => integer().withDefault(const Constant(0))();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {packetId, targetDeviceId};
+}
+
 @DriftDatabase(
   tables: [
     Conversations,
@@ -134,6 +167,8 @@ class Attachments extends Table {
     SosEvents,
     AppSettings,
     Attachments,
+    RelayPackets,
+    RelayForwardHistory,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -142,7 +177,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -168,6 +203,10 @@ class AppDatabase extends _$AppDatabase {
           END
           WHERE operation = 'cloud_sync'
         ''');
+      }
+      if (from < 4) {
+        await migrator.createTable(relayPackets);
+        await migrator.createTable(relayForwardHistory);
       }
     },
     beforeOpen: (OpeningDetails details) async {

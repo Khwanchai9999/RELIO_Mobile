@@ -4760,6 +4760,1332 @@ class AttachmentsCompanion extends UpdateCompanion<Attachment> {
   }
 }
 
+class $RelayPacketsTable extends RelayPackets
+    with TableInfo<$RelayPacketsTable, RelayPacket> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RelayPacketsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _packetIdMeta = const VerificationMeta(
+    'packetId',
+  );
+  @override
+  late final GeneratedColumn<String> packetId = GeneratedColumn<String>(
+    'packet_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originDeviceIdMeta = const VerificationMeta(
+    'originDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> originDeviceId = GeneratedColumn<String>(
+    'origin_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _destinationDeviceIdMeta =
+      const VerificationMeta('destinationDeviceId');
+  @override
+  late final GeneratedColumn<String> destinationDeviceId =
+      GeneratedColumn<String>(
+        'destination_device_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _payloadTypeMeta = const VerificationMeta(
+    'payloadType',
+  );
+  @override
+  late final GeneratedColumn<String> payloadType = GeneratedColumn<String>(
+    'payload_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _payloadIdMeta = const VerificationMeta(
+    'payloadId',
+  );
+  @override
+  late final GeneratedColumn<String> payloadId = GeneratedColumn<String>(
+    'payload_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _expiresAtMeta = const VerificationMeta(
+    'expiresAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> expiresAt = GeneratedColumn<DateTime>(
+    'expires_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hopCountMeta = const VerificationMeta(
+    'hopCount',
+  );
+  @override
+  late final GeneratedColumn<int> hopCount = GeneratedColumn<int>(
+    'hop_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _maxHopsMeta = const VerificationMeta(
+    'maxHops',
+  );
+  @override
+  late final GeneratedColumn<int> maxHops = GeneratedColumn<int>(
+    'max_hops',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _priorityMeta = const VerificationMeta(
+    'priority',
+  );
+  @override
+  late final GeneratedColumn<int> priority = GeneratedColumn<int>(
+    'priority',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _previousHopDeviceIdMeta =
+      const VerificationMeta('previousHopDeviceId');
+  @override
+  late final GeneratedColumn<String> previousHopDeviceId =
+      GeneratedColumn<String>(
+        'previous_hop_device_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _protocolMeta = const VerificationMeta(
+    'protocol',
+  );
+  @override
+  late final GeneratedColumn<String> protocol = GeneratedColumn<String>(
+    'protocol',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _payloadJsonMeta = const VerificationMeta(
+    'payloadJson',
+  );
+  @override
+  late final GeneratedColumn<String> payloadJson = GeneratedColumn<String>(
+    'payload_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _stateMeta = const VerificationMeta('state');
+  @override
+  late final GeneratedColumn<String> state = GeneratedColumn<String>(
+    'state',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _storedAtMeta = const VerificationMeta(
+    'storedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> storedAt = GeneratedColumn<DateTime>(
+    'stored_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    packetId,
+    originDeviceId,
+    destinationDeviceId,
+    payloadType,
+    payloadId,
+    createdAt,
+    expiresAt,
+    hopCount,
+    maxHops,
+    priority,
+    previousHopDeviceId,
+    protocol,
+    payloadJson,
+    state,
+    storedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'relay_packets';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RelayPacket> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('packet_id')) {
+      context.handle(
+        _packetIdMeta,
+        packetId.isAcceptableOrUnknown(data['packet_id']!, _packetIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_packetIdMeta);
+    }
+    if (data.containsKey('origin_device_id')) {
+      context.handle(
+        _originDeviceIdMeta,
+        originDeviceId.isAcceptableOrUnknown(
+          data['origin_device_id']!,
+          _originDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originDeviceIdMeta);
+    }
+    if (data.containsKey('destination_device_id')) {
+      context.handle(
+        _destinationDeviceIdMeta,
+        destinationDeviceId.isAcceptableOrUnknown(
+          data['destination_device_id']!,
+          _destinationDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_destinationDeviceIdMeta);
+    }
+    if (data.containsKey('payload_type')) {
+      context.handle(
+        _payloadTypeMeta,
+        payloadType.isAcceptableOrUnknown(
+          data['payload_type']!,
+          _payloadTypeMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_payloadTypeMeta);
+    }
+    if (data.containsKey('payload_id')) {
+      context.handle(
+        _payloadIdMeta,
+        payloadId.isAcceptableOrUnknown(data['payload_id']!, _payloadIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_payloadIdMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('expires_at')) {
+      context.handle(
+        _expiresAtMeta,
+        expiresAt.isAcceptableOrUnknown(data['expires_at']!, _expiresAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_expiresAtMeta);
+    }
+    if (data.containsKey('hop_count')) {
+      context.handle(
+        _hopCountMeta,
+        hopCount.isAcceptableOrUnknown(data['hop_count']!, _hopCountMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_hopCountMeta);
+    }
+    if (data.containsKey('max_hops')) {
+      context.handle(
+        _maxHopsMeta,
+        maxHops.isAcceptableOrUnknown(data['max_hops']!, _maxHopsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_maxHopsMeta);
+    }
+    if (data.containsKey('priority')) {
+      context.handle(
+        _priorityMeta,
+        priority.isAcceptableOrUnknown(data['priority']!, _priorityMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_priorityMeta);
+    }
+    if (data.containsKey('previous_hop_device_id')) {
+      context.handle(
+        _previousHopDeviceIdMeta,
+        previousHopDeviceId.isAcceptableOrUnknown(
+          data['previous_hop_device_id']!,
+          _previousHopDeviceIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('protocol')) {
+      context.handle(
+        _protocolMeta,
+        protocol.isAcceptableOrUnknown(data['protocol']!, _protocolMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_protocolMeta);
+    }
+    if (data.containsKey('payload_json')) {
+      context.handle(
+        _payloadJsonMeta,
+        payloadJson.isAcceptableOrUnknown(
+          data['payload_json']!,
+          _payloadJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_payloadJsonMeta);
+    }
+    if (data.containsKey('state')) {
+      context.handle(
+        _stateMeta,
+        state.isAcceptableOrUnknown(data['state']!, _stateMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_stateMeta);
+    }
+    if (data.containsKey('stored_at')) {
+      context.handle(
+        _storedAtMeta,
+        storedAt.isAcceptableOrUnknown(data['stored_at']!, _storedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_storedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {packetId};
+  @override
+  RelayPacket map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RelayPacket(
+      packetId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}packet_id'],
+      )!,
+      originDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}origin_device_id'],
+      )!,
+      destinationDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}destination_device_id'],
+      )!,
+      payloadType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload_type'],
+      )!,
+      payloadId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload_id'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      expiresAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}expires_at'],
+      )!,
+      hopCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}hop_count'],
+      )!,
+      maxHops: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}max_hops'],
+      )!,
+      priority: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}priority'],
+      )!,
+      previousHopDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}previous_hop_device_id'],
+      ),
+      protocol: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}protocol'],
+      )!,
+      payloadJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payload_json'],
+      )!,
+      state: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}state'],
+      )!,
+      storedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}stored_at'],
+      )!,
+    );
+  }
+
+  @override
+  $RelayPacketsTable createAlias(String alias) {
+    return $RelayPacketsTable(attachedDatabase, alias);
+  }
+}
+
+class RelayPacket extends DataClass implements Insertable<RelayPacket> {
+  final String packetId;
+  final String originDeviceId;
+  final String destinationDeviceId;
+  final String payloadType;
+  final String payloadId;
+  final DateTime createdAt;
+  final DateTime expiresAt;
+  final int hopCount;
+  final int maxHops;
+  final int priority;
+  final String? previousHopDeviceId;
+  final String protocol;
+  final String payloadJson;
+  final String state;
+  final DateTime storedAt;
+  const RelayPacket({
+    required this.packetId,
+    required this.originDeviceId,
+    required this.destinationDeviceId,
+    required this.payloadType,
+    required this.payloadId,
+    required this.createdAt,
+    required this.expiresAt,
+    required this.hopCount,
+    required this.maxHops,
+    required this.priority,
+    this.previousHopDeviceId,
+    required this.protocol,
+    required this.payloadJson,
+    required this.state,
+    required this.storedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['packet_id'] = Variable<String>(packetId);
+    map['origin_device_id'] = Variable<String>(originDeviceId);
+    map['destination_device_id'] = Variable<String>(destinationDeviceId);
+    map['payload_type'] = Variable<String>(payloadType);
+    map['payload_id'] = Variable<String>(payloadId);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['expires_at'] = Variable<DateTime>(expiresAt);
+    map['hop_count'] = Variable<int>(hopCount);
+    map['max_hops'] = Variable<int>(maxHops);
+    map['priority'] = Variable<int>(priority);
+    if (!nullToAbsent || previousHopDeviceId != null) {
+      map['previous_hop_device_id'] = Variable<String>(previousHopDeviceId);
+    }
+    map['protocol'] = Variable<String>(protocol);
+    map['payload_json'] = Variable<String>(payloadJson);
+    map['state'] = Variable<String>(state);
+    map['stored_at'] = Variable<DateTime>(storedAt);
+    return map;
+  }
+
+  RelayPacketsCompanion toCompanion(bool nullToAbsent) {
+    return RelayPacketsCompanion(
+      packetId: Value(packetId),
+      originDeviceId: Value(originDeviceId),
+      destinationDeviceId: Value(destinationDeviceId),
+      payloadType: Value(payloadType),
+      payloadId: Value(payloadId),
+      createdAt: Value(createdAt),
+      expiresAt: Value(expiresAt),
+      hopCount: Value(hopCount),
+      maxHops: Value(maxHops),
+      priority: Value(priority),
+      previousHopDeviceId: previousHopDeviceId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(previousHopDeviceId),
+      protocol: Value(protocol),
+      payloadJson: Value(payloadJson),
+      state: Value(state),
+      storedAt: Value(storedAt),
+    );
+  }
+
+  factory RelayPacket.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RelayPacket(
+      packetId: serializer.fromJson<String>(json['packetId']),
+      originDeviceId: serializer.fromJson<String>(json['originDeviceId']),
+      destinationDeviceId: serializer.fromJson<String>(
+        json['destinationDeviceId'],
+      ),
+      payloadType: serializer.fromJson<String>(json['payloadType']),
+      payloadId: serializer.fromJson<String>(json['payloadId']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      expiresAt: serializer.fromJson<DateTime>(json['expiresAt']),
+      hopCount: serializer.fromJson<int>(json['hopCount']),
+      maxHops: serializer.fromJson<int>(json['maxHops']),
+      priority: serializer.fromJson<int>(json['priority']),
+      previousHopDeviceId: serializer.fromJson<String?>(
+        json['previousHopDeviceId'],
+      ),
+      protocol: serializer.fromJson<String>(json['protocol']),
+      payloadJson: serializer.fromJson<String>(json['payloadJson']),
+      state: serializer.fromJson<String>(json['state']),
+      storedAt: serializer.fromJson<DateTime>(json['storedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'packetId': serializer.toJson<String>(packetId),
+      'originDeviceId': serializer.toJson<String>(originDeviceId),
+      'destinationDeviceId': serializer.toJson<String>(destinationDeviceId),
+      'payloadType': serializer.toJson<String>(payloadType),
+      'payloadId': serializer.toJson<String>(payloadId),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'expiresAt': serializer.toJson<DateTime>(expiresAt),
+      'hopCount': serializer.toJson<int>(hopCount),
+      'maxHops': serializer.toJson<int>(maxHops),
+      'priority': serializer.toJson<int>(priority),
+      'previousHopDeviceId': serializer.toJson<String?>(previousHopDeviceId),
+      'protocol': serializer.toJson<String>(protocol),
+      'payloadJson': serializer.toJson<String>(payloadJson),
+      'state': serializer.toJson<String>(state),
+      'storedAt': serializer.toJson<DateTime>(storedAt),
+    };
+  }
+
+  RelayPacket copyWith({
+    String? packetId,
+    String? originDeviceId,
+    String? destinationDeviceId,
+    String? payloadType,
+    String? payloadId,
+    DateTime? createdAt,
+    DateTime? expiresAt,
+    int? hopCount,
+    int? maxHops,
+    int? priority,
+    Value<String?> previousHopDeviceId = const Value.absent(),
+    String? protocol,
+    String? payloadJson,
+    String? state,
+    DateTime? storedAt,
+  }) => RelayPacket(
+    packetId: packetId ?? this.packetId,
+    originDeviceId: originDeviceId ?? this.originDeviceId,
+    destinationDeviceId: destinationDeviceId ?? this.destinationDeviceId,
+    payloadType: payloadType ?? this.payloadType,
+    payloadId: payloadId ?? this.payloadId,
+    createdAt: createdAt ?? this.createdAt,
+    expiresAt: expiresAt ?? this.expiresAt,
+    hopCount: hopCount ?? this.hopCount,
+    maxHops: maxHops ?? this.maxHops,
+    priority: priority ?? this.priority,
+    previousHopDeviceId: previousHopDeviceId.present
+        ? previousHopDeviceId.value
+        : this.previousHopDeviceId,
+    protocol: protocol ?? this.protocol,
+    payloadJson: payloadJson ?? this.payloadJson,
+    state: state ?? this.state,
+    storedAt: storedAt ?? this.storedAt,
+  );
+  RelayPacket copyWithCompanion(RelayPacketsCompanion data) {
+    return RelayPacket(
+      packetId: data.packetId.present ? data.packetId.value : this.packetId,
+      originDeviceId: data.originDeviceId.present
+          ? data.originDeviceId.value
+          : this.originDeviceId,
+      destinationDeviceId: data.destinationDeviceId.present
+          ? data.destinationDeviceId.value
+          : this.destinationDeviceId,
+      payloadType: data.payloadType.present
+          ? data.payloadType.value
+          : this.payloadType,
+      payloadId: data.payloadId.present ? data.payloadId.value : this.payloadId,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      expiresAt: data.expiresAt.present ? data.expiresAt.value : this.expiresAt,
+      hopCount: data.hopCount.present ? data.hopCount.value : this.hopCount,
+      maxHops: data.maxHops.present ? data.maxHops.value : this.maxHops,
+      priority: data.priority.present ? data.priority.value : this.priority,
+      previousHopDeviceId: data.previousHopDeviceId.present
+          ? data.previousHopDeviceId.value
+          : this.previousHopDeviceId,
+      protocol: data.protocol.present ? data.protocol.value : this.protocol,
+      payloadJson: data.payloadJson.present
+          ? data.payloadJson.value
+          : this.payloadJson,
+      state: data.state.present ? data.state.value : this.state,
+      storedAt: data.storedAt.present ? data.storedAt.value : this.storedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RelayPacket(')
+          ..write('packetId: $packetId, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('destinationDeviceId: $destinationDeviceId, ')
+          ..write('payloadType: $payloadType, ')
+          ..write('payloadId: $payloadId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('hopCount: $hopCount, ')
+          ..write('maxHops: $maxHops, ')
+          ..write('priority: $priority, ')
+          ..write('previousHopDeviceId: $previousHopDeviceId, ')
+          ..write('protocol: $protocol, ')
+          ..write('payloadJson: $payloadJson, ')
+          ..write('state: $state, ')
+          ..write('storedAt: $storedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    packetId,
+    originDeviceId,
+    destinationDeviceId,
+    payloadType,
+    payloadId,
+    createdAt,
+    expiresAt,
+    hopCount,
+    maxHops,
+    priority,
+    previousHopDeviceId,
+    protocol,
+    payloadJson,
+    state,
+    storedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RelayPacket &&
+          other.packetId == this.packetId &&
+          other.originDeviceId == this.originDeviceId &&
+          other.destinationDeviceId == this.destinationDeviceId &&
+          other.payloadType == this.payloadType &&
+          other.payloadId == this.payloadId &&
+          other.createdAt == this.createdAt &&
+          other.expiresAt == this.expiresAt &&
+          other.hopCount == this.hopCount &&
+          other.maxHops == this.maxHops &&
+          other.priority == this.priority &&
+          other.previousHopDeviceId == this.previousHopDeviceId &&
+          other.protocol == this.protocol &&
+          other.payloadJson == this.payloadJson &&
+          other.state == this.state &&
+          other.storedAt == this.storedAt);
+}
+
+class RelayPacketsCompanion extends UpdateCompanion<RelayPacket> {
+  final Value<String> packetId;
+  final Value<String> originDeviceId;
+  final Value<String> destinationDeviceId;
+  final Value<String> payloadType;
+  final Value<String> payloadId;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> expiresAt;
+  final Value<int> hopCount;
+  final Value<int> maxHops;
+  final Value<int> priority;
+  final Value<String?> previousHopDeviceId;
+  final Value<String> protocol;
+  final Value<String> payloadJson;
+  final Value<String> state;
+  final Value<DateTime> storedAt;
+  final Value<int> rowid;
+  const RelayPacketsCompanion({
+    this.packetId = const Value.absent(),
+    this.originDeviceId = const Value.absent(),
+    this.destinationDeviceId = const Value.absent(),
+    this.payloadType = const Value.absent(),
+    this.payloadId = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.expiresAt = const Value.absent(),
+    this.hopCount = const Value.absent(),
+    this.maxHops = const Value.absent(),
+    this.priority = const Value.absent(),
+    this.previousHopDeviceId = const Value.absent(),
+    this.protocol = const Value.absent(),
+    this.payloadJson = const Value.absent(),
+    this.state = const Value.absent(),
+    this.storedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RelayPacketsCompanion.insert({
+    required String packetId,
+    required String originDeviceId,
+    required String destinationDeviceId,
+    required String payloadType,
+    required String payloadId,
+    required DateTime createdAt,
+    required DateTime expiresAt,
+    required int hopCount,
+    required int maxHops,
+    required int priority,
+    this.previousHopDeviceId = const Value.absent(),
+    required String protocol,
+    required String payloadJson,
+    required String state,
+    required DateTime storedAt,
+    this.rowid = const Value.absent(),
+  }) : packetId = Value(packetId),
+       originDeviceId = Value(originDeviceId),
+       destinationDeviceId = Value(destinationDeviceId),
+       payloadType = Value(payloadType),
+       payloadId = Value(payloadId),
+       createdAt = Value(createdAt),
+       expiresAt = Value(expiresAt),
+       hopCount = Value(hopCount),
+       maxHops = Value(maxHops),
+       priority = Value(priority),
+       protocol = Value(protocol),
+       payloadJson = Value(payloadJson),
+       state = Value(state),
+       storedAt = Value(storedAt);
+  static Insertable<RelayPacket> custom({
+    Expression<String>? packetId,
+    Expression<String>? originDeviceId,
+    Expression<String>? destinationDeviceId,
+    Expression<String>? payloadType,
+    Expression<String>? payloadId,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? expiresAt,
+    Expression<int>? hopCount,
+    Expression<int>? maxHops,
+    Expression<int>? priority,
+    Expression<String>? previousHopDeviceId,
+    Expression<String>? protocol,
+    Expression<String>? payloadJson,
+    Expression<String>? state,
+    Expression<DateTime>? storedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (packetId != null) 'packet_id': packetId,
+      if (originDeviceId != null) 'origin_device_id': originDeviceId,
+      if (destinationDeviceId != null)
+        'destination_device_id': destinationDeviceId,
+      if (payloadType != null) 'payload_type': payloadType,
+      if (payloadId != null) 'payload_id': payloadId,
+      if (createdAt != null) 'created_at': createdAt,
+      if (expiresAt != null) 'expires_at': expiresAt,
+      if (hopCount != null) 'hop_count': hopCount,
+      if (maxHops != null) 'max_hops': maxHops,
+      if (priority != null) 'priority': priority,
+      if (previousHopDeviceId != null)
+        'previous_hop_device_id': previousHopDeviceId,
+      if (protocol != null) 'protocol': protocol,
+      if (payloadJson != null) 'payload_json': payloadJson,
+      if (state != null) 'state': state,
+      if (storedAt != null) 'stored_at': storedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RelayPacketsCompanion copyWith({
+    Value<String>? packetId,
+    Value<String>? originDeviceId,
+    Value<String>? destinationDeviceId,
+    Value<String>? payloadType,
+    Value<String>? payloadId,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? expiresAt,
+    Value<int>? hopCount,
+    Value<int>? maxHops,
+    Value<int>? priority,
+    Value<String?>? previousHopDeviceId,
+    Value<String>? protocol,
+    Value<String>? payloadJson,
+    Value<String>? state,
+    Value<DateTime>? storedAt,
+    Value<int>? rowid,
+  }) {
+    return RelayPacketsCompanion(
+      packetId: packetId ?? this.packetId,
+      originDeviceId: originDeviceId ?? this.originDeviceId,
+      destinationDeviceId: destinationDeviceId ?? this.destinationDeviceId,
+      payloadType: payloadType ?? this.payloadType,
+      payloadId: payloadId ?? this.payloadId,
+      createdAt: createdAt ?? this.createdAt,
+      expiresAt: expiresAt ?? this.expiresAt,
+      hopCount: hopCount ?? this.hopCount,
+      maxHops: maxHops ?? this.maxHops,
+      priority: priority ?? this.priority,
+      previousHopDeviceId: previousHopDeviceId ?? this.previousHopDeviceId,
+      protocol: protocol ?? this.protocol,
+      payloadJson: payloadJson ?? this.payloadJson,
+      state: state ?? this.state,
+      storedAt: storedAt ?? this.storedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (packetId.present) {
+      map['packet_id'] = Variable<String>(packetId.value);
+    }
+    if (originDeviceId.present) {
+      map['origin_device_id'] = Variable<String>(originDeviceId.value);
+    }
+    if (destinationDeviceId.present) {
+      map['destination_device_id'] = Variable<String>(
+        destinationDeviceId.value,
+      );
+    }
+    if (payloadType.present) {
+      map['payload_type'] = Variable<String>(payloadType.value);
+    }
+    if (payloadId.present) {
+      map['payload_id'] = Variable<String>(payloadId.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (expiresAt.present) {
+      map['expires_at'] = Variable<DateTime>(expiresAt.value);
+    }
+    if (hopCount.present) {
+      map['hop_count'] = Variable<int>(hopCount.value);
+    }
+    if (maxHops.present) {
+      map['max_hops'] = Variable<int>(maxHops.value);
+    }
+    if (priority.present) {
+      map['priority'] = Variable<int>(priority.value);
+    }
+    if (previousHopDeviceId.present) {
+      map['previous_hop_device_id'] = Variable<String>(
+        previousHopDeviceId.value,
+      );
+    }
+    if (protocol.present) {
+      map['protocol'] = Variable<String>(protocol.value);
+    }
+    if (payloadJson.present) {
+      map['payload_json'] = Variable<String>(payloadJson.value);
+    }
+    if (state.present) {
+      map['state'] = Variable<String>(state.value);
+    }
+    if (storedAt.present) {
+      map['stored_at'] = Variable<DateTime>(storedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RelayPacketsCompanion(')
+          ..write('packetId: $packetId, ')
+          ..write('originDeviceId: $originDeviceId, ')
+          ..write('destinationDeviceId: $destinationDeviceId, ')
+          ..write('payloadType: $payloadType, ')
+          ..write('payloadId: $payloadId, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('expiresAt: $expiresAt, ')
+          ..write('hopCount: $hopCount, ')
+          ..write('maxHops: $maxHops, ')
+          ..write('priority: $priority, ')
+          ..write('previousHopDeviceId: $previousHopDeviceId, ')
+          ..write('protocol: $protocol, ')
+          ..write('payloadJson: $payloadJson, ')
+          ..write('state: $state, ')
+          ..write('storedAt: $storedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $RelayForwardHistoryTable extends RelayForwardHistory
+    with TableInfo<$RelayForwardHistoryTable, RelayForwardHistoryData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $RelayForwardHistoryTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _packetIdMeta = const VerificationMeta(
+    'packetId',
+  );
+  @override
+  late final GeneratedColumn<String> packetId = GeneratedColumn<String>(
+    'packet_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _targetDeviceIdMeta = const VerificationMeta(
+    'targetDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> targetDeviceId = GeneratedColumn<String>(
+    'target_device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _targetEndpointIdMeta = const VerificationMeta(
+    'targetEndpointId',
+  );
+  @override
+  late final GeneratedColumn<String> targetEndpointId = GeneratedColumn<String>(
+    'target_endpoint_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _attemptCountMeta = const VerificationMeta(
+    'attemptCount',
+  );
+  @override
+  late final GeneratedColumn<int> attemptCount = GeneratedColumn<int>(
+    'attempt_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    packetId,
+    targetDeviceId,
+    targetEndpointId,
+    status,
+    attemptCount,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'relay_forward_history';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<RelayForwardHistoryData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('packet_id')) {
+      context.handle(
+        _packetIdMeta,
+        packetId.isAcceptableOrUnknown(data['packet_id']!, _packetIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_packetIdMeta);
+    }
+    if (data.containsKey('target_device_id')) {
+      context.handle(
+        _targetDeviceIdMeta,
+        targetDeviceId.isAcceptableOrUnknown(
+          data['target_device_id']!,
+          _targetDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_targetDeviceIdMeta);
+    }
+    if (data.containsKey('target_endpoint_id')) {
+      context.handle(
+        _targetEndpointIdMeta,
+        targetEndpointId.isAcceptableOrUnknown(
+          data['target_endpoint_id']!,
+          _targetEndpointIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_targetEndpointIdMeta);
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_statusMeta);
+    }
+    if (data.containsKey('attempt_count')) {
+      context.handle(
+        _attemptCountMeta,
+        attemptCount.isAcceptableOrUnknown(
+          data['attempt_count']!,
+          _attemptCountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {packetId, targetDeviceId};
+  @override
+  RelayForwardHistoryData map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return RelayForwardHistoryData(
+      packetId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}packet_id'],
+      )!,
+      targetDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target_device_id'],
+      )!,
+      targetEndpointId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}target_endpoint_id'],
+      )!,
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      attemptCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempt_count'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $RelayForwardHistoryTable createAlias(String alias) {
+    return $RelayForwardHistoryTable(attachedDatabase, alias);
+  }
+}
+
+class RelayForwardHistoryData extends DataClass
+    implements Insertable<RelayForwardHistoryData> {
+  final String packetId;
+  final String targetDeviceId;
+  final String targetEndpointId;
+  final String status;
+  final int attemptCount;
+  final DateTime updatedAt;
+  const RelayForwardHistoryData({
+    required this.packetId,
+    required this.targetDeviceId,
+    required this.targetEndpointId,
+    required this.status,
+    required this.attemptCount,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['packet_id'] = Variable<String>(packetId);
+    map['target_device_id'] = Variable<String>(targetDeviceId);
+    map['target_endpoint_id'] = Variable<String>(targetEndpointId);
+    map['status'] = Variable<String>(status);
+    map['attempt_count'] = Variable<int>(attemptCount);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  RelayForwardHistoryCompanion toCompanion(bool nullToAbsent) {
+    return RelayForwardHistoryCompanion(
+      packetId: Value(packetId),
+      targetDeviceId: Value(targetDeviceId),
+      targetEndpointId: Value(targetEndpointId),
+      status: Value(status),
+      attemptCount: Value(attemptCount),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory RelayForwardHistoryData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return RelayForwardHistoryData(
+      packetId: serializer.fromJson<String>(json['packetId']),
+      targetDeviceId: serializer.fromJson<String>(json['targetDeviceId']),
+      targetEndpointId: serializer.fromJson<String>(json['targetEndpointId']),
+      status: serializer.fromJson<String>(json['status']),
+      attemptCount: serializer.fromJson<int>(json['attemptCount']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'packetId': serializer.toJson<String>(packetId),
+      'targetDeviceId': serializer.toJson<String>(targetDeviceId),
+      'targetEndpointId': serializer.toJson<String>(targetEndpointId),
+      'status': serializer.toJson<String>(status),
+      'attemptCount': serializer.toJson<int>(attemptCount),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  RelayForwardHistoryData copyWith({
+    String? packetId,
+    String? targetDeviceId,
+    String? targetEndpointId,
+    String? status,
+    int? attemptCount,
+    DateTime? updatedAt,
+  }) => RelayForwardHistoryData(
+    packetId: packetId ?? this.packetId,
+    targetDeviceId: targetDeviceId ?? this.targetDeviceId,
+    targetEndpointId: targetEndpointId ?? this.targetEndpointId,
+    status: status ?? this.status,
+    attemptCount: attemptCount ?? this.attemptCount,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  RelayForwardHistoryData copyWithCompanion(RelayForwardHistoryCompanion data) {
+    return RelayForwardHistoryData(
+      packetId: data.packetId.present ? data.packetId.value : this.packetId,
+      targetDeviceId: data.targetDeviceId.present
+          ? data.targetDeviceId.value
+          : this.targetDeviceId,
+      targetEndpointId: data.targetEndpointId.present
+          ? data.targetEndpointId.value
+          : this.targetEndpointId,
+      status: data.status.present ? data.status.value : this.status,
+      attemptCount: data.attemptCount.present
+          ? data.attemptCount.value
+          : this.attemptCount,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RelayForwardHistoryData(')
+          ..write('packetId: $packetId, ')
+          ..write('targetDeviceId: $targetDeviceId, ')
+          ..write('targetEndpointId: $targetEndpointId, ')
+          ..write('status: $status, ')
+          ..write('attemptCount: $attemptCount, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    packetId,
+    targetDeviceId,
+    targetEndpointId,
+    status,
+    attemptCount,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is RelayForwardHistoryData &&
+          other.packetId == this.packetId &&
+          other.targetDeviceId == this.targetDeviceId &&
+          other.targetEndpointId == this.targetEndpointId &&
+          other.status == this.status &&
+          other.attemptCount == this.attemptCount &&
+          other.updatedAt == this.updatedAt);
+}
+
+class RelayForwardHistoryCompanion
+    extends UpdateCompanion<RelayForwardHistoryData> {
+  final Value<String> packetId;
+  final Value<String> targetDeviceId;
+  final Value<String> targetEndpointId;
+  final Value<String> status;
+  final Value<int> attemptCount;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const RelayForwardHistoryCompanion({
+    this.packetId = const Value.absent(),
+    this.targetDeviceId = const Value.absent(),
+    this.targetEndpointId = const Value.absent(),
+    this.status = const Value.absent(),
+    this.attemptCount = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  RelayForwardHistoryCompanion.insert({
+    required String packetId,
+    required String targetDeviceId,
+    required String targetEndpointId,
+    required String status,
+    this.attemptCount = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : packetId = Value(packetId),
+       targetDeviceId = Value(targetDeviceId),
+       targetEndpointId = Value(targetEndpointId),
+       status = Value(status),
+       updatedAt = Value(updatedAt);
+  static Insertable<RelayForwardHistoryData> custom({
+    Expression<String>? packetId,
+    Expression<String>? targetDeviceId,
+    Expression<String>? targetEndpointId,
+    Expression<String>? status,
+    Expression<int>? attemptCount,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (packetId != null) 'packet_id': packetId,
+      if (targetDeviceId != null) 'target_device_id': targetDeviceId,
+      if (targetEndpointId != null) 'target_endpoint_id': targetEndpointId,
+      if (status != null) 'status': status,
+      if (attemptCount != null) 'attempt_count': attemptCount,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  RelayForwardHistoryCompanion copyWith({
+    Value<String>? packetId,
+    Value<String>? targetDeviceId,
+    Value<String>? targetEndpointId,
+    Value<String>? status,
+    Value<int>? attemptCount,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return RelayForwardHistoryCompanion(
+      packetId: packetId ?? this.packetId,
+      targetDeviceId: targetDeviceId ?? this.targetDeviceId,
+      targetEndpointId: targetEndpointId ?? this.targetEndpointId,
+      status: status ?? this.status,
+      attemptCount: attemptCount ?? this.attemptCount,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (packetId.present) {
+      map['packet_id'] = Variable<String>(packetId.value);
+    }
+    if (targetDeviceId.present) {
+      map['target_device_id'] = Variable<String>(targetDeviceId.value);
+    }
+    if (targetEndpointId.present) {
+      map['target_endpoint_id'] = Variable<String>(targetEndpointId.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (attemptCount.present) {
+      map['attempt_count'] = Variable<int>(attemptCount.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('RelayForwardHistoryCompanion(')
+          ..write('packetId: $packetId, ')
+          ..write('targetDeviceId: $targetDeviceId, ')
+          ..write('targetEndpointId: $targetEndpointId, ')
+          ..write('status: $status, ')
+          ..write('attemptCount: $attemptCount, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -4770,6 +6096,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $SosEventsTable sosEvents = $SosEventsTable(this);
   late final $AppSettingsTable appSettings = $AppSettingsTable(this);
   late final $AttachmentsTable attachments = $AttachmentsTable(this);
+  late final $RelayPacketsTable relayPackets = $RelayPacketsTable(this);
+  late final $RelayForwardHistoryTable relayForwardHistory =
+      $RelayForwardHistoryTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4782,6 +6111,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     sosEvents,
     appSettings,
     attachments,
+    relayPackets,
+    relayForwardHistory,
   ];
 }
 
@@ -7085,6 +8416,668 @@ typedef $$AttachmentsTableProcessedTableManager =
       Attachment,
       PrefetchHooks Function()
     >;
+typedef $$RelayPacketsTableCreateCompanionBuilder =
+    RelayPacketsCompanion Function({
+      required String packetId,
+      required String originDeviceId,
+      required String destinationDeviceId,
+      required String payloadType,
+      required String payloadId,
+      required DateTime createdAt,
+      required DateTime expiresAt,
+      required int hopCount,
+      required int maxHops,
+      required int priority,
+      Value<String?> previousHopDeviceId,
+      required String protocol,
+      required String payloadJson,
+      required String state,
+      required DateTime storedAt,
+      Value<int> rowid,
+    });
+typedef $$RelayPacketsTableUpdateCompanionBuilder =
+    RelayPacketsCompanion Function({
+      Value<String> packetId,
+      Value<String> originDeviceId,
+      Value<String> destinationDeviceId,
+      Value<String> payloadType,
+      Value<String> payloadId,
+      Value<DateTime> createdAt,
+      Value<DateTime> expiresAt,
+      Value<int> hopCount,
+      Value<int> maxHops,
+      Value<int> priority,
+      Value<String?> previousHopDeviceId,
+      Value<String> protocol,
+      Value<String> payloadJson,
+      Value<String> state,
+      Value<DateTime> storedAt,
+      Value<int> rowid,
+    });
+
+class $$RelayPacketsTableFilterComposer
+    extends Composer<_$AppDatabase, $RelayPacketsTable> {
+  $$RelayPacketsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get packetId => $composableBuilder(
+    column: $table.packetId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get destinationDeviceId => $composableBuilder(
+    column: $table.destinationDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payloadType => $composableBuilder(
+    column: $table.payloadType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payloadId => $composableBuilder(
+    column: $table.payloadId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get hopCount => $composableBuilder(
+    column: $table.hopCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get maxHops => $composableBuilder(
+    column: $table.maxHops,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get priority => $composableBuilder(
+    column: $table.priority,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get previousHopDeviceId => $composableBuilder(
+    column: $table.previousHopDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get protocol => $composableBuilder(
+    column: $table.protocol,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get storedAt => $composableBuilder(
+    column: $table.storedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$RelayPacketsTableOrderingComposer
+    extends Composer<_$AppDatabase, $RelayPacketsTable> {
+  $$RelayPacketsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get packetId => $composableBuilder(
+    column: $table.packetId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get destinationDeviceId => $composableBuilder(
+    column: $table.destinationDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payloadType => $composableBuilder(
+    column: $table.payloadType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payloadId => $composableBuilder(
+    column: $table.payloadId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get expiresAt => $composableBuilder(
+    column: $table.expiresAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get hopCount => $composableBuilder(
+    column: $table.hopCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get maxHops => $composableBuilder(
+    column: $table.maxHops,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get priority => $composableBuilder(
+    column: $table.priority,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get previousHopDeviceId => $composableBuilder(
+    column: $table.previousHopDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get protocol => $composableBuilder(
+    column: $table.protocol,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get state => $composableBuilder(
+    column: $table.state,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get storedAt => $composableBuilder(
+    column: $table.storedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$RelayPacketsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $RelayPacketsTable> {
+  $$RelayPacketsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get packetId =>
+      $composableBuilder(column: $table.packetId, builder: (column) => column);
+
+  GeneratedColumn<String> get originDeviceId => $composableBuilder(
+    column: $table.originDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get destinationDeviceId => $composableBuilder(
+    column: $table.destinationDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get payloadType => $composableBuilder(
+    column: $table.payloadType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get payloadId =>
+      $composableBuilder(column: $table.payloadId, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get expiresAt =>
+      $composableBuilder(column: $table.expiresAt, builder: (column) => column);
+
+  GeneratedColumn<int> get hopCount =>
+      $composableBuilder(column: $table.hopCount, builder: (column) => column);
+
+  GeneratedColumn<int> get maxHops =>
+      $composableBuilder(column: $table.maxHops, builder: (column) => column);
+
+  GeneratedColumn<int> get priority =>
+      $composableBuilder(column: $table.priority, builder: (column) => column);
+
+  GeneratedColumn<String> get previousHopDeviceId => $composableBuilder(
+    column: $table.previousHopDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get protocol =>
+      $composableBuilder(column: $table.protocol, builder: (column) => column);
+
+  GeneratedColumn<String> get payloadJson => $composableBuilder(
+    column: $table.payloadJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get state =>
+      $composableBuilder(column: $table.state, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get storedAt =>
+      $composableBuilder(column: $table.storedAt, builder: (column) => column);
+}
+
+class $$RelayPacketsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $RelayPacketsTable,
+          RelayPacket,
+          $$RelayPacketsTableFilterComposer,
+          $$RelayPacketsTableOrderingComposer,
+          $$RelayPacketsTableAnnotationComposer,
+          $$RelayPacketsTableCreateCompanionBuilder,
+          $$RelayPacketsTableUpdateCompanionBuilder,
+          (
+            RelayPacket,
+            BaseReferences<_$AppDatabase, $RelayPacketsTable, RelayPacket>,
+          ),
+          RelayPacket,
+          PrefetchHooks Function()
+        > {
+  $$RelayPacketsTableTableManager(_$AppDatabase db, $RelayPacketsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RelayPacketsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$RelayPacketsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$RelayPacketsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> packetId = const Value.absent(),
+                Value<String> originDeviceId = const Value.absent(),
+                Value<String> destinationDeviceId = const Value.absent(),
+                Value<String> payloadType = const Value.absent(),
+                Value<String> payloadId = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> expiresAt = const Value.absent(),
+                Value<int> hopCount = const Value.absent(),
+                Value<int> maxHops = const Value.absent(),
+                Value<int> priority = const Value.absent(),
+                Value<String?> previousHopDeviceId = const Value.absent(),
+                Value<String> protocol = const Value.absent(),
+                Value<String> payloadJson = const Value.absent(),
+                Value<String> state = const Value.absent(),
+                Value<DateTime> storedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RelayPacketsCompanion(
+                packetId: packetId,
+                originDeviceId: originDeviceId,
+                destinationDeviceId: destinationDeviceId,
+                payloadType: payloadType,
+                payloadId: payloadId,
+                createdAt: createdAt,
+                expiresAt: expiresAt,
+                hopCount: hopCount,
+                maxHops: maxHops,
+                priority: priority,
+                previousHopDeviceId: previousHopDeviceId,
+                protocol: protocol,
+                payloadJson: payloadJson,
+                state: state,
+                storedAt: storedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String packetId,
+                required String originDeviceId,
+                required String destinationDeviceId,
+                required String payloadType,
+                required String payloadId,
+                required DateTime createdAt,
+                required DateTime expiresAt,
+                required int hopCount,
+                required int maxHops,
+                required int priority,
+                Value<String?> previousHopDeviceId = const Value.absent(),
+                required String protocol,
+                required String payloadJson,
+                required String state,
+                required DateTime storedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => RelayPacketsCompanion.insert(
+                packetId: packetId,
+                originDeviceId: originDeviceId,
+                destinationDeviceId: destinationDeviceId,
+                payloadType: payloadType,
+                payloadId: payloadId,
+                createdAt: createdAt,
+                expiresAt: expiresAt,
+                hopCount: hopCount,
+                maxHops: maxHops,
+                priority: priority,
+                previousHopDeviceId: previousHopDeviceId,
+                protocol: protocol,
+                payloadJson: payloadJson,
+                state: state,
+                storedAt: storedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$RelayPacketsTable, RelayPacket>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $RelayPacketsTable,
+                    RelayPacket
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$RelayPacketsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $RelayPacketsTable,
+      RelayPacket,
+      $$RelayPacketsTableFilterComposer,
+      $$RelayPacketsTableOrderingComposer,
+      $$RelayPacketsTableAnnotationComposer,
+      $$RelayPacketsTableCreateCompanionBuilder,
+      $$RelayPacketsTableUpdateCompanionBuilder,
+      (
+        RelayPacket,
+        BaseReferences<_$AppDatabase, $RelayPacketsTable, RelayPacket>,
+      ),
+      RelayPacket,
+      PrefetchHooks Function()
+    >;
+typedef $$RelayForwardHistoryTableCreateCompanionBuilder =
+    RelayForwardHistoryCompanion Function({
+      required String packetId,
+      required String targetDeviceId,
+      required String targetEndpointId,
+      required String status,
+      Value<int> attemptCount,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$RelayForwardHistoryTableUpdateCompanionBuilder =
+    RelayForwardHistoryCompanion Function({
+      Value<String> packetId,
+      Value<String> targetDeviceId,
+      Value<String> targetEndpointId,
+      Value<String> status,
+      Value<int> attemptCount,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$RelayForwardHistoryTableFilterComposer
+    extends Composer<_$AppDatabase, $RelayForwardHistoryTable> {
+  $$RelayForwardHistoryTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get packetId => $composableBuilder(
+    column: $table.packetId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get targetDeviceId => $composableBuilder(
+    column: $table.targetDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get targetEndpointId => $composableBuilder(
+    column: $table.targetEndpointId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$RelayForwardHistoryTableOrderingComposer
+    extends Composer<_$AppDatabase, $RelayForwardHistoryTable> {
+  $$RelayForwardHistoryTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get packetId => $composableBuilder(
+    column: $table.packetId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get targetDeviceId => $composableBuilder(
+    column: $table.targetDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get targetEndpointId => $composableBuilder(
+    column: $table.targetEndpointId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$RelayForwardHistoryTableAnnotationComposer
+    extends Composer<_$AppDatabase, $RelayForwardHistoryTable> {
+  $$RelayForwardHistoryTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get packetId =>
+      $composableBuilder(column: $table.packetId, builder: (column) => column);
+
+  GeneratedColumn<String> get targetDeviceId => $composableBuilder(
+    column: $table.targetDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get targetEndpointId => $composableBuilder(
+    column: $table.targetEndpointId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get attemptCount => $composableBuilder(
+    column: $table.attemptCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$RelayForwardHistoryTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $RelayForwardHistoryTable,
+          RelayForwardHistoryData,
+          $$RelayForwardHistoryTableFilterComposer,
+          $$RelayForwardHistoryTableOrderingComposer,
+          $$RelayForwardHistoryTableAnnotationComposer,
+          $$RelayForwardHistoryTableCreateCompanionBuilder,
+          $$RelayForwardHistoryTableUpdateCompanionBuilder,
+          (
+            RelayForwardHistoryData,
+            BaseReferences<
+              _$AppDatabase,
+              $RelayForwardHistoryTable,
+              RelayForwardHistoryData
+            >,
+          ),
+          RelayForwardHistoryData,
+          PrefetchHooks Function()
+        > {
+  $$RelayForwardHistoryTableTableManager(
+    _$AppDatabase db,
+    $RelayForwardHistoryTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$RelayForwardHistoryTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$RelayForwardHistoryTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$RelayForwardHistoryTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> packetId = const Value.absent(),
+                Value<String> targetDeviceId = const Value.absent(),
+                Value<String> targetEndpointId = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> attemptCount = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => RelayForwardHistoryCompanion(
+                packetId: packetId,
+                targetDeviceId: targetDeviceId,
+                targetEndpointId: targetEndpointId,
+                status: status,
+                attemptCount: attemptCount,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String packetId,
+                required String targetDeviceId,
+                required String targetEndpointId,
+                required String status,
+                Value<int> attemptCount = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => RelayForwardHistoryCompanion.insert(
+                packetId: packetId,
+                targetDeviceId: targetDeviceId,
+                targetEndpointId: targetEndpointId,
+                status: status,
+                attemptCount: attemptCount,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $RelayForwardHistoryTable,
+                    RelayForwardHistoryData
+                  >(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $RelayForwardHistoryTable,
+                    RelayForwardHistoryData
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$RelayForwardHistoryTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $RelayForwardHistoryTable,
+      RelayForwardHistoryData,
+      $$RelayForwardHistoryTableFilterComposer,
+      $$RelayForwardHistoryTableOrderingComposer,
+      $$RelayForwardHistoryTableAnnotationComposer,
+      $$RelayForwardHistoryTableCreateCompanionBuilder,
+      $$RelayForwardHistoryTableUpdateCompanionBuilder,
+      (
+        RelayForwardHistoryData,
+        BaseReferences<
+          _$AppDatabase,
+          $RelayForwardHistoryTable,
+          RelayForwardHistoryData
+        >,
+      ),
+      RelayForwardHistoryData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -7103,4 +9096,8 @@ class $AppDatabaseManager {
       $$AppSettingsTableTableManager(_db, _db.appSettings);
   $$AttachmentsTableTableManager get attachments =>
       $$AttachmentsTableTableManager(_db, _db.attachments);
+  $$RelayPacketsTableTableManager get relayPackets =>
+      $$RelayPacketsTableTableManager(_db, _db.relayPackets);
+  $$RelayForwardHistoryTableTableManager get relayForwardHistory =>
+      $$RelayForwardHistoryTableTableManager(_db, _db.relayForwardHistory);
 }

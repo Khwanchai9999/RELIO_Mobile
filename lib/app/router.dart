@@ -5,6 +5,7 @@ import '../features/auth/auth_screens.dart';
 import '../features/chat/chat_screens.dart';
 import '../features/developer/nearby_diagnostics_screen.dart';
 import '../features/developer/cloud_diagnostics_screen.dart';
+import '../features/developer/relay_diagnostics_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/nearby/nearby_screen.dart';
 import '../features/onboarding/welcome_screen.dart';
@@ -70,6 +71,12 @@ GoRouter createRelioRouter() {
         redirect: (_, _) =>
             RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
         builder: (_, _) => const CloudDiagnosticsScreen(),
+      ),
+      GoRoute(
+        path: '/developer/relay',
+        redirect: (_, _) =>
+            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
+        builder: (_, _) => const RelayDiagnosticsScreen(),
       ),
     ],
     errorBuilder: (context, state) => Scaffold(

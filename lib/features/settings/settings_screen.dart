@@ -151,6 +151,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
+            icon: Icons.route_outlined,
+            title: 'Relay Diagnostics',
+            subtitle: 'relay-v1 / Developer only',
+            onTap: () => context.push('/developer/relay'),
+          ),
+          const SizedBox(height: 8),
+          RelioSettingTile(
             icon: Icons.info_outline,
             title: 'เกี่ยวกับ RELIO',
             subtitle: RelioBuildInfo.aboutLabel,

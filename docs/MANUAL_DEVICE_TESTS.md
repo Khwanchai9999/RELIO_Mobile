@@ -1,4 +1,4 @@
-# RELIO v0.7 Manual Device Tests
+# RELIO v0.8 Manual Device Tests
 
 ## DEFERRED MANUAL VERIFICATION — NOT PERFORMED
 
@@ -175,3 +175,24 @@ Before a TEST upload, a developer should:
    without clearing its local SQLite data.
 
 These distribution steps are not claimed as manually completed by Codex.
+
+## L. v0.8 Relay A→B→C — DEFERRED
+
+No physical relay test was performed for v0.8. With three Android phones and
+Internet/mobile data disabled:
+
+1. Confirm A, B, and C complete the hello handshake and advertise `relay-v1`.
+2. Queue a text payload from A for C, with only A↔B and B↔C available.
+3. Confirm B shows a stored hop state but does not insert the private text into
+   B's normal chat history.
+4. Confirm C materializes the text once, preserving the original message ID
+   and origin device, then returns a destination acknowledgement.
+5. Repeat with SOS and location payloads; verify SOS ID, capture time, and
+   accuracy are preserved and no UI describes the location as current.
+6. Disconnect C, restart B, reconnect C, and confirm persisted packet and
+   forward history retry without duplication.
+7. Confirm expired/over-hop packets are not forwarded and attachments are not
+   relayed.
+
+These checks are **DEFERRED — NOT YET PERFORMED**. `MockNearbyTransport` and
+automated tests cover the deterministic path.

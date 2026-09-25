@@ -62,7 +62,7 @@ void main() {
   });
 
   test(
-    'schema v3 preserves messages while attachments persist transfer state',
+    'schema v4 preserves messages while attachments persist transfer state',
     () async {
       final db = AppDatabase.memory();
       addTearDown(db.close);
@@ -95,7 +95,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 3);
+      expect(db.schemaVersion, 4);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',

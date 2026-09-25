@@ -8,6 +8,7 @@ class NearbyPeer {
     required this.name,
     this.connected = false,
     this.deviceId,
+    this.capabilities = const [],
   });
 
   /// Transport endpoint identity. This may change between sessions.
@@ -18,6 +19,9 @@ class NearbyPeer {
 
   /// RELIO's stable application identity, learned from the hello packet.
   final String? deviceId;
+
+  /// Capabilities learned from the completed RELIO hello handshake.
+  final List<String> capabilities;
 }
 
 class NearbyPayloadEvent {
@@ -242,8 +246,18 @@ class MockNearbyTransport implements NearbyTransport {
     return payloadId;
   }
 
-  void simulatePeer({required String id, required String name}) {
-    final peer = NearbyPeer(id: id, name: name);
+  void simulatePeer({
+    required String id,
+    required String name,
+    String? deviceId,
+    List<String> capabilities = const [],
+  }) {
+    final peer = NearbyPeer(
+      id: id,
+      name: name,
+      deviceId: deviceId,
+      capabilities: capabilities,
+    );
     peers[id] = peer;
     _peers.add(peer);
   }

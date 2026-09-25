@@ -1,14 +1,13 @@
-# RELIO Mobile — v0.7.0
+# RELIO Mobile — v0.8.0
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
-`RELIO_SOS` React/Vite prototype. v0.7 keeps the offline-first local core and
-hardens the v0.6 ownership-gated, queue-driven Supabase sync engine for a
-future disposable live test project.
+`RELIO_SOS` React/Vite prototype. v0.8 keeps the offline-first local core,
+ownership-gated cloud boundary, and adds a bounded Nearby relay foundation.
 
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.7.0)
+## Current scope (v0.8.0)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -38,8 +37,9 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 3 with conversations, messages, attachments,
-  nearby devices, sync queue, SOS events, and app settings tables
+- Drift database schema version 4 with conversations, messages, attachments,
+  nearby devices, sync queue, SOS events, app settings, relay packets, and
+  relay forward history tables
 - Repository-owned persistence for conversations, messages, SOS, queue items,
   nearby peer metadata, and the stable local device identity
 - Local outgoing message lifecycle: pending → nearbySent → delivered; Cloud
@@ -49,7 +49,10 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - `NearbyTransport` abstraction, deterministic `MockNearbyTransport`, and the
   Android adapter wrapping `nearby_connections`
 - RELIO packet protocol v1 using validated UTF-8 JSON for hello, textMessage,
-  deviceStatus, ack, and sos packets
+  deviceStatus, ack, sos, and additive relay-v1 packets
+- Bounded A→B→C store-and-forward for text, location, and SOS with TTL, max
+  hops, relay capability checks, persistent deduplication, and destination-only
+  private-text materialization; binary media is not relayed
 - Application-level hello handshake mapping a transport endpoint to stable
   local `deviceId` metadata
 - Direct one-to-one chat routing, local-first pending/nearbySent/delivered
@@ -133,7 +136,7 @@ package identity is finalized.
 The current test-pipeline build is version `0.7.0+9`; production remains
 reserved as `com.relio.relio_mobile`.
 
-## Test distribution (v0.5.2 pipeline)
+## Test distribution (v0.8.0 pipeline)
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
 `com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
@@ -204,9 +207,9 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 
 - **v0.5:** Supabase Auth + Cloud Data + Storage Foundation
 - **v0.6:** ownership-gated queue-driven cloud synchronization
-- **v0.7:** live Supabase integration preparation and Cloud hardening (current)
-- **Later:** conflict handling, encrypted payloads, relay, background services,
-  live location, and push notifications
+- **v0.7:** live Supabase integration preparation and Cloud hardening
+- **v0.8:** bounded Nearby relay/store-and-forward foundation (current)
+- **v0.9:** routing/receipt and ecosystem evaluation (not implemented)
 - **v1.0:** production security review, observability, accessibility audit,
   signed Android release, and end-to-end field testing
 

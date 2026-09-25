@@ -7,6 +7,10 @@ RELIO-owned application-support directory, and represented by a persistent
 message plus `attachments` row before Nearby is attempted. There is no cloud
 upload, media synchronization, Base64 media JSON, transcoding, or relay.
 
+v0.8 keeps this boundary unchanged: binary attachments and media metadata are
+not accepted by `relay-v1` envelopes. Media relay remains deferred until a
+separate bounded transfer design is reviewed.
+
 ## Storage and validation
 
 `MediaStorageService` generates UUID-based filenames and never trusts an

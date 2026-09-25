@@ -8,6 +8,7 @@ import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
 import '../repositories/local_repositories.dart';
+import '../relay/relay_engine.dart';
 import 'nearby_transport.dart';
 import 'relio_packet.dart';
 
@@ -32,6 +33,7 @@ class NearbyService extends ChangeNotifier {
     this.settings,
     this.attachments,
     this.mediaStorage,
+    this.relayEngine,
   });
 
   final NearbyTransport transport;
@@ -43,6 +45,7 @@ class NearbyService extends ChangeNotifier {
   final RelioSettingsRepository? settings;
   final AttachmentRepository? attachments;
   final MediaStorageService? mediaStorage;
+  final RelayEngine? relayEngine;
   final List<NearbyPeer> discoveredPeers = [];
   final List<String> eventLog = [];
   final Map<String, String> _packetMessageIds = {};
@@ -310,7 +313,7 @@ class NearbyService extends ChangeNotifier {
         message.id,
         DeliveryStatus.nearbySent,
       );
-      lastSentPacket = jsonEncode(packet.toJson());
+      lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง textMessage ${message.id} แล้ว');
       notifyListeners();
       if (transport is MockNearbyTransport &&
@@ -357,7 +360,7 @@ class NearbyService extends ChangeNotifier {
         message.id,
         DeliveryStatus.nearbySent,
       );
-      lastSentPacket = jsonEncode(packet.toJson());
+      lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง locationMessage ${message.id} แล้ว');
       if (transport is MockNearbyTransport &&
           (transport as MockNearbyTransport).autoAcknowledge) {
@@ -415,7 +418,7 @@ class NearbyService extends ChangeNotifier {
         message.id,
         DeliveryStatus.nearbySent,
       );
-      lastSentPacket = jsonEncode(packet.toJson());
+      lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง mediaMetadata ${attachment.transferId} แล้ว');
       if (transport is MockNearbyTransport &&
           (transport as MockNearbyTransport).autoAcknowledge) {
@@ -487,7 +490,7 @@ class NearbyService extends ChangeNotifier {
         throw const NearbyTransportException('No connected mock peer.');
       }
       await transport.sendBytes(packet.toBytes(), peerId: peerId);
-      lastSentPacket = jsonEncode(packet.toJson());
+      lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง $description แล้ว');
       notifyListeners();
     } on Object catch (error) {
@@ -597,7 +600,9 @@ class NearbyService extends ChangeNotifier {
       final packet = RelioPacket.fromBytes(event.bytes);
       endpointToDeviceId[event.peerId] = packet.senderDeviceId;
       deviceToEndpointId[packet.senderDeviceId] = event.peerId;
-      lastReceivedPacket = jsonEncode(packet.toJson());
+      // Packet อาจมีข้อความ/SOS/พิกัดส่วนตัว จึงเก็บ diagnostics แค่ type กับ ID
+      // และไม่เปิดเผย payload ใน log ปกติ
+      lastReceivedPacket = _diagnosticPacket(packet);
       _log('รับ ${packet.type.name} จาก ${event.peerId}');
       switch (packet.type) {
         case RelioPacketType.hello:
@@ -616,6 +621,10 @@ class NearbyService extends ChangeNotifier {
           await _handleMediaAck(packet);
         case RelioPacketType.locationMessage:
           await _handleLocation(event.peerId, packet);
+        case RelioPacketType.relayEnvelope:
+          await relayEngine?.handleIncomingPacket(event.peerId, packet);
+        case RelioPacketType.relayAck:
+          await relayEngine?.handleIncomingPacket(event.peerId, packet);
       }
       notifyListeners();
     } on RelioPacketException catch (error) {
@@ -769,7 +778,7 @@ class NearbyService extends ChangeNotifier {
       errorCode: errorCode,
     );
     await transport.sendBytes(ack.toBytes(), peerId: endpointId);
-    lastSentPacket = jsonEncode(ack.toJson());
+    lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
   }
 
@@ -787,6 +796,7 @@ class NearbyService extends ChangeNotifier {
       endpointId,
       packet.senderDeviceId,
       displayName: displayName,
+      capabilities: _capabilitiesFrom(packet.payload['capabilities']),
     );
     _log('จับคู่ endpoint $endpointId ↔ ${packet.senderDeviceId}');
   }
@@ -901,7 +911,7 @@ class NearbyService extends ChangeNotifier {
       messageId: packet.payload['messageId'] as String?,
     );
     await transport.sendBytes(ack.toBytes(), peerId: endpointId);
-    lastSentPacket = jsonEncode(ack.toJson());
+    lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
   }
 
@@ -924,6 +934,7 @@ class NearbyService extends ChangeNotifier {
     String? endpointId,
     String deviceId, {
     String? displayName,
+    List<String>? capabilities,
   }) {
     if (endpointId == null) return;
     endpointToDeviceId[endpointId] = deviceId;
@@ -938,8 +949,13 @@ class NearbyService extends ChangeNotifier {
           peer.connected ||
           peerStates[endpointId] == NearbyConnectionState.connected,
       deviceId: deviceId,
+      capabilities: capabilities ?? peer.capabilities,
     );
   }
+
+  List<String> _capabilitiesFrom(Object? value) => value is List
+      ? value.whereType<String>().toList(growable: false)
+      : const [];
 
   DeviceStatus _statusFrom(String value) => DeviceStatus.values.firstWhere(
     (status) => status.name == value,
@@ -959,6 +975,12 @@ class NearbyService extends ChangeNotifier {
   String _safeError(Object error) => error is NearbyTransportException
       ? error.message
       : error.toString().replaceFirst('Exception: ', '');
+
+  String _diagnosticPacket(RelioPacket packet) => jsonEncode({
+    'type': packet.type.name,
+    'packetId': packet.packetId,
+    'senderDeviceId': packet.senderDeviceId,
+  });
 
   void _log(String message) {
     eventLog.insert(0, '${DateTime.now().toIso8601String()} $message');

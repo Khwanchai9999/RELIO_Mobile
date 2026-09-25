@@ -1,4 +1,4 @@
-# RELIO Test Deployment — v0.5.2
+# RELIO Test Deployment — v0.8.0
 
 เอกสารนี้อธิบายการแจก Android TEST build ของ RELIO ผ่าน Firebase App
 Distribution เท่านั้น โดย Supabase ยังคงเป็น cloud backend ของแอป และไม่ได้
@@ -54,7 +54,8 @@ Firebase CLI distribution ใช้ Firebase App ID, release notes และ tes
 5. สร้าง TEST APK ด้วย Android flavor ภายในชื่อ `qa` (`--flavor qa`; AGP 9
    ไม่อนุญาตชื่อ flavor ที่ขึ้นต้นด้วย `test`)
 6. ตรวจ APK และคัดลอกไป `dist\relio-test-0.5.2+7.apk`
-7. ใช้ release notes จาก `release_notes\0.5.2.md`
+7. ใช้ release notes จาก `release_notes\0.8.0.md` เมื่อมีไฟล์ release notes ของ
+   milestone นี้
 8. อัปโหลดเมื่อ Firebase CLI, `FIREBASE_APP_ID` และ tester/group config พร้อม
 
 ถ้า format, analyze, test หรือ build ไม่ผ่าน สคริปต์จะหยุดและไม่ upload
@@ -134,7 +135,7 @@ Nearby, Chat, SOS, media และ location
 
 ## Firebase live status
 
-v0.5.2 เตรียม local pipeline และ Firebase CLI integration แล้ว แต่จะไม่ invent
+v0.8.0 เตรียม local pipeline และ Firebase CLI integration แล้ว แต่จะไม่ invent
 Firebase project ID, App ID, tester email หรือ credential ใด ๆ การ upload จริง
 จะทำได้เมื่อผู้ใช้ตั้งค่าบัญชีและ Firebase project เอง
 
