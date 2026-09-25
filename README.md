@@ -1,0 +1,185 @@
+# RELIO Mobile — v0.5.1
+
+RELIO Mobile Foundation is the Android-first Flutter companion to the existing
+`RELIO_SOS` React/Vite prototype. v0.5 keeps the v0.4 offline-first local core
+and adds an optional Supabase Auth + Cloud Data + private Storage foundation.
+
+The React prototype is intentionally kept as a separate project. This Flutter
+app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
+
+## Current scope (v0.5.1)
+
+- Optional Supabase email/password authentication with guest/offline entry
+- Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
+  missing configuration is safe and does not block local use
+- `CloudDataSource`, `CloudAuthService`, `SupabaseCloudDataSource`, and
+  deterministic `FakeCloudDataSource`
+- Versioned SQL migrations with normalized tables, RLS policies, and private
+  `relio-media` storage
+- Developer-only `/developer/cloud` diagnostics
+- Local `sync_queue` remains truthful preparation only; no automatic worker
+
+- Welcome, login/register prototype, offline entry, and permission explainer
+- Home dashboard with separate Internet and Nearby connectivity status
+- Nearby device list with All, SOS, Rescue, and Normal filters
+- Nearby discovery/advertising/connect/disconnect coordination with explicit
+  endpoint and connection state
+- Chat list and chat room with persistent text, image, video, and location
+  message flows
+- Drift database schema version 2 with conversations, messages, attachments,
+  nearby devices, sync queue, SOS events, and app settings tables
+- Repository-owned persistence for conversations, messages, SOS, queue items,
+  nearby peer metadata, and the stable local device identity
+- Local outgoing message lifecycle: pending → nearbySent → delivered; `synced`
+  remains reserved for a future cloud adapter
+- Chat and conversation list driven by local database streams; SOS state and
+  sync queue counts persist locally
+- `NearbyTransport` abstraction, deterministic `MockNearbyTransport`, and the
+  Android adapter wrapping `nearby_connections`
+- RELIO packet protocol v1 using validated UTF-8 JSON for hello, textMessage,
+  deviceStatus, ack, and sos packets
+- Application-level hello handshake mapping a transport endpoint to stable
+  local `deviceId` metadata
+- Direct one-to-one chat routing, local-first pending/nearbySent/delivered
+  lifecycle, duplicate protection, ACK idempotence, and user retry
+- RELIO-owned media storage, MIME/signature validation, bounded image/video
+  policy, native Nearby file payloads, progress, completion ACK, and retry
+- On-demand LocationService for location messages and SOS, with current/last
+  known fallback and bounded timeout; no background tracking
+- Local SOS packet receive/deduplication/deactivation and Rescue status
+  propagation; status precedence is SOS > Rescue > Normal
+- Permission service architecture and Android Nearby-related declarations
+- Development-only `/developer/nearby` diagnostics screen, reachable from
+  Profile → Settings → Nearby Diagnostics
+- SOS setup, confirmation, active state, stop confirmation, and received SOS
+- Rescue mode with active SOS cases and local status updates
+- Profile, settings, dark mode, theme selection, and sync visibility
+- Theme selection supports Light, Dark, and System modes. One application-level
+  controller persists stable `light`, `dark`, or `system` values and the root
+  `MaterialApp.router` observes it immediately.
+- Prototype seed data is only initial local data; user-generated data is
+  persisted before transport delivery
+- Physical Android device-to-device verification is deferred; see
+  [docs/MANUAL_DEVICE_TESTS.md](docs/MANUAL_DEVICE_TESTS.md)
+
+The Android adapter compiles and is the application runtime default after the
+Flutter binding is active. Headless automated tests and deliberate developer
+overrides use Mock transport. Two-phone radio behavior remains
+`DEFERRED MANUAL VERIFICATION`.
+
+## Active workspace
+
+The active development repository is `D:\RELIO\RELIO_Mobile`, an ASCII-safe
+copy created from the preserved original at
+`D:\ปี 3 เทอม 1\mobile app จารเกียร์\RELIO_Mobile`. The original remains
+untouched as the archived/previous location. No Git metadata was present in
+the original project, so there were no branches or tags to migrate.
+
+## Requirements
+
+- Flutter 3.44 or newer on the stable channel
+- Dart 3.12 or newer
+- Android SDK / Android Studio for Android builds
+
+The current development machine uses Flutter 3.44.6, Dart 3.12.2, and Android
+SDK 36. Android Studio's bundled JDK 21 is recommended.
+
+## Run and verify
+
+```bash
+flutter pub get
+flutter run
+flutter analyze
+flutter test
+flutter build apk --debug
+```
+
+After Drift schema changes, generate sources with:
+
+```bash
+dart run build_runner build --delete-conflicting-outputs
+```
+
+If build_runner cannot write its AOT snapshot, use `--force-jit`:
+
+```bash
+dart run build_runner build --force-jit --delete-conflicting-outputs
+```
+
+The debug APK is written to `build/app/outputs/flutter-apk/app-debug.apk`.
+
+For a release build, configure signing and run:
+
+```bash
+flutter build apk --release
+```
+
+The default Android application id is `com.relio.relio_mobile`. It is a safe
+temporary identifier for this foundation and can be replaced when the product
+package identity is finalized.
+
+The current hotfix build is version `0.5.1+6`; the application ID remains
+`com.relio.relio_mobile`.
+
+## Architecture
+
+The code is organized by app foundation, feature, shared UI, and data:
+
+```text
+lib/
+  app/       app shell, router, theme tokens, theme controller
+  data/      mock models and centralized prototype data
+  features/  onboarding, auth, home, nearby, chat, SOS, rescue, profile, sync
+  core/media/ RELIO-owned media storage and transfer policy
+  core/location/ on-demand location abstraction and fake test service
+  shared/    reusable RELIO widgets
+test/        widget smoke and interaction tests
+```
+
+`go_router` owns navigation. `RelioApp` owns the application-lifetime
+`RelioThemeController`; its `SharedPreferencesThemePreferenceStore` is the
+single persistence source for the `light`, `dark`, or `system` preference.
+`MaterialApp.router` receives the live `ThemeMode` from that controller, while
+Material 3 is configured through centralized RELIO color,
+spacing, and typography tokens. Google Prompt is wired through `google_fonts`
+with a safe fallback for offline development.
+
+The local write path is:
+
+```text
+UI → repository/domain → Drift/SQLite → local sync_queue → cloud adapter →
+Supabase
+```
+
+UI code does not call Drift or the Nearby plugin directly. Plugin-specific
+types stay inside `AndroidNearbyTransport`. `NearbyService` coordinates packet
+validation, persistence, and acknowledgements without containing SQL.
+
+## Offline-first and Nearby boundary
+
+The database is authoritative for core local application state. An outgoing
+message is inserted as `pending` before Nearby is attempted. Accepted transport
+delivery moves it to `nearbySent`; a remote ACK moves it to `delivered`. Cloud
+sync is not implemented, so messages are not automatically marked `synced`.
+When a peer is unavailable, the message remains stored as `pending` for an
+explicit retry after reconnection. Incoming messages are validated, deduped by
+`messageId`, persisted, and acknowledged before the database stream updates
+the UI. Media control is JSON, while image/video content uses native Nearby
+file payloads; binary content is never Base64-encoded into protocol JSON. See
+[docs/NEARBY_PROTOCOL.md](docs/NEARBY_PROTOCOL.md) and
+[docs/MEDIA_TRANSFER.md](docs/MEDIA_TRANSFER.md).
+
+## Roadmap
+
+- **v0.5:** Supabase Auth + Cloud Data + Storage Foundation (current)
+- **v0.6:** queue-driven cloud synchronization and conflict policy
+- **Later:** conflict handling, encrypted payloads, relay, background services,
+  live location, and push notifications
+- **v1.0:** production security review, observability, accessibility audit,
+  signed Android release, and end-to-end field testing
+
+## Relationship to the React prototype
+
+`RELIO_SOS` remains the visual/reference prototype. When parity work is needed,
+compare flows and semantics between the two projects, but keep each project's
+toolchain and source tree independent.
