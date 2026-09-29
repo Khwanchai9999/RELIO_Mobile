@@ -237,7 +237,10 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Firebase CLI could not list projects for the authenticated account.'
 }
 try {
-    $projectsResponse = ($projectsJson -join "`n") | ConvertFrom-Json
+    $projectsText = $projectsJson -join "`n"
+    $projectsJsonStart = $projectsText.IndexOf('{')
+    if ($projectsJsonStart -lt 0) { throw 'No JSON object found.' }
+    $projectsResponse = $projectsText.Substring($projectsJsonStart) | ConvertFrom-Json
 } catch {
     throw 'Firebase CLI returned an unreadable project list.'
 }
@@ -255,7 +258,10 @@ if ($groupsValue) {
         throw "Firebase App Distribution groups could not be listed for project $qaProjectId."
     }
     try {
-        $groupsResponse = ($groupsJson -join "`n") | ConvertFrom-Json
+        $groupsText = $groupsJson -join "`n"
+        $groupsJsonStart = $groupsText.IndexOf('{')
+        if ($groupsJsonStart -lt 0) { throw 'No JSON object found.' }
+        $groupsResponse = $groupsText.Substring($groupsJsonStart) | ConvertFrom-Json
     } catch {
         throw 'Firebase CLI returned an unreadable App Distribution group list.'
     }
