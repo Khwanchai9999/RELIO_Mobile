@@ -1,7 +1,9 @@
+import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 import java.util.Properties
 
 plugins {
     id("com.android.application")
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -74,6 +76,11 @@ android {
             // until their release keys are explicitly configured.
         }
     }
+}
+
+googleServices {
+    // QA มี google-services.json จริง ส่วน DEV/PROD ใช้ Supabase และต้อง build ต่อได้
+    missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN
 }
 
 dependencies {

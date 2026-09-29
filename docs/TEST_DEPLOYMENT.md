@@ -35,12 +35,13 @@ DEV และ TEST เป็นคนละแอป จึงมี SQLite/app 
 
 Firebase CLI distribution ใช้ Firebase App ID, release notes และ testers/groups
 สำหรับการอัปโหลด ส่วน Android runtime ใช้ API-only library ทุก variant และ
-full App Distribution SDK เฉพาะ `qaImplementation`; ไม่สร้างค่า Firebase หรือ
-`google-services.json` ปลอมใน repository
+full App Distribution SDK เฉพาะ `qaImplementation`; repository มี real
+`android/app/src/qa/google-services.json` สำหรับ package เดียวกันเท่านั้น และ
+ไม่เพิ่ม Firebase Auth, Firestore, Storage หรือ Analytics
 
 ## Quality gate และการแจก
 
-จาก root `D:\RELIO\RELIO_Mobile`:
+จาก active root `D:\RELIO_Mobile` เท่านั้น:
 
 ```powershell
 .\scripts\deploy-test.ps1
@@ -138,9 +139,10 @@ Nearby, Chat, SOS, media และ location
 ## Firebase live status
 
 v0.8.5 เพิ่ม official QA-only in-app update bridge และ machine check ที่ยืนยันว่า
-full App Distribution SDK อยู่ใน QA เท่านั้น แต่จะไม่ invent Firebase project ID,
-App ID, tester email หรือ credential ใด ๆ การ upload จริงจะทำได้เมื่อผู้ใช้ตั้งค่า
-บัญชีและ Firebase project เอง
+full App Distribution SDK อยู่ใน QA เท่านั้น ไฟล์ QA Firebase config ถูกเพิ่มจาก
+Firebase project จริงและตรวจ package เป็น `com.relio.relio_mobile.test`; จะไม่
+invent App ID, tester email หรือ credential ใด ๆ การ upload จริงจะทำได้เมื่อ
+ผู้ใช้ตั้งค่าบัญชีและ Firebase project เอง
 
 ตรวจ isolation ได้ด้วย:
 

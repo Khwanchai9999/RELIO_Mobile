@@ -87,7 +87,10 @@ into it.
   comment every line, obvious syntax, or generated files.
 - Never distribute a TEST APK if `format`, `flutter analyze`, `flutter test`,
   or the TEST build fails. Never commit signing secrets, keystores, Firebase
-  credentials, tokens, or service-account files.
+  credentials, tokens, or service-account files. The tracked QA
+  `android/app/src/qa/google-services.json` contains Firebase client
+  identifiers only, must target `com.relio.relio_mobile.test`, and must never
+  be copied to DEV or PROD source sets.
 - Keep DEV, TEST, and PROD packaging separate. Production ID/signing must not
   be reused casually for TEST builds. Firebase App Distribution is only a test
   delivery channel; Supabase remains the RELIO backend.
@@ -115,6 +118,11 @@ flutter analyze
 flutter test
 flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
 ```
+
+The Google Services Gradle plugin is configured for the QA-only config with a
+WARN policy for missing config, so DEV and PROD remain Supabase-only and
+buildable. Verify its package target and App Distribution dependency boundary
+with `scripts/verify-qa-update-isolation.ps1` before QA deployment.
 
 Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if
@@ -152,3 +160,5 @@ performing them.
 - Do not make broad destructive changes to either project.
 - Update this file and `README.md` when architecture or milestone boundaries
   materially change.
+- All maintained scripts derive the project root from `$PSScriptRoot`; no
+  runnable command may point to an old ASCII or Thai workspace path.

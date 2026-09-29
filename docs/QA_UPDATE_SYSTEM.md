@@ -44,11 +44,13 @@ Run the machine check from the repository root:
 It inspects `qaReleaseRuntimeClasspath` and `prodReleaseRuntimeClasspath` and
 fails if QA lacks the full SDK or PROD contains it.
 
-No `google-services.json` or Firebase value is invented. When the real QA
-Firebase app is created, place its config at the ignored path
-`android/app/src/qa/google-services.json` only if the selected Firebase setup
-requires it. It must be for the exact package
-`com.relio.relio_mobile.test`.
+The real QA Firebase config is tracked at
+`android/app/src/qa/google-services.json` and is for the exact package
+`com.relio.relio_mobile.test`. The Google Services Gradle plugin is declared in
+`android/settings.gradle.kts`, applied by the app module, and configured with a
+WARN policy so DEV/PROD remain buildable without Firebase config. The config
+contains only the identifiers required by App Distribution; no Firebase Auth,
+Firestore, Storage, or Analytics SDK is added.
 
 ## Tester flow
 

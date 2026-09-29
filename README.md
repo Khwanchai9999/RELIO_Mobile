@@ -89,11 +89,10 @@ overrides use Mock transport. Two-phone radio behavior remains
 
 ## Active workspace
 
-The active development repository is `D:\RELIO\RELIO_Mobile`, an ASCII-safe
-copy created from the preserved original at
-`D:\ปี 3 เทอม 1\mobile app จารเกียร์\RELIO_Mobile`. The original remains
-untouched as the archived/previous location. No Git metadata was present in
-the original project, so there were no branches or tags to migrate.
+The active development repository and Git root are `D:\RELIO_Mobile`. Do not
+use or modify any old RELIO workspace. The historical source path
+`D:\ปี 3 เทอม 1\mobile app จารเกียร์\RELIO_Mobile` is retained only as an
+inactive historical reference; it is not a runnable workspace.
 
 ## Requirements
 
@@ -160,7 +159,12 @@ See [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
 The QA variant contains the full Firebase App Distribution Android SDK for the
 official tester alert/update flow. DEV and PROD contain only the safe API-only
 stub; the full self-update implementation is excluded from the PROD Play
-build. See [docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
+build. The real QA Firebase config is
+`android/app/src/qa/google-services.json` and targets
+`com.relio.relio_mobile.test`; the Google Services Gradle plugin processes it
+only as QA configuration. No Firebase Auth, Firestore, Storage, or Analytics
+SDK is added; Supabase remains the cloud backend. See
+[docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
 
 ## Architecture
 
