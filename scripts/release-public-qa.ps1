@@ -288,6 +288,24 @@ if (-not $NoUpload) {
     if ($repo.private -eq $true -or $repo.name -ne $githubRepositoryName) {
         throw 'The GitHub release repository is not the expected public repository.'
     }
+    if ([int]$repo.size -eq 0) {
+        $seedReadme = @(
+            '# RELIO Android Updates',
+            '',
+            'Public RELIO Test Android QA release metadata and signed APK assets only.',
+            'This repository intentionally contains no RELIO application source or secrets.'
+        ) -join "`n"
+        $seedContent = [Convert]::ToBase64String(
+            [Text.Encoding]::UTF8.GetBytes($seedReadme)
+        )
+        Write-Host 'Initializing the empty public release repository with metadata-only README...'
+        & $gh.Source api --method PUT "repos/$githubRepository/contents/README.md" `
+            --field message='chore: initialize Android update metadata repository' `
+            --field content=$seedContent
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Could not initialize the empty GitHub release repository.'
+        }
+    }
 
     $release = Get-ReleaseApiObject -Repository $githubRepository -Tag $releaseTag
     if (-not $release) {
