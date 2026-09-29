@@ -85,10 +85,10 @@ abstract interface class AppUpdateProvider {
 class PublicQaAppUpdateProvider implements AppUpdateProvider {
   PublicQaAppUpdateProvider({
     required Uri manifestUri,
-    required Uri approvedBaseUri,
+    required PublicUpdateUrlPolicy urlPolicy,
   }) : _provider = PublicQaUpdateProvider(
          manifestUri: manifestUri,
-         approvedBaseUri: approvedBaseUri,
+         urlPolicy: urlPolicy,
        );
 
   final PublicQaUpdateProvider _provider;
@@ -257,7 +257,7 @@ class AppUpdateService extends ChangeNotifier {
            (gateway == null
                ? PublicQaAppUpdateProvider(
                    manifestUri: RelioBuildInfo.publicUpdateManifestUri,
-                   approvedBaseUri: RelioBuildInfo.publicUpdateBaseUri,
+                   urlPolicy: RelioBuildInfo.publicUpdateUrlPolicy,
                  )
                : FirebaseAppDistributionUpdateProvider(gateway: gateway)),
        _installer = installer ?? MethodChannelAppUpdateInstaller(),

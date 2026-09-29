@@ -2,7 +2,8 @@
 
 ## Public QA channel — v0.8.6+12
 
-The normal QA distribution path is Firebase Hosting, not tester enrollment.
+The normal QA distribution path is a Firebase Hosting metadata page plus a
+GitHub Releases APK, not tester enrollment.
 From `D:\RELIO_Mobile` run:
 
 ```powershell
@@ -12,10 +13,12 @@ From `D:\RELIO_Mobile` run:
 
 The script derives the project root from `$PSScriptRoot`, requires version
 `0.8.6+12`, runs quality/build/signing gates, prepares isolated
-`public_update\qa\` files, deploys only Hosting in Firebase project
-`relio-17dc0`, and verifies the public page, manifest, APK, and remote SHA-256.
-The public URL is `https://relio-17dc0.web.app/qa/`; ordinary download needs no
-Firebase tester account or Google sign-in.
+`public_update\hosting\qa\` metadata, creates or verifies the immutable
+`qa-v0.8.6-b12` release in the authenticated owner's public
+`RELIO-Android-Updates` repository, deploys only Hosting in Firebase project
+`relio-17dc0`, and verifies both public origins. The public page is
+`https://relio-17dc0.web.app/qa/`; ordinary download needs no Firebase tester
+account or Google sign-in.
 
 The app validates schema, channel, exact QA package, monotonic versionCode,
 HTTPS Hosting `/qa/` path, SHA-256, file size, and QA signing fingerprint
@@ -56,6 +59,9 @@ DEV และ TEST เป็นคนละแอป จึงมี SQLite/app 
 5. ติดตั้ง Firebase CLI และล็อกอินครั้งเดียวด้วย `firebase login`
 6. สร้าง tester group เช่น `relio-testers` ใน Firebase console หรือเพิ่ม
    tester emails ตามระบบของทีม
+7. ติดตั้ง GitHub CLI ทางการและล็อกอินด้วย `gh auth login` สำหรับเจ้าของ
+   repository ที่อนุมัติเท่านั้น; script จะสร้างหรือใช้ public repository
+   `RELIO-Android-Updates` โดยไม่ push source หรือ secret ใด ๆ
 
 Firebase CLI distribution ใช้ Firebase App ID, release notes และ testers/groups
 สำหรับการอัปโหลด ส่วน Android runtime ใช้ API-only library ทุก variant และ
@@ -114,9 +120,9 @@ QA config เสมอ ถ้าไม่ตรง script จะหยุดก�
 ## Historical Build 11 and public Build 12
 
 Build 11 ใช้เป็น historical/internal App Distribution release ส่วน Build 12
-เป็น public Hosting first-install baseline. การ deploy Build 12 ถูกบล็อกใน
-ปัจจุบันเพราะ Firebase Spark ห้ามไฟล์ APK executable; ห้าม upgrade billing หรือ
-เปลี่ยนไปใช้ Firebase Storage โดยอัตโนมัติ:
+เป็น public hybrid first-install baseline. APK อยู่ใน GitHub Releases และ
+Firebase Hosting มีเฉพาะ metadata/page จึงไม่ต้อง upgrade billing หรือเปลี่ยน
+ไปใช้ Firebase Storage โดยอัตโนมัติ:
 
 ```powershell
 .\scripts\bump-qa-build.ps1 -NextBuildNumber 12 -WhatIf
@@ -195,8 +201,8 @@ v0.8.6 เพิ่ม public QA update provider, strict manifest/APK verificati
 QA-only Android installer permission ขณะที่ full App Distribution SDK ยังคงอยู่
 ใน QA เท่านั้น ไฟล์ QA Firebase config ถูกเพิ่มจาก Firebase project จริงและ
 ตรวจ package เป็น `com.relio.relio_mobile.test`; จะไม่ invent App ID, tester
-email หรือ credential ใด ๆ การ deploy Hosting ยังรอ approved hosting/billing
-path เพราะ Spark ไม่อนุญาตให้เสิร์ฟ APK executable
+email หรือ credential ใด ๆ Firebase Hosting deploy มีเฉพาะ page/manifest และ
+APK อยู่ใน GitHub release asset.
 
 ตรวจ isolation ได้ด้วย:
 

@@ -3,7 +3,8 @@
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
 `RELIO_SOS` React/Vite prototype. v0.8.6 keeps the offline-first local core,
 ownership-gated cloud boundary, bounded Nearby relay foundation, and adds a
-public Android QA update channel backed by Firebase Hosting.
+hybrid public Android QA update channel: Firebase Hosting serves metadata and
+GitHub Releases serves the signed APK.
 
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
@@ -154,11 +155,13 @@ key once, then run the fail-fast deployment pipeline from the active workspace:
 ```
 
 The public pipeline runs format, analyze, tests, QA/PROD isolation, and a
-signed QA build before deploying only Firebase Hosting for `relio-17dc0`. It
-generates `/qa/latest.json`, a mobile download page, and a versioned APK, then
-verifies the public URLs and remote APK SHA-256. It never deploys Functions,
-Firestore, Realtime Database, Storage, App Distribution, or Supabase resources.
-Use `-NoDeploy` to prepare and inspect the hosting files. See
+signed QA build before creating an immutable GitHub release and deploying only
+Firebase Hosting metadata for `relio-17dc0`. Firebase Hosting contains only
+`/qa/index.html` and `/qa/latest.json`; the signed APK and `SHA256SUMS.txt`
+are GitHub release assets. It never deploys Functions, Firestore, Realtime
+Database, Storage, App Distribution, or Supabase resources. Use `-NoDeploy` to
+skip Hosting after the GitHub asset has been verified, or `-NoUpload` to
+prepare local metadata without changing GitHub. See
 [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
 
 The QA variant contains the full Firebase App Distribution Android SDK for the
@@ -172,13 +175,14 @@ SDK is added; Supabase remains the cloud backend. See
 [docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
 
 The intended public first-install URL is `https://relio-17dc0.web.app/qa/`.
-The first Hosting deploy is currently blocked because Firebase's Spark plan
-forbids executable APK files; no billing upgrade or Storage fallback was made.
-Once an approved hosting path is available, ordinary download will not require
-a Firebase tester account or Google sign-in. Android will still require the
-user to approve unknown-app installation and confirm the Package Installer
-update. Build 13 is reserved for a later physical 12 → 13 verification and
-must not be created in this milestone.
+Ordinary download follows the exact authenticated owner's public
+`RELIO-Android-Updates` release asset and does not require a Firebase tester
+account or Google sign-in. Android still requires the user to approve unknown-
+app installation and confirm the Package Installer update. The earlier
+all-Firebase attempt was blocked by the Spark executable-file restriction; the
+hybrid channel keeps the APK out of Hosting and does not upgrade billing or
+use Firebase Storage. Build 13 is reserved for a later physical 12 → 13
+verification and must not be created in this milestone.
 
 ## Architecture
 

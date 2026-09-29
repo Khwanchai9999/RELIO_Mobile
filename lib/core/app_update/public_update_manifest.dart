@@ -7,6 +7,65 @@ class PublicUpdateValidationException implements Exception {
   String toString() => 'Public update manifest validation failed: $code';
 }
 
+class PublicUpdateUrlPolicy {
+  const PublicUpdateUrlPolicy({
+    required this.manifestUri,
+    required this.githubOwner,
+  });
+
+  static const githubRepository = 'RELIO-Android-Updates';
+  static final _approvedManifestUri = Uri.parse(
+    'https://relio-17dc0.web.app/qa/latest.json',
+  );
+
+  final Uri manifestUri;
+  final String githubOwner;
+
+  Uri get githubReleaseBaseUri => Uri.parse(
+    'https://github.com/$githubOwner/$githubRepository/releases/download/',
+  );
+
+  bool isApprovedManifestUri(Uri actual) =>
+      _sameUri(actual, manifestUri) && _sameUri(actual, _approvedManifestUri);
+
+  bool isApprovedApkUrl(Uri actual) {
+    final segments = actual.pathSegments;
+    return actual.scheme.toLowerCase() == 'https' &&
+        actual.host.toLowerCase() == 'github.com' &&
+        !actual.hasPort &&
+        actual.userInfo.isEmpty &&
+        actual.query.isEmpty &&
+        actual.fragment.isEmpty &&
+        githubOwner.isNotEmpty &&
+        segments.length == 6 &&
+        segments[0] == githubOwner &&
+        segments[1] == githubRepository &&
+        segments[2] == 'releases' &&
+        segments[3] == 'download' &&
+        segments[4].isNotEmpty &&
+        segments[5].endsWith('.apk');
+  }
+
+  bool isApprovedApkRedirect(Uri actual) {
+    final host = actual.host.toLowerCase();
+    return actual.scheme.toLowerCase() == 'https' &&
+        actual.userInfo.isEmpty &&
+        !actual.hasPort &&
+        (host == 'github.com' ||
+            host == 'release-assets.githubusercontent.com' ||
+            host == 'objects.githubusercontent.com');
+  }
+
+  static bool _sameUri(Uri actual, Uri expected) =>
+      actual.scheme.toLowerCase() == expected.scheme.toLowerCase() &&
+      actual.host.toLowerCase() == expected.host.toLowerCase() &&
+      actual.port == expected.port &&
+      actual.userInfo.isEmpty &&
+      actual.query.isEmpty &&
+      actual.fragment.isEmpty &&
+      actual.path == expected.path;
+}
+
 class PublicQaUpdateManifest {
   const PublicQaUpdateManifest({
     required this.schemaVersion,
@@ -43,7 +102,7 @@ class PublicQaUpdateManifest {
 
   factory PublicQaUpdateManifest.fromJson(
     Map<String, dynamic> json, {
-    required Uri approvedBaseUri,
+    required PublicUpdateUrlPolicy urlPolicy,
   }) {
     final schemaVersion = _intValue(json['schemaVersion'], 'schemaVersion');
     if (schemaVersion != supportedSchemaVersion) {
@@ -71,7 +130,7 @@ class PublicQaUpdateManifest {
     }
 
     final apkUrl = Uri.tryParse(_stringValue(json['apkUrl'], 'apkUrl'));
-    if (apkUrl == null || !_isApprovedApkUrl(apkUrl, approvedBaseUri)) {
+    if (apkUrl == null || !urlPolicy.isApprovedApkUrl(apkUrl)) {
       throw const PublicUpdateValidationException('unapprovedApkUrl');
     }
 
@@ -138,21 +197,6 @@ class PublicQaUpdateManifest {
     'publishedAt': publishedAt.toUtc().toIso8601String(),
     'releaseNotes': releaseNotes,
   };
-
-  static bool _isApprovedApkUrl(Uri actual, Uri approvedBaseUri) {
-    final expectedPath = approvedBaseUri.path.endsWith('/')
-        ? approvedBaseUri.path
-        : '${approvedBaseUri.path}/';
-    final actualPort = actual.hasPort ? actual.port : 443;
-    final expectedPort = approvedBaseUri.hasPort ? approvedBaseUri.port : 443;
-    return actual.scheme.toLowerCase() == 'https' &&
-        actual.host.toLowerCase() == approvedBaseUri.host.toLowerCase() &&
-        actualPort == expectedPort &&
-        actual.query.isEmpty &&
-        actual.fragment.isEmpty &&
-        actual.path.startsWith(expectedPath) &&
-        actual.pathSegments.last.endsWith('.apk');
-  }
 
   static String _stringValue(Object? value, String field) {
     if (value is! String || value.trim().isEmpty) {

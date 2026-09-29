@@ -1,3 +1,5 @@
+import '../core/app_update/public_update_manifest.dart';
+
 enum RelioEnvironment { development, test, production }
 
 abstract final class RelioBuildInfo {
@@ -12,6 +14,10 @@ abstract final class RelioBuildInfo {
   static const publicUpdateBaseUrl = String.fromEnvironment(
     'RELIO_PUBLIC_UPDATE_BASE_URL',
     defaultValue: 'https://relio-17dc0.web.app/qa/',
+  );
+  static const publicUpdateGithubOwner = String.fromEnvironment(
+    'RELIO_PUBLIC_UPDATE_OWNER',
+    defaultValue: '',
   );
   static const environmentName = String.fromEnvironment(
     'RELIO_ENV',
@@ -48,4 +54,10 @@ abstract final class RelioBuildInfo {
 
   static Uri get publicUpdateManifestUri =>
       publicUpdateBaseUri.resolve('latest.json');
+
+  static PublicUpdateUrlPolicy get publicUpdateUrlPolicy =>
+      PublicUpdateUrlPolicy(
+        manifestUri: publicUpdateManifestUri,
+        githubOwner: publicUpdateGithubOwner,
+      );
 }

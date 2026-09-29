@@ -5,7 +5,7 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous release: `0.8.5+11` through Firebase App Distribution
-- Current milestone: `0.8.6+12` through public Firebase Hosting QA
+- Current milestone: `0.8.6+12` through the hybrid public QA channel
 - Drift schema: v4
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
@@ -19,6 +19,8 @@
 - Hosting site: `relio-17dc0`
 - Public QA URL: `https://relio-17dc0.web.app/qa/`
 - Public manifest: `https://relio-17dc0.web.app/qa/latest.json`
+- Public APK: authenticated-owner GitHub release asset in
+  `RELIO-Android-Updates`, tag `qa-v0.8.6-b12`
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
 
@@ -27,8 +29,10 @@
 - QA defaults to `PublicQaAppUpdateProvider` and fetches only `latest.json`.
 - Firebase App Distribution is retained behind an explicit fallback provider;
   public QA users are not asked to enroll or sign in.
-- Manifest validation gates schema, channel, package, versionCode, HTTPS
-  origin/path, SHA-256, size, release notes, and signing certificate.
+- Manifest validation gates schema, channel, package, versionCode, exact
+  GitHub owner/repository/release path, SHA-256, size, release notes, and
+  signing certificate. The manifest itself is fetched only from Firebase
+  Hosting.
 - APK verification gates package, exact higher versionCode, SHA-256, and the
   signer match against the installed QA application.
 - Android Package Installer receives a temporary `content://` URI only after
@@ -44,16 +48,17 @@
 - QA/PROD App Distribution SDK isolation: passed
 - DEV debug, QA debug, QA signed release, and PROD verification builds are
   required before the public release pipeline can deploy.
-- `scripts/release-public-qa.ps1` is the only public Hosting release entrypoint;
-  it deploys Hosting only and verifies the remote page, manifest, APK, and hash.
+- `scripts/release-public-qa.ps1` is the only public release entrypoint; it
+  verifies the signed APK, creates/verifies the GitHub release asset, deploys
+  Hosting metadata only, and verifies both remote origins.
 
 ## Deployment status
 
-Build 12 is prepared locally, but public deployment is **BLOCKED** by Firebase
+The earlier all-Firebase Build 12 deployment was **BLOCKED** by Firebase
 Hosting's Spark-plan restriction: executable APK files are forbidden. The
-Hosting deploy was not activated and the page, manifest, and APK URLs all
-returned 404 afterward. No billing upgrade or Firebase Storage fallback was
-performed.
+hybrid channel resolves that limitation by keeping the APK in GitHub Releases
+and deploying only page/manifest metadata to Hosting. No billing upgrade or
+Firebase Storage fallback is used.
 
 ## Physical boundary
 

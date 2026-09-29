@@ -35,12 +35,12 @@ abstract interface class PublicUpdateProvider {
 class PublicQaUpdateProvider implements PublicUpdateProvider {
   PublicQaUpdateProvider({
     required this.manifestUri,
-    required this.approvedBaseUri,
+    required this.urlPolicy,
     HttpClient? client,
   }) : _client = client ?? HttpClient();
 
   final Uri manifestUri;
-  final Uri approvedBaseUri;
+  final PublicUpdateUrlPolicy urlPolicy;
   final HttpClient _client;
 
   @override
@@ -50,6 +50,9 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
   Future<PublicQaUpdateManifest?> fetchLatest({
     required int currentBuild,
   }) async {
+    if (!urlPolicy.isApprovedManifestUri(manifestUri)) {
+      throw const PublicUpdateProviderException('manifestUrlNotApproved');
+    }
     final request = await _client.getUrl(manifestUri);
     request.followRedirects = false;
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
@@ -68,10 +71,7 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
       if (decoded is! Map<String, dynamic>) {
         throw const PublicUpdateValidationException('manifestNotObject');
       }
-      return PublicQaUpdateManifest.fromJson(
-        decoded,
-        approvedBaseUri: approvedBaseUri,
-      );
+      return PublicQaUpdateManifest.fromJson(decoded, urlPolicy: urlPolicy);
     } on PublicUpdateValidationException {
       rethrow;
     } on Object {
@@ -101,13 +101,10 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
     );
     IOSink? sink;
     try {
-      final request = await _client.getUrl(manifest.apkUrl);
-      request.followRedirects = false;
-      request.headers.set(
-        HttpHeaders.acceptHeader,
-        'application/vnd.android.package-archive',
-      );
-      final response = await request.close();
+      if (!urlPolicy.isApprovedApkUrl(manifest.apkUrl)) {
+        throw const PublicUpdateProviderException('unapprovedApkUrl');
+      }
+      final response = await _openApkResponse(manifest.apkUrl);
       if (response.statusCode != HttpStatus.ok) {
         await response.drain<void>();
         throw const PublicUpdateProviderException('downloadUnavailable');
@@ -156,6 +153,33 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
   }
 
   void close() => _client.close(force: true);
+
+  Future<HttpClientResponse> _openApkResponse(Uri initialUri) async {
+    var uri = initialUri;
+    for (var redirectCount = 0; redirectCount <= 5; redirectCount++) {
+      final request = await _client.getUrl(uri);
+      request.followRedirects = false;
+      request.headers.set(
+        HttpHeaders.acceptHeader,
+        'application/vnd.android.package-archive',
+      );
+      final response = await request.close();
+      if (response.statusCode < 300 || response.statusCode >= 400) {
+        return response;
+      }
+      final location = response.headers.value(HttpHeaders.locationHeader);
+      await response.drain<void>();
+      if (location == null || redirectCount == 5) {
+        throw const PublicUpdateProviderException('downloadRedirectFailed');
+      }
+      final nextUri = uri.resolve(location);
+      if (!urlPolicy.isApprovedApkRedirect(nextUri)) {
+        throw const PublicUpdateProviderException('unapprovedApkRedirect');
+      }
+      uri = nextUri;
+    }
+    throw const PublicUpdateProviderException('downloadRedirectFailed');
+  }
 }
 
 class PublicUpdateProviderException implements Exception {

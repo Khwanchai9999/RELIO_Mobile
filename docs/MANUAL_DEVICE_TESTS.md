@@ -188,10 +188,11 @@ These distribution steps are not claimed as manually completed by Codex.
 
 ## K1. Public Build 12 first-install baseline — DEFERRED
 
-After the automated Hosting deployment is verified:
+After the automated hybrid GitHub/Hosting deployment is verified:
 
-1. Open `https://relio-17dc0.web.app/qa/` on an Android phone. No Firebase
-   tester account or Google sign-in is required.
+1. Open `https://relio-17dc0.web.app/qa/` on an Android phone. The page links
+   to the exact GitHub release asset; no Firebase tester account or Google
+   sign-in is required.
 2. Download and install `RELIO Test` v0.8.6+12. If Android asks, allow the
    browser to install unknown apps and confirm Android Package Installer.
 3. Open RELIO Test and confirm the displayed version/build is `0.8.6+12`.

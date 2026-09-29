@@ -1,7 +1,7 @@
 {
   "hosting": {
     "site": "relio-17dc0",
-    "public": "public_update",
+    "public": "public_update/hosting",
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -18,15 +18,11 @@
         ]
       },
       {
-        "source": "/qa/*.apk",
+        "source": "/qa/index.html",
         "headers": [
           {
             "key": "Cache-Control",
-            "value": "public, max-age=31536000, immutable"
-          },
-          {
-            "key": "Content-Type",
-            "value": "application/vnd.android.package-archive"
+            "value": "public, max-age=300"
           }
         ]
       }

@@ -29,7 +29,7 @@ function Invoke-QualityStep {
     }
 }
 
-Write-Host 'RELIO Test deployment pipeline v0.8.5'
+Write-Host 'RELIO Test deployment pipeline v0.8.6'
 Write-Host 'Quality gate runs before any APK upload.'
 & "$PSScriptRoot\preflight.ps1" -RequireTestSigning
 
@@ -68,8 +68,10 @@ $defines = @(
     "--dart-define=RELIO_BUILD=$buildNumber"
 )
 
-if ($versionName -ne '0.8.5' -or [int]$buildNumber -lt 11) {
-    throw "TEST deployment requires version 0.8.5+11 or newer; found $version."
+if (($versionName -eq '0.8.5' -and [int]$buildNumber -lt 11) -or
+    ($versionName -eq '0.8.6' -and [int]$buildNumber -lt 12) -or
+    $versionName -notin @('0.8.5', '0.8.6')) {
+    throw "TEST deployment requires the maintained 0.8.5+11 or 0.8.6+12 baseline; found $version."
 }
 
 # ขั้นนี้ตั้งใจรัน quality gate ก่อน build และ upload

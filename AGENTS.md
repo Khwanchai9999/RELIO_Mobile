@@ -96,11 +96,14 @@ into it.
   delivery channel; Supabase remains the RELIO backend.
 - USB smoke testing may occur before distribution. Do not implement a custom,
   silent, or insecure APK self-updater.
-- Public Android QA updates use Firebase Hosting metadata and a versioned APK.
+- Public Android QA updates use Firebase Hosting metadata and an immutable
+  GitHub Releases APK asset. Firebase Hosting must never contain an APK.
   Only QA may request user-controlled unknown-app installation; PROD must not
   contain `REQUEST_INSTALL_PACKAGES` or public QA update behavior.
-- The public updater validates HTTPS origin/path, package, versionCode, SHA-256,
-  APK signer, and Android Package Installer handoff before installation.
+- The public updater fetches `latest.json` only from the approved Firebase
+  Hosting URL and validates an exact authenticated-owner GitHub release asset,
+  HTTPS redirects, package, versionCode, SHA-256, APK signer, and Android
+  Package Installer handoff before installation.
 - Firebase App Distribution remains an internal/fallback QA channel and is not
   required for ordinary public QA downloads.
 - Preserve Thai copy and accessibility labels when changing UI.
@@ -134,9 +137,10 @@ with `scripts/verify-qa-update-isolation.ps1` before QA deployment.
 
 `scripts/deploy-test.ps1` preserves the Firebase App Distribution fallback and
 resolves the QA App ID from the verified config when `FIREBASE_APP_ID` is
-absent. `scripts/release-public-qa.ps1` deploys only Firebase Hosting for the
-confirmed `relio-17dc0` site and verifies the remote manifest/APK. Deployment
-must never bump the version implicitly.
+absent. `scripts/release-public-qa.ps1` verifies the authenticated GitHub
+owner/repository, creates or reuses the immutable Build 12 release asset, then
+deploys only metadata to the confirmed `relio-17dc0` Hosting site and verifies
+both public origins. Deployment must never bump the version implicitly.
 
 Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if

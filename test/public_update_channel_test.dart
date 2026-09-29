@@ -10,23 +10,23 @@ import 'package:relio_mobile/core/app_update/public_update_provider.dart';
 const _signer =
     'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
 
-PublicQaUpdateManifest _manifest({int versionCode = 12}) =>
-    PublicQaUpdateManifest(
-      schemaVersion: 1,
-      channel: 'qa-public',
-      packageName: 'com.relio.relio_mobile.test',
-      versionName: '0.8.6',
-      versionCode: versionCode,
-      apkUrl: Uri.parse(
-        'https://relio-17dc0.web.app/qa/relio-test-0.8.6+$versionCode.apk',
-      ),
-      sha256:
-          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      sizeBytes: 10,
-      signingCertSha256: _signer,
-      publishedAt: DateTime.utc(2026, 9, 29),
-      releaseNotes: const ['Test release'],
-    );
+PublicQaUpdateManifest _manifest({
+  int versionCode = 12,
+}) => PublicQaUpdateManifest(
+  schemaVersion: 1,
+  channel: 'qa-public',
+  packageName: 'com.relio.relio_mobile.test',
+  versionName: '0.8.6',
+  versionCode: versionCode,
+  apkUrl: Uri.parse(
+    'https://github.com/example-owner/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+$versionCode.apk',
+  ),
+  sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  sizeBytes: 10,
+  signingCertSha256: _signer,
+  publishedAt: DateTime.utc(2026, 9, 29),
+  releaseNotes: const ['Test release'],
+);
 
 class _FakeClock implements AppUpdateClock {
   DateTime value;

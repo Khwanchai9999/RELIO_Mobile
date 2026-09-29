@@ -2,13 +2,15 @@
 
 ## Purpose
 
-RELIO Test `com.relio.relio_mobile.test` uses Firebase Hosting as the normal
-public QA first-install and update channel. The confirmed site is
-`relio-17dc0`, with the public page at:
+RELIO Test `com.relio.relio_mobile.test` uses a hybrid public QA channel. The
+confirmed Firebase Hosting site `relio-17dc0` serves only the page and small
+manifest; the signed APK is an immutable asset in the authenticated owner's
+public `RELIO-Android-Updates` GitHub repository:
 
 ```text
 https://relio-17dc0.web.app/qa/
 https://relio-17dc0.web.app/qa/latest.json
+https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk
 ```
 
 Ordinary testers do not need Firebase App Distribution enrollment, a Firebase
@@ -45,7 +47,7 @@ the APK is not downloaded automatically.
   "packageName": "com.relio.relio_mobile.test",
   "versionName": "0.8.6",
   "versionCode": 12,
-  "apkUrl": "https://relio-17dc0.web.app/qa/relio-test-0.8.6+12.apk",
+  "apkUrl": "https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk",
   "sha256": "64 lowercase hexadecimal characters",
   "sizeBytes": 123,
   "signingCertSha256": "64 hexadecimal characters",
@@ -54,11 +56,14 @@ the APK is not downloaded automatically.
 }
 ```
 
-The parser rejects unsupported schema versions, wrong channel/package, invalid
-version values, non-HTTPS URLs, hosts or paths outside the approved Hosting
-`/qa/` origin, malformed hashes/fingerprints, unreasonable file sizes, bad
-timestamps, and malformed release notes. An update is offered only when
-`versionCode` is greater than the installed build.
+The provider fetches the manifest only from the exact approved Firebase
+Hosting URL. The parser rejects unsupported schema versions, wrong
+channel/package, invalid version values, HTTP, wrong GitHub owner/repository,
+wrong `releases/download` path, query/fragment/user-info, malformed
+hashes/fingerprints, unreasonable file sizes, bad timestamps, and malformed
+release notes. APK downloads may follow only HTTPS GitHub release/CDN redirects.
+An update is offered only when `versionCode` is greater than the installed
+build.
 
 ## Download and verification flow
 
@@ -105,28 +110,30 @@ From `D:\RELIO_Mobile`, use:
 .\scripts\release-public-qa.ps1
 ```
 
-The script derives its root from `$PSScriptRoot`, requires `0.8.6+12`, runs
-format/analyze/tests, checks QA/PROD isolation, builds the signed QA APK,
-verifies package/version/signing, generates `public_update/qa/latest.json` and
-the download page, then deploys only:
+The script derives its root from `$PSScriptRoot`, requires `0.8.6+12`, verifies
+Firebase and GitHub CLI identity, runs format/analyze/tests, checks QA/PROD
+isolation, builds the signed QA APK, verifies package/version/signing, creates
+or reuses the immutable GitHub release asset, and generates
+`public_update/hosting/qa/latest.json` and the download page. It then deploys
+only:
 
 ```text
 firebase deploy --only hosting:relio-17dc0 --project relio-17dc0
 ```
 
-It verifies the public page, manifest, APK URL, and remote APK SHA-256 after
-deployment. `public_update/` is generated and ignored; the template and
-Firebase Hosting configuration are maintained in the repository. Hosting
-headers keep `latest.json` non-cacheable and versioned APKs immutable.
+It verifies the public page and manifest on Hosting, then downloads the GitHub
+asset remotely and checks size, SHA-256, package, version, and signer.
+`public_update/` and `dist/` are generated and ignored; the repository template
+and Firebase Hosting configuration are maintained in source control. Hosting
+contains no `.apk` files, so Firebase Spark billing is sufficient and no
+Firebase Storage or billing upgrade is used.
 
-### Current Hosting blocker
+### Historical all-Firebase attempt
 
-The first live deployment was intentionally stopped by Firebase with:
-`Executable files are forbidden on the Spark billing plan`. Firebase Hosting
-did not activate the page, manifest, or APK; all three public URLs remain 404.
-Do not upgrade billing automatically and do not switch to Firebase Storage or
-another Firebase service. The user must explicitly choose an approved
-hosting/billing path before this public channel can become live.
+The earlier all-Firebase deployment attempt was stopped with `Executable files
+are forbidden on the Spark billing plan`. It remains historical; the hybrid
+pipeline keeps the APK in GitHub Releases and deploys Hosting metadata only.
+Do not upgrade billing or switch to Firebase Storage automatically.
 
 ## Manual boundary
 

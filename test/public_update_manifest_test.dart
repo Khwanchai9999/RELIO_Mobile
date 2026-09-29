@@ -1,7 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/app_update/public_update_manifest.dart';
 
-const _baseUri = 'https://relio-17dc0.web.app/qa/';
+const _manifestUri = 'https://relio-17dc0.web.app/qa/latest.json';
+const _githubBaseUri =
+    'https://github.com/example-owner/RELIO-Android-Updates/releases/download/';
 const _sha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const _signer =
     'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
@@ -12,7 +14,7 @@ Map<String, dynamic> _validJson() => {
   'packageName': 'com.relio.relio_mobile.test',
   'versionName': '0.8.6',
   'versionCode': 12,
-  'apkUrl': '${_baseUri}relio-test-0.8.6+12.apk',
+  'apkUrl': '${_githubBaseUri}qa-v0.8.6-b12/relio-test-0.8.6+12.apk',
   'sha256': _sha,
   'sizeBytes': 1024,
   'signingCertSha256': _signer,
@@ -21,10 +23,15 @@ Map<String, dynamic> _validJson() => {
 };
 
 void main() {
+  final urlPolicy = PublicUpdateUrlPolicy(
+    manifestUri: Uri.parse(_manifestUri),
+    githubOwner: 'example-owner',
+  );
+
   test('parses the supported public QA manifest schema', () {
     final manifest = PublicQaUpdateManifest.fromJson(
       _validJson(),
-      approvedBaseUri: Uri.parse(_baseUri),
+      urlPolicy: urlPolicy,
     );
 
     expect(manifest.versionCode, 12);
@@ -41,10 +48,7 @@ void main() {
     ]) {
       final json = _validJson()..[change.key] = change.value;
       expect(
-        () => PublicQaUpdateManifest.fromJson(
-          json,
-          approvedBaseUri: Uri.parse(_baseUri),
-        ),
+        () => PublicQaUpdateManifest.fromJson(json, urlPolicy: urlPolicy),
         throwsA(
           isA<PublicUpdateValidationException>().having(
             (error) => error.code,
@@ -56,18 +60,35 @@ void main() {
     }
   });
 
-  test('rejects HTTP, unapproved host, and unapproved path URLs', () {
+  test('accepts only the exact GitHub release asset URL', () {
+    final accepted = _validJson();
+    expect(
+      PublicQaUpdateManifest.fromJson(accepted, urlPolicy: urlPolicy).apkUrl,
+      Uri.parse('${_githubBaseUri}qa-v0.8.6-b12/relio-test-0.8.6+12.apk'),
+    );
+  });
+
+  test('approves only the fixed Firebase Hosting manifest URL', () {
+    expect(urlPolicy.isApprovedManifestUri(Uri.parse(_manifestUri)), isTrue);
+    expect(
+      urlPolicy.isApprovedManifestUri(
+        Uri.parse('https://example.com/qa/latest.json'),
+      ),
+      isFalse,
+    );
+  });
+
+  test('rejects HTTP, unapproved owner/repository, and unapproved paths', () {
     for (final url in [
-      'http://relio-17dc0.web.app/qa/relio-test-0.8.6+12.apk',
-      'https://example.com/qa/relio-test-0.8.6+12.apk',
-      'https://relio-17dc0.web.app/other/relio-test-0.8.6+12.apk',
+      'http://github.com/example-owner/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk',
+      'https://github.com/other-owner/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk',
+      'https://github.com/example-owner/other/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk',
+      'https://github.com/example-owner/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk?download=1',
+      'https://relio-17dc0.web.app/qa/relio-test-0.8.6+12.apk',
     ]) {
       final json = _validJson()..['apkUrl'] = url;
       expect(
-        () => PublicQaUpdateManifest.fromJson(
-          json,
-          approvedBaseUri: Uri.parse(_baseUri),
-        ),
+        () => PublicQaUpdateManifest.fromJson(json, urlPolicy: urlPolicy),
         throwsA(
           isA<PublicUpdateValidationException>().having(
             (error) => error.code,
@@ -93,10 +114,7 @@ void main() {
     ]) {
       final json = _validJson()..[change.key] = change.value;
       expect(
-        () => PublicQaUpdateManifest.fromJson(
-          json,
-          approvedBaseUri: Uri.parse(_baseUri),
-        ),
+        () => PublicQaUpdateManifest.fromJson(json, urlPolicy: urlPolicy),
         throwsA(
           isA<PublicUpdateValidationException>().having(
             (error) => error.code,
