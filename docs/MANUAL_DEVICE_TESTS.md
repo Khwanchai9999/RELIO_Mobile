@@ -186,27 +186,17 @@ Before a TEST upload, a developer should:
 
 These distribution steps are not claimed as manually completed by Codex.
 
-## K1. Public Build 12 → Build 13 in-app OTA — PENDING PHYSICAL TEST
+## K1. Public Build 12 → Build 16 in-app OTA — PENDING PHYSICAL TEST
 
-Build 12 is already installed on two Android phones. After the automated
-Build 13 GitHub/Hosting deployment is verified:
-
-1. Open `https://relio-17dc0.web.app/qa/` on an Android phone. The page links
-   to the exact GitHub release asset; no Firebase tester account or Google
-   sign-in is required.
-2. On a phone still running `RELIO Test` v0.8.6+12, confirm local Drift/SQLite
-   data is present before updating.
-3. Press `ตรวจสอบอัปเดต`, review Build 13 release notes, and choose the explicit
-   download/install actions. If Android asks, allow the app to install unknown
-   apps and confirm Android Package Installer.
-4. Confirm the installed version/build is `0.8.6+13`, the app data remains
-   present, and the app still reports the QA channel.
-5. Record any OEM/Play Protect block or installer error exactly; do not bypass
-   it with ADB or an accessibility click.
-
-Automated verification covers the manifest, hash, package, version, signer,
-permission, and PROD isolation. Physical status remains **PENDING PHYSICAL
-TEST** until this in-app flow is completed.
+The user confirmed Build 15 on Realme reports “up to date” against public Build
+13. The latest ADB check found no connected devices, so Huawei's installed
+artifact has not been independently verified; the user intends to preserve
+Huawei Build 12 as the OTA baseline. Build 16 is publicly available and its
+live manifest/page, APK hash, package, version, and signer were verified. No
+phone was modified. The user will manually open RELIO on Huawei Build 12 and
+check for an update from Settings. Automated verification covers the live
+manifest parser, hash, package, version, signer, permission, and PROD isolation,
+but cannot establish installed phone state or OEM installer behavior.
 
 ## L. v0.8 Relay A→B→C — DEFERRED
 

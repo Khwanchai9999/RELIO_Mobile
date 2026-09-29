@@ -143,6 +143,58 @@ void main() {
   );
 
   test(
+    'Build 16 manifest parses and compares against builds 12, 15, and 16',
+    () async {
+      const signer =
+          'a5b3b13122d6a8cdbef9f933b4c6fdcc292ba7345649f9f5fe8632deaff62b1d';
+      final policy = PublicUpdateUrlPolicy(
+        manifestUri: Uri.parse('https://relio-17dc0.web.app/qa/latest.json'),
+        githubOwner: 'Khwanchai9999',
+      );
+      final manifest = PublicQaUpdateManifest.fromJson({
+        'schemaVersion': 1,
+        'channel': 'qa-public',
+        'packageName': 'com.relio.relio_mobile.test',
+        'versionName': '0.8.6',
+        'versionCode': 16,
+        'apkUrl':
+            'https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/download/qa-v0.8.6-b16/relio-test-0.8.6+16.apk',
+        'sha256':
+            '356115053e6083a438646c9fa6f4ba74964308980fffc9bbd34fab2716b5a309',
+        'sizeBytes': 64112805,
+        'signingCertSha256': signer,
+        'publishedAt': '2026-09-29T00:00:00Z',
+        'releaseNotes': ['RELIO Test v0.8.6 Build 16'],
+      }, urlPolicy: policy);
+
+      for (final entry in {
+        12: AppUpdateStatus.updateAvailable,
+        15: AppUpdateStatus.updateAvailable,
+        16: AppUpdateStatus.noUpdate,
+      }.entries) {
+        final service = AppUpdateService(
+          provider: _FakeProvider(
+            AppUpdateProviderResult(
+              status: AppUpdateStatus.updateAvailable,
+              manifest: manifest,
+            ),
+          ),
+          enabled: true,
+          environment: RelioEnvironment.test,
+          currentBuild: '0.8.6+${entry.key}',
+        );
+
+        expect(
+          (await service.checkForUpdate(manual: true)).status,
+          entry.value,
+          reason: 'installed versionCode ${entry.key}',
+        );
+        service.dispose();
+      }
+    },
+  );
+
+  test(
     'automatic checks use the cooldown while manual checks bypass it',
     () async {
       final provider = _FakeProvider(

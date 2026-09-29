@@ -7,13 +7,15 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
+. (Join-Path $PSScriptRoot 'public-qa-config.ps1')
+$publicQaUpdateConfig = Get-RelioPublicQaUpdateConfig
 $projectId = 'relio-17dc0'
-$expectedVersion = '0.8.6+13'
+$expectedVersion = '0.8.6+16'
 $expectedPackage = 'com.relio.relio_mobile.test'
-$approvedManifestBaseUrl = 'https://relio-17dc0.web.app/qa/'
-$githubRepositoryName = 'RELIO-Android-Updates'
-$releaseTag = 'qa-v0.8.6-b13'
-$releaseTitle = 'RELIO Test v0.8.6 Build 13'
+$githubRepositoryName = $publicQaUpdateConfig.Repository
+$releaseTag = 'qa-v0.8.6-b16'
+$releaseTitle = 'RELIO Test v0.8.6 Build 16'
+$expectedQaAppId = '1:789862464099:android:a26ab040a4fdbe1a899656'
 
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the active workspace: $projectRoot"
@@ -177,7 +179,7 @@ $qaClient = @($config.client | Where-Object {
     }) | Select-Object -First 1
 $qaAppId = [string]$qaClient.client_info.mobilesdk_app_id
 if (-not $qaClient -or $config.project_info.project_id -ne $projectId -or
-    $qaAppId -notmatch '^1:\d+:android:[A-Za-z0-9_-]+$') {
+    $qaAppId -ne $expectedQaAppId) {
     throw 'QA Firebase configuration does not match the approved project/package/App ID.'
 }
 Write-Host "Verified QA Firebase project $projectId and App ID $qaAppId for $expectedPackage."
@@ -189,6 +191,9 @@ if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI is not authenticated. Run gh auth l
 $githubOwner = (& $gh.Source api user --jq .login 2>$null).Trim()
 if ($LASTEXITCODE -ne 0 -or $githubOwner -notmatch '^[A-Za-z0-9-]+$') {
     throw 'Could not determine the authenticated GitHub owner without exposing credentials.'
+}
+if ($githubOwner -ne $publicQaUpdateConfig.Owner) {
+    throw 'Authenticated GitHub owner does not match the canonical public QA updater configuration.'
 }
 $githubRepository = "$githubOwner/$githubRepositoryName"
 $githubReleaseBaseUrl = "https://github.com/$githubOwner/$githubRepositoryName/releases/download/"
@@ -222,8 +227,10 @@ $defines = @(
     '--dart-define=RELIO_ENV=test',
     "--dart-define=RELIO_VERSION=$versionName",
     "--dart-define=RELIO_BUILD=$buildNumber",
-    "--dart-define=RELIO_PUBLIC_UPDATE_BASE_URL=$approvedManifestBaseUrl",
-    "--dart-define=RELIO_PUBLIC_UPDATE_OWNER=$githubOwner"
+    "--dart-define=RELIO_PUBLIC_UPDATE_MANIFEST_URL=$($publicQaUpdateConfig.ManifestUrl)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_OWNER=$($publicQaUpdateConfig.Owner)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_REPO=$($publicQaUpdateConfig.Repository)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_CHANNEL=$($publicQaUpdateConfig.Channel)"
 )
 
 Invoke-CheckedStep 'Checking dart format...' {
@@ -348,7 +355,7 @@ if (-not $NoUpload) {
 
 $manifest = [ordered]@{
     schemaVersion = 1
-    channel = 'qa-public'
+    channel = $publicQaUpdateConfig.Channel
     packageName = $expectedPackage
     versionName = $versionName
     versionCode = $buildNumber

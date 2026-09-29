@@ -13,6 +13,8 @@ $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the active workspace: $projectRoot"
 }
+. (Join-Path $PSScriptRoot 'public-qa-config.ps1')
+$publicQaUpdateConfig = Get-RelioPublicQaUpdateConfig
 if (-not $env:JAVA_HOME) {
     $androidStudioJava = 'C:\Program Files\Android\Android Studio\jbr\bin\java.exe'
     if (Test-Path -LiteralPath $androidStudioJava) {
@@ -65,13 +67,17 @@ $resolvedFirebaseAppId = if ($providedAppId) { $providedAppId } else { $qaAppIdF
 $defines = @(
     "--dart-define=RELIO_ENV=test",
     "--dart-define=RELIO_VERSION=$versionName",
-    "--dart-define=RELIO_BUILD=$buildNumber"
+    "--dart-define=RELIO_BUILD=$buildNumber",
+    "--dart-define=RELIO_PUBLIC_UPDATE_MANIFEST_URL=$($publicQaUpdateConfig.ManifestUrl)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_OWNER=$($publicQaUpdateConfig.Owner)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_REPO=$($publicQaUpdateConfig.Repository)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_CHANNEL=$($publicQaUpdateConfig.Channel)"
 )
 
 if (($versionName -eq '0.8.5' -and [int]$buildNumber -lt 11) -or
     ($versionName -eq '0.8.6' -and [int]$buildNumber -lt 13) -or
     $versionName -notin @('0.8.5', '0.8.6')) {
-    throw "TEST deployment requires the maintained 0.8.5+11 or 0.8.6+13 baseline; found $version."
+    throw "TEST deployment requires the maintained 0.8.5+11 or 0.8.6+13-or-newer baseline; found $version."
 }
 
 # ขั้นนี้ตั้งใจรัน quality gate ก่อน build และ upload

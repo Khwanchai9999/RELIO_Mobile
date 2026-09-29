@@ -2,6 +2,7 @@
 *.class
 *.log
 relio-update-runtime.txt
+relio-build14-update-runtime.txt
 *.pyc
 *.swp
 .DS_Store

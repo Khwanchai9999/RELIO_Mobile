@@ -1,4 +1,5 @@
 import '../core/app_update/public_update_manifest.dart';
+import '../core/app_update/public_qa_build_config.dart';
 
 enum RelioEnvironment { development, test, production }
 
@@ -11,17 +12,32 @@ abstract final class RelioBuildInfo {
     'RELIO_BUILD',
     defaultValue: '11',
   );
-  static const publicUpdateBaseUrl = String.fromEnvironment(
-    'RELIO_PUBLIC_UPDATE_BASE_URL',
-    defaultValue: 'https://relio-17dc0.web.app/qa/',
+  static const publicUpdateManifestUrl = String.fromEnvironment(
+    'RELIO_PUBLIC_UPDATE_MANIFEST_URL',
+    defaultValue: '',
   );
   static const publicUpdateGithubOwner = String.fromEnvironment(
     'RELIO_PUBLIC_UPDATE_OWNER',
     defaultValue: '',
   );
+  static const publicUpdateGithubRepository = String.fromEnvironment(
+    'RELIO_PUBLIC_UPDATE_REPO',
+    defaultValue: '',
+  );
+  static const publicUpdateChannel = String.fromEnvironment(
+    'RELIO_PUBLIC_UPDATE_CHANNEL',
+    defaultValue: '',
+  );
   static const environmentName = String.fromEnvironment(
     'RELIO_ENV',
     defaultValue: 'development',
+  );
+  static const publicQaUpdateConfig = PublicQaBuildConfig(
+    enabled: environmentName == 'test',
+    manifestUrl: publicUpdateManifestUrl,
+    githubOwner: publicUpdateGithubOwner,
+    githubRepository: publicUpdateGithubRepository,
+    channel: publicUpdateChannel,
   );
 
   static RelioEnvironment get environment => switch (environmentName) {
@@ -50,14 +66,13 @@ abstract final class RelioBuildInfo {
 
   static String get buildLabel => '$versionName+$buildNumber';
 
-  static Uri get publicUpdateBaseUri => Uri.parse(publicUpdateBaseUrl);
-
-  static Uri get publicUpdateManifestUri =>
-      publicUpdateBaseUri.resolve('latest.json');
+  static Uri get publicUpdateManifestUri => Uri.parse(publicUpdateManifestUrl);
 
   static PublicUpdateUrlPolicy get publicUpdateUrlPolicy =>
       PublicUpdateUrlPolicy(
         manifestUri: publicUpdateManifestUri,
         githubOwner: publicUpdateGithubOwner,
+        githubRepository: publicUpdateGithubRepository,
+        channel: publicUpdateChannel,
       );
 }

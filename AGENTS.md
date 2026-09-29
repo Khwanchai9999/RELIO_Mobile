@@ -104,6 +104,11 @@ into it.
   Hosting URL and validates an exact authenticated-owner GitHub release asset,
   HTTPS redirects, package, versionCode, SHA-256, APK signer, and Android
   Package Installer handoff before installation.
+- QA public updater builds must load the shared non-secret configuration from
+  `scripts/public-qa-config.ps1` and pass its manifest URL, GitHub owner,
+  repository, and channel as `dart-define` values. The Dart compile-time guard
+  must reject QA builds with missing or unapproved values; DEV/PROD remain
+  buildable without these QA-only values.
 - Firebase App Distribution remains an internal/fallback QA channel and is not
   required for ordinary public QA downloads.
 - Preserve Thai copy and accessibility labels when changing UI.

@@ -103,6 +103,13 @@ The machine check is:
 
 ## Release and Hosting pipeline
 
+The public updater build settings have one canonical source in
+`scripts/public-qa-config.ps1`: manifest URL, GitHub owner, repository, and
+channel. Both `deploy-test.ps1` and `release-public-qa.ps1` pass all four values
+to Flutter. The Dart compile-time guard rejects QA builds that omit or change a
+required value before producing an APK. DEV and PROD do not require these
+QA-only values.
+
 From `D:\RELIO_Mobile`, use:
 
 ```powershell
@@ -140,8 +147,13 @@ Do not upgrade billing or switch to Firebase Storage automatically.
 Automated tests prove manifest validation, provider selection, cooldown,
 offline/error mapping, download failure handling, APK metadata/signer gates,
 and install permission states. They do not prove OEM Android installer behavior.
-The physical Build 12 first-install baseline is complete on two Android phones.
-The remaining manual boundary is the Build 12 → Build 13 OTA verification:
-open RELIO Test on a phone still running Build 12 and tap `ตรวจสอบอัปเดต`.
-Confirm local data remains present and Android shows its normal user-confirmed
-installer flow. Do not ADB-install Build 13 or start v0.9.
+The public Build 12 APK matches its known SHA-256 and its compiled updater
+contains the expected owner, manifest URL, repository, and channel. Huawei's
+installed APK could not be inspected because no ADB device was connected.
+Huawei is intended to remain on Build 12, but its installed artifact could not
+be checked because no ADB device was connected. The user confirmed Realme
+Build 15 reports “up to date” against public Build 13. Build 16 is now
+published; its GitHub asset, live Hosting manifest and page, and production
+parser version gates were verified. Hosting deployed exactly two metadata/page
+files and no APK. The Build 12 → Build 16 OTA test remains pending physical
+verification.

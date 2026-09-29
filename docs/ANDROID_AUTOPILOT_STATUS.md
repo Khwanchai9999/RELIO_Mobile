@@ -62,10 +62,11 @@ Firebase Storage fallback is used.
 
 ## Physical boundary
 
-The automated work does not claim OEM Android installer behavior. Build 12 is
-already the physical baseline on two Android phones. The next manual action is
-to open RELIO Test on a phone still running Build 12 and tap
-`ตรวจสอบอัปเดต`, then confirm the user-controlled download/install flow and
-that local data remains present. Physical status:
-**Build 12 → Build 13 in-app OTA: PENDING PHYSICAL TEST**. Do not ADB-install
-Build 13 or start v0.9.
+The automated work does not claim OEM Android installer behavior. The user
+confirmed Build 15 on Realme reports “up to date” against public Build 13,
+validating the corrected updater configuration on-device. The latest ADB check
+found no connected devices, so Huawei's installed package and APK hash remain
+unverified; Huawei is intended to remain on Build 12. Build 16 is published
+and its live manifest, page, APK hash, package, version, and signer were
+verified. No phone was modified. Physical status:
+**Build 12 → Build 16 in-app OTA: PENDING PHYSICAL TEST**.

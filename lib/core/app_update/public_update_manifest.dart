@@ -17,15 +17,20 @@ class PublicUpdateUrlPolicy {
   const PublicUpdateUrlPolicy({
     required this.manifestUri,
     required this.githubOwner,
+    this.githubRepository = defaultGithubRepository,
+    this.channel = defaultChannel,
   });
 
-  static const githubRepository = 'RELIO-Android-Updates';
+  static const defaultGithubRepository = 'RELIO-Android-Updates';
+  static const defaultChannel = 'qa-public';
   static final _approvedManifestUri = Uri.parse(
     'https://relio-17dc0.web.app/qa/latest.json',
   );
 
   final Uri manifestUri;
   final String githubOwner;
+  final String githubRepository;
+  final String channel;
 
   Uri get githubReleaseBaseUri => Uri.parse(
     'https://github.com/$githubOwner/$githubRepository/releases/download/',
@@ -88,7 +93,7 @@ class PublicQaUpdateManifest {
   });
 
   static const supportedSchemaVersion = 1;
-  static const expectedChannel = 'qa-public';
+  static const expectedChannel = PublicUpdateUrlPolicy.defaultChannel;
   static const expectedPackageName = 'com.relio.relio_mobile.test';
   static const maxApkSizeBytes = 200 * 1024 * 1024;
 
@@ -115,7 +120,7 @@ class PublicQaUpdateManifest {
       throw const PublicUpdateValidationException('unsupportedSchema');
     }
     final channel = _stringValue(json['channel'], 'channel');
-    if (channel != expectedChannel) {
+    if (channel != urlPolicy.channel) {
       throw const PublicUpdateValidationException('wrongChannel');
     }
     final packageName = _stringValue(json['packageName'], 'packageName');

@@ -140,9 +140,11 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current public QA build is version `0.8.6+13`; production remains reserved
-as `com.relio.relio_mobile`. Build 13 is published for physical Build 12 →
-Build 13 in-app OTA verification; do not ADB-install it over the baseline.
+The current public QA build is version `0.8.6+16`; production remains reserved
+as `com.relio.relio_mobile`. Build 13 remains immutable history. Build 15
+verified QA updater configuration parity locally and was confirmed on Realme.
+Build 16 is publicly available for physical in-app OTA verification; no phone
+was modified during publication.
 
 ## Public QA distribution and wireless updates (v0.8.6)
 
@@ -174,6 +176,9 @@ The real QA Firebase config is
 only as QA configuration. No Firebase Auth, Firestore, Storage, or Analytics
 SDK is added; Supabase remains the cloud backend. See
 [docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
+Both QA build pipelines use `scripts/public-qa-config.ps1` as the canonical
+source for the manifest URL, GitHub owner/repository, and update channel.
+Missing or unapproved QA updater values fail at compile time.
 
 The intended public first-install URL is `https://relio-17dc0.web.app/qa/`.
 Ordinary download follows the exact authenticated owner's public
