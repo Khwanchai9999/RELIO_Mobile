@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/environment.dart';
 import 'app_update_installer.dart';
+import 'public_update_errors.dart';
 import 'public_update_manifest.dart';
 import 'public_update_provider.dart';
 
@@ -86,9 +87,11 @@ class PublicQaAppUpdateProvider implements AppUpdateProvider {
   PublicQaAppUpdateProvider({
     required Uri manifestUri,
     required PublicUpdateUrlPolicy urlPolicy,
+    bool diagnosticLogging = false,
   }) : _provider = PublicQaUpdateProvider(
          manifestUri: manifestUri,
          urlPolicy: urlPolicy,
+         diagnosticLogging: diagnosticLogging,
        );
 
   final PublicQaUpdateProvider _provider;
@@ -258,6 +261,8 @@ class AppUpdateService extends ChangeNotifier {
                ? PublicQaAppUpdateProvider(
                    manifestUri: RelioBuildInfo.publicUpdateManifestUri,
                    urlPolicy: RelioBuildInfo.publicUpdateUrlPolicy,
+                   diagnosticLogging:
+                       RelioBuildInfo.environment == RelioEnvironment.test,
                  )
                : FirebaseAppDistributionUpdateProvider(gateway: gateway)),
        _installer = installer ?? MethodChannelAppUpdateInstaller(),
@@ -267,6 +272,7 @@ class AppUpdateService extends ChangeNotifier {
            const PathProviderAppUpdateTemporaryDirectory(),
        _enabled =
            enabled ?? (RelioBuildInfo.environment == RelioEnvironment.test),
+       _diagnosticLogging = RelioBuildInfo.environment == RelioEnvironment.test,
        _snapshot = AppUpdateSnapshot.initial(
          currentBuild: currentBuild ?? RelioBuildInfo.buildLabel,
          environment: (environment ?? RelioBuildInfo.environment).name,
@@ -277,6 +283,7 @@ class AppUpdateService extends ChangeNotifier {
   final AppUpdateClock _clock;
   final AppUpdateTemporaryDirectory _temporaryDirectory;
   final bool _enabled;
+  final bool _diagnosticLogging;
   final Duration cooldown;
   final _changes = StreamController<AppUpdateSnapshot>.broadcast();
   AppUpdateSnapshot _snapshot;
@@ -325,6 +332,10 @@ class AppUpdateService extends ChangeNotifier {
         environment: _snapshot.environment,
       ),
     );
+    _log(
+      'update check start provider=${_provider.runtimeType} '
+      'installedVersionCode=$_currentBuildCode',
+    );
     final operation = _checkProvider();
     _operation = operation;
     return operation.whenComplete(() => _operation = null);
@@ -353,18 +364,44 @@ class AppUpdateService extends ChangeNotifier {
         manifest: manifest,
         code: result.code,
       );
+      _log(
+        'final status=${next.status} '
+        'remoteVersionCode=${manifest?.versionCode ?? 'none'} '
+        'code=${next.code ?? 'none'}',
+      );
       _setSnapshot(next);
       return next;
-    } on PublicUpdateValidationException catch (error) {
-      return _setError(error.code);
-    } on PublicUpdateProviderException catch (error) {
-      return _setError(error.code);
-    } on Object {
-      return _setError(
-        _provider is FirebaseAppDistributionUpdateProvider
-            ? 'gatewayError'
-            : 'providerError',
+    } on PublicUpdateValidationException catch (error, stackTrace) {
+      _logError(error.classification, error, stackTrace);
+      return _setError(error.classification);
+    } on PublicUpdateProviderException catch (error, stackTrace) {
+      _logError(
+        error.code,
+        error.cause ?? error,
+        error.stackTrace ?? stackTrace,
       );
+      return _setError(error.code);
+    } on Object catch (error, stackTrace) {
+      final code = _provider is FirebaseAppDistributionUpdateProvider
+          ? 'gatewayError'
+          : classifyPublicUpdateError(error);
+      _logError(code, error, stackTrace);
+      return _setError(code);
+    }
+  }
+
+  void _log(String message) {
+    if (_diagnosticLogging) debugPrint('[RELIO][QA_UPDATE] $message');
+  }
+
+  void _logError(String code, Object error, StackTrace stackTrace) {
+    if (!_diagnosticLogging) return;
+    debugPrint(
+      '[RELIO][QA_UPDATE] error code=$code '
+      'type=${error.runtimeType} message=$error',
+    );
+    if (code == PublicUpdateErrorCode.unexpectedError) {
+      debugPrint('[RELIO][QA_UPDATE] stackTrace=$stackTrace');
     }
   }
 

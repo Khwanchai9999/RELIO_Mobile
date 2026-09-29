@@ -4,7 +4,9 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:convert/convert.dart';
+import 'package:flutter/foundation.dart';
 
+import 'public_update_errors.dart';
 import 'public_update_manifest.dart';
 
 class AppUpdateDownloadResult {
@@ -37,10 +39,12 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
     required this.manifestUri,
     required this.urlPolicy,
     HttpClient? client,
+    this.diagnosticLogging = false,
   }) : _client = client ?? HttpClient();
 
   final Uri manifestUri;
   final PublicUpdateUrlPolicy urlPolicy;
+  final bool diagnosticLogging;
   final HttpClient _client;
 
   @override
@@ -50,32 +54,84 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
   Future<PublicQaUpdateManifest?> fetchLatest({
     required int currentBuild,
   }) async {
-    if (!urlPolicy.isApprovedManifestUri(manifestUri)) {
-      throw const PublicUpdateProviderException('manifestUrlNotApproved');
-    }
-    final request = await _client.getUrl(manifestUri);
-    request.followRedirects = false;
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    final response = await request.close();
-    if (response.statusCode != HttpStatus.ok) {
-      await response.drain<void>();
-      throw const PublicUpdateProviderException('manifestUnavailable');
-    }
-    if (response.contentLength > 1024 * 1024) {
-      await response.drain<void>();
-      throw const PublicUpdateProviderException('manifestTooLarge');
-    }
-    final body = await response.transform(utf8.decoder).join();
+    _log('update check start installedVersionCode=$currentBuild');
     try {
+      if (!urlPolicy.isApprovedManifestUri(manifestUri)) {
+        throw const PublicUpdateProviderException(
+          PublicUpdateErrorCode.urlValidationError,
+        );
+      }
+      _log('manifest request start uri=$manifestUri');
+      final request = await _client.getUrl(manifestUri);
+      request.followRedirects = false;
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      final response = await request.close();
+      _log(
+        'HTTP response status=${response.statusCode} '
+        'contentType=${response.headers.contentType?.mimeType ?? 'unknown'} '
+        'contentLength=${response.contentLength}',
+      );
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        throw PublicUpdateProviderException(
+          PublicUpdateErrorCode.httpError,
+          httpStatus: response.statusCode,
+        );
+      }
+      if (response.contentLength > 1024 * 1024) {
+        await response.drain<void>();
+        throw const PublicUpdateProviderException('manifestTooLarge');
+      }
+      final body = await response.transform(utf8.decoder).join();
+      _log('manifest response bytes=${utf8.encode(body).length}');
+      _log('JSON decode start');
       final decoded = jsonDecode(body);
       if (decoded is! Map<String, dynamic>) {
-        throw const PublicUpdateValidationException('manifestNotObject');
+        throw const PublicUpdateProviderException(
+          PublicUpdateErrorCode.jsonError,
+        );
       }
-      return PublicQaUpdateManifest.fromJson(decoded, urlPolicy: urlPolicy);
-    } on PublicUpdateValidationException {
+      _log('JSON decode success; manifest validation start');
+      final manifest = PublicQaUpdateManifest.fromJson(
+        decoded,
+        urlPolicy: urlPolicy,
+      );
+      _log(
+        'manifest validation success remoteVersionCode=${manifest.versionCode}',
+      );
+      return manifest;
+    } on PublicUpdateValidationException catch (error, stackTrace) {
+      _logError(error.classification, error, stackTrace);
       rethrow;
-    } on Object {
-      throw const PublicUpdateProviderException('manifestMalformed');
+    } on PublicUpdateProviderException catch (error, stackTrace) {
+      _logError(
+        error.code,
+        error.cause ?? error,
+        error.stackTrace ?? stackTrace,
+      );
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      final classified = PublicUpdateProviderException.fromError(
+        error,
+        stackTrace,
+      );
+      _logError(classified.code, error, stackTrace);
+      throw classified;
+    }
+  }
+
+  void _log(String message) {
+    if (diagnosticLogging) debugPrint('[RELIO][QA_UPDATE] $message');
+  }
+
+  void _logError(String code, Object error, StackTrace stackTrace) {
+    if (!diagnosticLogging) return;
+    debugPrint(
+      '[RELIO][QA_UPDATE] error code=$code '
+      'type=${error.runtimeType} message=$error',
+    );
+    if (code == PublicUpdateErrorCode.unexpectedError) {
+      debugPrint('[RELIO][QA_UPDATE] stackTrace=$stackTrace');
     }
   }
 
@@ -183,7 +239,42 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
 }
 
 class PublicUpdateProviderException implements Exception {
-  const PublicUpdateProviderException(this.code);
+  const PublicUpdateProviderException(
+    this.code, {
+    this.cause,
+    this.stackTrace,
+    this.httpStatus,
+  });
+
+  factory PublicUpdateProviderException.fromError(
+    Object error,
+    StackTrace stackTrace,
+  ) => PublicUpdateProviderException(
+    classifyPublicUpdateError(error),
+    cause: error,
+    stackTrace: stackTrace,
+  );
 
   final String code;
+  final Object? cause;
+  final StackTrace? stackTrace;
+  final int? httpStatus;
+}
+
+String classifyPublicUpdateError(Object error) {
+  if (error is PublicUpdateProviderException) return error.code;
+  if (error is PublicUpdateValidationException) return error.classification;
+  if (error is HandshakeException) return PublicUpdateErrorCode.tlsError;
+  if (error is TimeoutException) return PublicUpdateErrorCode.timeoutError;
+  if (error is SocketException) {
+    final osErrorCode = error.osError?.errorCode;
+    if (osErrorCode != null &&
+        const {1, 2, 4, 7, 11001, 11002}.contains(osErrorCode)) {
+      return PublicUpdateErrorCode.dnsError;
+    }
+    return PublicUpdateErrorCode.socketError;
+  }
+  if (error is FormatException) return PublicUpdateErrorCode.jsonError;
+  if (error is HttpException) return PublicUpdateErrorCode.providerError;
+  return PublicUpdateErrorCode.unexpectedError;
 }

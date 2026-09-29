@@ -1,6 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/app/environment.dart';
+import 'package:relio_mobile/core/app_update/public_update_errors.dart';
 import 'package:relio_mobile/core/app_update/app_update_service.dart';
+import 'package:relio_mobile/core/app_update/public_update_manifest.dart';
+import 'package:relio_mobile/core/app_update/public_update_provider.dart';
 
 class _FakeGateway implements AppUpdateGateway {
   _FakeGateway(this.nextResult);
@@ -152,6 +158,43 @@ void main() {
       expect(result.code, 'gatewayError');
       service.dispose();
     });
+
+    test(
+      'classifies QA runtime failures without exposing exception text',
+      () async {
+        final cases = <Object, String>{
+          SocketException('dns', osError: OSError('dns', 7)):
+              PublicUpdateErrorCode.dnsError,
+          SocketException('socket', osError: OSError('socket', 111)):
+              PublicUpdateErrorCode.socketError,
+          TimeoutException('timeout'): PublicUpdateErrorCode.timeoutError,
+          HandshakeException('tls'): PublicUpdateErrorCode.tlsError,
+          const PublicUpdateProviderException(PublicUpdateErrorCode.httpError):
+              PublicUpdateErrorCode.httpError,
+          FormatException('json'): PublicUpdateErrorCode.jsonError,
+          const PublicUpdateValidationException('wrongPackage'):
+              PublicUpdateErrorCode.manifestValidationError,
+          const PublicUpdateValidationException('unapprovedApkUrl'):
+              PublicUpdateErrorCode.urlValidationError,
+          StateError('unexpected'): PublicUpdateErrorCode.unexpectedError,
+        };
+
+        for (final entry in cases.entries) {
+          final service = AppUpdateService(
+            provider: _ThrowingProvider(entry.key),
+            enabled: true,
+            environment: RelioEnvironment.test,
+            currentBuild: '0.8.6+12',
+          );
+
+          final result = await service.checkForUpdate(manual: true);
+
+          expect(result.status, AppUpdateStatus.error);
+          expect(result.code, entry.value);
+          service.dispose();
+        }
+      },
+    );
   });
 }
 
@@ -162,5 +205,31 @@ class _ThrowingGateway implements AppUpdateGateway {
   @override
   Future<AppUpdateGatewayResult> checkForUpdate() {
     throw StateError('test-only failure');
+  }
+}
+
+class _ThrowingProvider implements AppUpdateProvider {
+  _ThrowingProvider(this.error);
+
+  final Object error;
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<AppUpdateProviderResult> checkForUpdate({
+    required int currentBuild,
+  }) async {
+    throw error;
+  }
+
+  @override
+  Future<AppUpdateDownloadResult> download(
+    PublicQaUpdateManifest manifest, {
+    required Directory directory,
+    required bool Function() isCancelled,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) async {
+    throw error;
   }
 }

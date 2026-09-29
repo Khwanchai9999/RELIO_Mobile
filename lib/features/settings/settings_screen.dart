@@ -8,6 +8,7 @@ import '../../app/environment.dart';
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/app_update/app_update_service.dart';
+import '../../core/app_update/public_update_errors.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
@@ -133,7 +134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdateStatus.installing => 'เปิด Android Package Installer แล้ว',
       AppUpdateStatus.installPermissionRequired =>
         'โปรดอนุญาตให้ RELIO Test ติดตั้ง APK จากภายนอก แล้วกดยืนยันอีกครั้ง',
-      AppUpdateStatus.error => 'ตรวจสอบหรือติดตั้งอัปเดตไม่สำเร็จ',
+      AppUpdateStatus.error => _friendlyUpdateError(snapshot.code),
       AppUpdateStatus.unavailable => 'ยังไม่พร้อมใช้งาน โปรดลองภายหลัง',
       _ => 'ฟีเจอร์นี้ใช้เฉพาะ RELIO Test',
     };
@@ -141,6 +142,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
+
+  String _friendlyUpdateError(String? code) => switch (code) {
+    PublicUpdateErrorCode.dnsError ||
+    PublicUpdateErrorCode.socketError ||
+    PublicUpdateErrorCode.timeoutError => 'เชื่อมต่อเซิร์ฟเวอร์อัปเดตไม่สำเร็จ',
+    PublicUpdateErrorCode.tlsError => 'ไม่สามารถสร้างการเชื่อมต่อที่ปลอดภัยได้',
+    PublicUpdateErrorCode.httpError ||
+    PublicUpdateErrorCode.jsonError ||
+    PublicUpdateErrorCode.manifestValidationError ||
+    PublicUpdateErrorCode.urlValidationError => 'ข้อมูลอัปเดตไม่ถูกต้อง',
+    _ => 'ตรวจสอบหรือติดตั้งอัปเดตไม่สำเร็จ',
+  };
 
   String get _updateSubtitle {
     final snapshot = _appUpdateService.snapshot;

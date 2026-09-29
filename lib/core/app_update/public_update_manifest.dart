@@ -1,7 +1,13 @@
+import 'public_update_errors.dart';
+
 class PublicUpdateValidationException implements Exception {
   const PublicUpdateValidationException(this.code);
 
   final String code;
+
+  String get classification => code == 'unapprovedApkUrl'
+      ? PublicUpdateErrorCode.urlValidationError
+      : PublicUpdateErrorCode.manifestValidationError;
 
   @override
   String toString() => 'Public update manifest validation failed: $code';
