@@ -288,7 +288,12 @@ if (-not $NoUpload) {
     if ($repo.private -eq $true -or $repo.name -ne $githubRepositoryName) {
         throw 'The GitHub release repository is not the expected public repository.'
     }
-    if ([int]$repo.size -eq 0) {
+    $readmeOutput = & $gh.Source api "repos/$githubRepository/contents/README.md" 2>&1
+    $readmeExists = $LASTEXITCODE -eq 0
+    if (-not $readmeExists -and ($readmeOutput -join "`n") -notmatch 'empty|404|Not Found') {
+        throw 'Could not inspect the public release repository README state.'
+    }
+    if (-not $readmeExists) {
         $seedReadme = @(
             '# RELIO Android Updates',
             '',
