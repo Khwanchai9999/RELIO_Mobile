@@ -186,24 +186,27 @@ Before a TEST upload, a developer should:
 
 These distribution steps are not claimed as manually completed by Codex.
 
-## K1. Public Build 12 first-install baseline — DEFERRED
+## K1. Public Build 12 → Build 13 in-app OTA — PENDING PHYSICAL TEST
 
-After the automated hybrid GitHub/Hosting deployment is verified:
+Build 12 is already installed on two Android phones. After the automated
+Build 13 GitHub/Hosting deployment is verified:
 
 1. Open `https://relio-17dc0.web.app/qa/` on an Android phone. The page links
    to the exact GitHub release asset; no Firebase tester account or Google
    sign-in is required.
-2. Download and install `RELIO Test` v0.8.6+12. If Android asks, allow the
-   browser to install unknown apps and confirm Android Package Installer.
-3. Open RELIO Test and confirm the displayed version/build is `0.8.6+12`.
-4. Create a message or setting, close and reopen the app, and confirm local
-   Drift/SQLite data remains present.
-5. Press `ตรวจสอบอัปเดต`; with no Build 13 published, confirm the app reports
-   that no newer update is available.
+2. On a phone still running `RELIO Test` v0.8.6+12, confirm local Drift/SQLite
+   data is present before updating.
+3. Press `ตรวจสอบอัปเดต`, review Build 13 release notes, and choose the explicit
+   download/install actions. If Android asks, allow the app to install unknown
+   apps and confirm Android Package Installer.
+4. Confirm the installed version/build is `0.8.6+13`, the app data remains
+   present, and the app still reports the QA channel.
+5. Record any OEM/Play Protect block or installer error exactly; do not bypass
+   it with ADB or an accessibility click.
 
-Build 13 must not be created until this physical baseline is confirmed. The
-future test is Build 12 → Build 13 through the public manifest, including hash,
-package, version, signer, permission, and Android installer confirmation.
+Automated verification covers the manifest, hash, package, version, signer,
+permission, and PROD isolation. Physical status remains **PENDING PHYSICAL
+TEST** until this in-app flow is completed.
 
 ## L. v0.8 Relay A→B→C — DEFERRED
 

@@ -5,7 +5,7 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous release: `0.8.5+11` through Firebase App Distribution
-- Current milestone: `0.8.6+12` through the hybrid public QA channel
+- Current milestone: `0.8.6+13` through the hybrid public QA channel
 - Drift schema: v4
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
@@ -20,7 +20,7 @@
 - Public QA URL: `https://relio-17dc0.web.app/qa/`
 - Public manifest: `https://relio-17dc0.web.app/qa/latest.json`
 - Public APK: authenticated-owner GitHub release asset in
-  `RELIO-Android-Updates`, tag `qa-v0.8.6-b12`
+  `RELIO-Android-Updates`, tag `qa-v0.8.6-b13`
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
 
@@ -44,7 +44,7 @@
 
 - `dart format`: passed
 - `flutter analyze`: passed
-- `flutter test`: 86 passed
+- `flutter test`: 88 passed
 - QA/PROD App Distribution SDK isolation: passed
 - DEV debug, QA debug, QA signed release, and PROD verification builds are
   required before the public release pipeline can deploy.
@@ -54,7 +54,7 @@
 
 ## Deployment status
 
-The earlier all-Firebase Build 12 deployment was **BLOCKED** by Firebase
+The earlier all-Firebase deployment was **BLOCKED** by Firebase
 Hosting's Spark-plan restriction: executable APK files are forbidden. The
 hybrid channel resolves that limitation by keeping the APK in GitHub Releases
 and deploying only page/manifest metadata to Hosting. No billing upgrade or
@@ -62,8 +62,10 @@ Firebase Storage fallback is used.
 
 ## Physical boundary
 
-The automated work does not claim OEM Android installer behavior. The user must
-open the public QA URL on an Android phone, install Build 12, confirm
-`0.8.6+12`, create persistent local data, and confirm `ตรวจสอบอัปเดต` reports
-no newer build. Build 13 and v0.9 remain blocked until that baseline is
-confirmed.
+The automated work does not claim OEM Android installer behavior. Build 12 is
+already the physical baseline on two Android phones. The next manual action is
+to open RELIO Test on a phone still running Build 12 and tap
+`ตรวจสอบอัปเดต`, then confirm the user-controlled download/install flow and
+that local data remains present. Physical status:
+**Build 12 → Build 13 in-app OTA: PENDING PHYSICAL TEST**. Do not ADB-install
+Build 13 or start v0.9.

@@ -140,8 +140,9 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current public QA build is version `0.8.6+12`; production remains reserved
-as `com.relio.relio_mobile`.
+The current public QA build is version `0.8.6+13`; production remains reserved
+as `com.relio.relio_mobile`. Build 13 is published for physical Build 12 →
+Build 13 in-app OTA verification; do not ADB-install it over the baseline.
 
 ## Public QA distribution and wireless updates (v0.8.6)
 

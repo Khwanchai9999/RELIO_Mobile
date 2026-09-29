@@ -8,12 +8,12 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 $projectId = 'relio-17dc0'
-$expectedVersion = '0.8.6+12'
+$expectedVersion = '0.8.6+13'
 $expectedPackage = 'com.relio.relio_mobile.test'
 $approvedManifestBaseUrl = 'https://relio-17dc0.web.app/qa/'
 $githubRepositoryName = 'RELIO-Android-Updates'
-$releaseTag = 'qa-v0.8.6-b12'
-$releaseTitle = 'RELIO Test v0.8.6 Build 12'
+$releaseTag = 'qa-v0.8.6-b13'
+$releaseTitle = 'RELIO Test v0.8.6 Build 13'
 
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the active workspace: $projectRoot"
@@ -134,7 +134,9 @@ function Test-RemoteApk {
         [string]$Aapt2Path,
         [string]$ApkSignerPath
     )
-    if ($Url -notmatch '^https://github\.com/[^/]+/RELIO-Android-Updates/releases/download/[^/]+/relio-test-0\.8\.6(?:\+|%2[Bb])12\.apk$') {
+    $expectedAssetPattern = '^https://github\.com/[^/]+/RELIO-Android-Updates/releases/download/[^/]+/relio-test-' +
+        [regex]::Escape($ExpectedVersionName) + '(?:\+|%2[Bb])' + $ExpectedVersionCode + '\.apk$'
+    if ($Url -notmatch $expectedAssetPattern) {
         throw "GitHub asset URL is not an exact approved release URL: $Url"
     }
     $downloadPath = Join-Path ([IO.Path]::GetTempPath()) "relio-public-qa-$PID.apk"
@@ -150,14 +152,14 @@ function Test-RemoteApk {
             $metadata.VersionName -ne $ExpectedVersionName -or
             $metadata.VersionCode -ne $ExpectedVersionCode -or
             $metadata.SigningFingerprint -ne $ExpectedSigner) {
-            throw 'Remote GitHub APK package, version, or signer did not match Build 12.'
+            throw "Remote GitHub APK package, version, or signer did not match Build $ExpectedVersionCode."
         }
     } finally {
         if (Test-Path -LiteralPath $downloadPath) { Remove-Item -LiteralPath $downloadPath -Force }
     }
 }
 
-Write-Host 'RELIO hybrid public QA release pipeline v0.8.6+12'
+Write-Host "RELIO hybrid public QA release pipeline v$expectedVersion"
 & "$PSScriptRoot\preflight.ps1" -RequireTestSigning
 
 $pubspec = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'pubspec.yaml')
@@ -248,7 +250,7 @@ $metadata = Get-ApkMetadata -ApkPath $builtApk -Aapt2Path $aapt2 -ApkSignerPath 
 if ($metadata.PackageName -ne $expectedPackage -or
     $metadata.VersionName -ne $versionName -or
     $metadata.VersionCode -ne $buildNumber) {
-    throw 'QA APK package/version metadata did not match Build 12.'
+    throw "QA APK package/version metadata did not match Build $buildNumber."
 }
 
 $keyPropertiesPath = Join-Path $projectRoot 'android\key.properties'
@@ -314,7 +316,10 @@ if (-not $NoUpload) {
 
     $release = Get-ReleaseApiObject -Repository $githubRepository -Tag $releaseTag
     if (-not $release) {
-        $notesPath = Join-Path $projectRoot "release_notes\$versionName.md"
+        $notesPath = Join-Path $projectRoot "release_notes\$versionName-build-$buildNumber.md"
+        if (-not (Test-Path -LiteralPath $notesPath)) {
+            $notesPath = Join-Path $projectRoot "release_notes\$versionName.md"
+        }
         if (-not (Test-Path -LiteralPath $notesPath)) { throw "Release notes were not found: $notesPath" }
         Write-Host "Creating immutable GitHub release $releaseTag..."
         & $gh.Source release create $releaseTag $releaseApk $checksumPath --repo $githubRepository --title $releaseTitle --notes-file $notesPath
@@ -327,7 +332,7 @@ if (-not $NoUpload) {
     $existingApk = @($release.assets | Where-Object { $_.name -eq $artifactName }) | Select-Object -First 1
     if ($existingApk) {
         Test-RemoteApk -Url $existingApk.browser_download_url -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
-        Write-Host 'Existing GitHub APK asset matches the newly verified Build 12; it was not replaced.'
+        Write-Host "Existing GitHub APK asset matches the newly verified Build $buildNumber; it was not replaced."
     } else {
         & $gh.Source release upload $releaseTag $releaseApk --repo $githubRepository
         if ($LASTEXITCODE -ne 0) { throw 'GitHub APK upload failed. Firebase Hosting was not deployed.' }
@@ -353,9 +358,10 @@ $manifest = [ordered]@{
     signingCertSha256 = $metadata.SigningFingerprint
     publishedAt = [DateTime]::UtcNow.ToString('o')
     releaseNotes = @(
-        'เพิ่มช่องทางอัปเดต RELIO Test แบบสาธารณะผ่าน Firebase Hosting และ GitHub Releases',
-        'ตรวจสอบ SHA-256, package name, versionCode และลายเซ็น QA ก่อนติดตั้ง',
-        'ให้ Android Package Installer ขอการยืนยันจากผู้ใช้ทุกครั้ง'
+        "RELIO Test v$versionName Build $buildNumber",
+        "ทดสอบการอัปเดตจาก Build $($buildNumber - 1) ผ่านระบบ Public QA Update",
+        'ไม่มีการล้างข้อมูลในเครื่อง',
+        'ใช้สำหรับตรวจสอบการดาวน์โหลดและติดตั้งอัปเดตจากภายใน RELIO'
     )
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $qaHostingRoot 'latest.json') -Encoding utf8
@@ -372,7 +378,7 @@ if ($hostingApks.Count -gt 0) { throw 'Firebase Hosting staging contains an APK;
 if ($NoDeploy) {
     Write-Host "Prepared Firebase Hosting metadata only: $qaHostingRoot"
     Write-Host "GitHub APK URL: $apkUrl"
-    Write-Host "Build 12 SHA-256: $sha256"
+    Write-Host "Build $buildNumber SHA-256: $sha256"
     exit 0
 }
 
@@ -388,7 +394,7 @@ if ($remoteManifest.packageName -ne $expectedPackage -or
     [int]$remoteManifest.versionCode -ne $buildNumber -or
     $remoteManifest.sha256 -ne $sha256 -or
     $remoteManifest.apkUrl -ne $apkUrl) {
-    throw 'Remote public manifest values do not match Build 12 or the exact GitHub asset URL.'
+    throw "Remote public manifest values do not match Build $buildNumber or the exact GitHub asset URL."
 }
 $remotePage = Invoke-WebRequest -Uri "$publicBaseUrl/qa/" -UseBasicParsing
 if ($remotePage.StatusCode -ne 200 -or $remotePage.Content -notmatch 'data-relio-public-qa-channel="true"' -or
@@ -400,7 +406,7 @@ Test-RemoteApk -Url $apkUrl -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length
 Write-Host "PUBLIC QA PAGE: $publicBaseUrl/qa/"
 Write-Host "PUBLIC MANIFEST: $manifestUrl"
 Write-Host "PUBLIC GITHUB APK: $apkUrl"
-Write-Host "BUILD 12 SHA-256: $sha256"
-Write-Host "BUILD 12 SIZE BYTES: $($fileInfo.Length)"
-Write-Host "BUILD 12 SIGNING SHA-256: $($metadata.SigningFingerprint)"
+Write-Host "BUILD $buildNumber SHA-256: $sha256"
+Write-Host "BUILD $buildNumber SIZE BYTES: $($fileInfo.Length)"
+Write-Host "BUILD $buildNumber SIGNING SHA-256: $($metadata.SigningFingerprint)"
 Write-Host 'HYBRID PUBLIC QA RELEASE — VERIFIED'

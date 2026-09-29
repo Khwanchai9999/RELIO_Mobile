@@ -1,6 +1,6 @@
 # RELIO Test Deployment — v0.8.6
 
-## Public QA channel — v0.8.6+12
+## Public QA channel — v0.8.6+13
 
 The normal QA distribution path is a Firebase Hosting metadata page plus a
 GitHub Releases APK, not tester enrollment.
@@ -12,9 +12,9 @@ From `D:\RELIO_Mobile` run:
 ```
 
 The script derives the project root from `$PSScriptRoot`, requires version
-`0.8.6+12`, runs quality/build/signing gates, prepares isolated
+`0.8.6+13`, runs quality/build/signing gates, prepares isolated
 `public_update\hosting\qa\` metadata, creates or verifies the immutable
-`qa-v0.8.6-b12` release in the authenticated owner's public
+`qa-v0.8.6-b13` release in the authenticated owner's public
 `RELIO-Android-Updates` repository, deploys only Hosting in Firebase project
 `relio-17dc0`, and verifies both public origins. The public page is
 `https://relio-17dc0.web.app/qa/`; ordinary download needs no Firebase tester
@@ -117,10 +117,11 @@ $env:FIREBASE_GROUPS = 'relio-testers'
 App ID ที่ส่งผ่าน parameter หรือ environment ต้องตรงกับ `mobilesdk_app_id` ใน
 QA config เสมอ ถ้าไม่ตรง script จะหยุดก่อน upload และจะไม่อ่านหรือพิมพ์ API key
 
-## Historical Build 11 and public Build 12
+## Historical Build 11, Build 12, and current public Build 13
 
 Build 11 ใช้เป็น historical/internal App Distribution release ส่วน Build 12
-เป็น public hybrid first-install baseline. APK อยู่ใน GitHub Releases และ
+เป็น public hybrid first-install baseline. Build 13 เป็น public OTA target;
+APK อยู่ใน GitHub Releases และ
 Firebase Hosting มีเฉพาะ metadata/page จึงไม่ต้อง upgrade billing หรือเปลี่ยน
 ไปใช้ Firebase Storage โดยอัตโนมัติ:
 
@@ -135,8 +136,8 @@ Firebase Hosting มีเฉพาะ metadata/page จึงไม่ต้อ
 .\scripts\deploy-test.ps1 -ReleaseNotesPath .\release_notes\0.8.5-build-12-template.md
 ```
 
-คำสั่ง bump เดิมด้านล่างเป็น historical workflow เท่านั้น และห้ามสร้าง Build 13
-จนกว่าผู้ใช้จะยืนยันการติดตั้ง Build 12 จริงบน Android
+คำสั่ง bump เดิมด้านล่างเป็น historical workflow เท่านั้น และห้ามสร้าง Build 14
+หรือเริ่ม v0.9 จนกว่าผู้ใช้จะยืนยันผล OTA ของ Build 12 → Build 13
 
 ## Signing และ update
 

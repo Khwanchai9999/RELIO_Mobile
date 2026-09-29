@@ -10,7 +10,7 @@ public `RELIO-Android-Updates` GitHub repository:
 ```text
 https://relio-17dc0.web.app/qa/
 https://relio-17dc0.web.app/qa/latest.json
-https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk
+https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b13/relio-test-0.8.6+13.apk
 ```
 
 Ordinary testers do not need Firebase App Distribution enrollment, a Firebase
@@ -46,8 +46,8 @@ the APK is not downloaded automatically.
   "channel": "qa-public",
   "packageName": "com.relio.relio_mobile.test",
   "versionName": "0.8.6",
-  "versionCode": 12,
-  "apkUrl": "https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b12/relio-test-0.8.6+12.apk",
+  "versionCode": 13,
+  "apkUrl": "https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b13/relio-test-0.8.6+13.apk",
   "sha256": "64 lowercase hexadecimal characters",
   "sizeBytes": 123,
   "signingCertSha256": "64 hexadecimal characters",
@@ -110,7 +110,7 @@ From `D:\RELIO_Mobile`, use:
 .\scripts\release-public-qa.ps1
 ```
 
-The script derives its root from `$PSScriptRoot`, requires `0.8.6+12`, verifies
+The script derives its root from `$PSScriptRoot`, requires `0.8.6+13`, verifies
 Firebase and GitHub CLI identity, runs format/analyze/tests, checks QA/PROD
 isolation, builds the signed QA APK, verifies package/version/signing, creates
 or reuses the immutable GitHub release asset, and generates
@@ -140,9 +140,8 @@ Do not upgrade billing or switch to Firebase Storage automatically.
 Automated tests prove manifest validation, provider selection, cooldown,
 offline/error mapping, download failure handling, APK metadata/signer gates,
 and install permission states. They do not prove OEM Android installer behavior.
-The physical first-install baseline remains manual: open the public URL on an
-Android phone, install Build 12, open RELIO Test, confirm `0.8.6+12`, create
-persistent local data, and confirm `ตรวจสอบอัปเดต` reports no newer version.
-
-Build 13 is reserved for a later physical `12 → 13` OTA verification. Do not
-create Build 13 or start v0.9 before the user confirms the Build 12 baseline.
+The physical Build 12 first-install baseline is complete on two Android phones.
+The remaining manual boundary is the Build 12 → Build 13 OTA verification:
+open RELIO Test on a phone still running Build 12 and tap `ตรวจสอบอัปเดต`.
+Confirm local data remains present and Android shows its normal user-confirmed
+installer flow. Do not ADB-install Build 13 or start v0.9.

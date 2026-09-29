@@ -138,9 +138,10 @@ with `scripts/verify-qa-update-isolation.ps1` before QA deployment.
 `scripts/deploy-test.ps1` preserves the Firebase App Distribution fallback and
 resolves the QA App ID from the verified config when `FIREBASE_APP_ID` is
 absent. `scripts/release-public-qa.ps1` verifies the authenticated GitHub
-owner/repository, creates or reuses the immutable Build 12 release asset, then
-deploys only metadata to the confirmed `relio-17dc0` Hosting site and verifies
-both public origins. Deployment must never bump the version implicitly.
+owner/repository, creates or reuses the immutable current public QA release
+asset, then deploys only metadata to the confirmed `relio-17dc0` Hosting site
+and verifies both public origins. Deployment must never bump the version
+implicitly.
 
 Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if
