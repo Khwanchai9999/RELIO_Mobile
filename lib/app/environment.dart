@@ -9,6 +9,10 @@ abstract final class RelioBuildInfo {
     'RELIO_BUILD',
     defaultValue: '11',
   );
+  static const publicUpdateBaseUrl = String.fromEnvironment(
+    'RELIO_PUBLIC_UPDATE_BASE_URL',
+    defaultValue: 'https://relio-17dc0.web.app/qa/',
+  );
   static const environmentName = String.fromEnvironment(
     'RELIO_ENV',
     defaultValue: 'development',
@@ -39,4 +43,9 @@ abstract final class RelioBuildInfo {
       '${isTest ? ' • Environment: TEST' : ''}';
 
   static String get buildLabel => '$versionName+$buildNumber';
+
+  static Uri get publicUpdateBaseUri => Uri.parse(publicUpdateBaseUrl);
+
+  static Uri get publicUpdateManifestUri =>
+      publicUpdateBaseUri.resolve('latest.json');
 }

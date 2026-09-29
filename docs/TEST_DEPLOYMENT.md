@@ -1,15 +1,39 @@
-# RELIO Test Deployment — v0.8.5
+# RELIO Test Deployment — v0.8.6
 
-เอกสารนี้อธิบายการแจก Android TEST build ของ RELIO ผ่าน Firebase App
-Distribution เท่านั้น โดย Supabase ยังคงเป็น cloud backend ของแอป และไม่ได้
-เพิ่ม Firebase Auth, Firestore, Storage หรือ Realtime Database
+## Public QA channel — v0.8.6+12
+
+The normal QA distribution path is Firebase Hosting, not tester enrollment.
+From `D:\RELIO_Mobile` run:
+
+```powershell
+.\scripts\release-public-qa.ps1 -NoDeploy
+.\scripts\release-public-qa.ps1
+```
+
+The script derives the project root from `$PSScriptRoot`, requires version
+`0.8.6+12`, runs quality/build/signing gates, prepares isolated
+`public_update\qa\` files, deploys only Hosting in Firebase project
+`relio-17dc0`, and verifies the public page, manifest, APK, and remote SHA-256.
+The public URL is `https://relio-17dc0.web.app/qa/`; ordinary download needs no
+Firebase tester account or Google sign-in.
+
+The app validates schema, channel, exact QA package, monotonic versionCode,
+HTTPS Hosting `/qa/` path, SHA-256, file size, and QA signing fingerprint
+before invoking Android Package Installer. Android user confirmation remains
+mandatory. Firebase App Distribution Build 11 (`0.8.5+11`) remains intact as
+an internal/fallback channel. This script never deploys App Distribution,
+Functions, Firestore, Realtime Database, Storage, or Supabase resources.
+
+เอกสารนี้อธิบายทั้ง public Firebase Hosting QA channel และ Firebase App
+Distribution fallback ของ RELIO Test โดย Supabase ยังคงเป็น cloud backend ของ
+แอป และไม่ได้เพิ่ม Firebase Auth, Firestore, Storage หรือ Realtime Database
 
 ## ช่องทางของแอป
 
 | Channel | Application ID | ใช้สำหรับ |
 | --- | --- | --- |
 | DEV | `com.relio.relio_mobile.dev` | USB debugging และ developer diagnostics |
-| TEST | `com.relio.relio_mobile.test` | Firebase App Distribution |
+| TEST | `com.relio.relio_mobile.test` | Firebase Hosting public QA; App Distribution fallback |
 | PROD | `com.relio.relio_mobile` | production ในอนาคต ยังไม่ publish |
 
 DEV และ TEST เป็นคนละแอป จึงมี SQLite/app data คนละชุดโดยตั้งใจ ข้อมูลจาก
@@ -87,10 +111,12 @@ $env:FIREBASE_GROUPS = 'relio-testers'
 App ID ที่ส่งผ่าน parameter หรือ environment ต้องตรงกับ `mobilesdk_app_id` ใน
 QA config เสมอ ถ้าไม่ตรง script จะหยุดก่อน upload และจะไม่อ่านหรือพิมพ์ API key
 
-## เตรียม Build 12 สำหรับ wireless-update test
+## Historical Build 11 and public Build 12
 
-อย่า bump version ระหว่างการลอง deploy Build 11 และอย่าแจก Build 12 จนกว่า
-ผู้ทดสอบจะติดตั้ง Build 11 บน Android จริงแล้ว เตรียมเลข build แบบ explicit ได้ด้วย:
+Build 11 ใช้เป็น historical/internal App Distribution release ส่วน Build 12
+เป็น public Hosting first-install baseline. การ deploy Build 12 ถูกบล็อกใน
+ปัจจุบันเพราะ Firebase Spark ห้ามไฟล์ APK executable; ห้าม upgrade billing หรือ
+เปลี่ยนไปใช้ Firebase Storage โดยอัตโนมัติ:
 
 ```powershell
 .\scripts\bump-qa-build.ps1 -NextBuildNumber 12 -WhatIf
@@ -103,8 +129,8 @@ QA config เสมอ ถ้าไม่ตรง script จะหยุดก�
 .\scripts\deploy-test.ps1 -ReleaseNotesPath .\release_notes\0.8.5-build-12-template.md
 ```
 
-คำสั่งนี้เป็นเพียง workflow ที่เตรียมไว้ ไม่ได้เปลี่ยน current build หรือ
-ทำ live upload อัตโนมัติใน milestone นี้
+คำสั่ง bump เดิมด้านล่างเป็น historical workflow เท่านั้น และห้ามสร้าง Build 13
+จนกว่าผู้ใช้จะยืนยันการติดตั้ง Build 12 จริงบน Android
 
 ## Signing และ update
 
@@ -165,11 +191,12 @@ Nearby, Chat, SOS, media และ location
 
 ## Firebase live status
 
-v0.8.5 เพิ่ม official QA-only in-app update bridge และ machine check ที่ยืนยันว่า
-full App Distribution SDK อยู่ใน QA เท่านั้น ไฟล์ QA Firebase config ถูกเพิ่มจาก
-Firebase project จริงและตรวจ package เป็น `com.relio.relio_mobile.test`; จะไม่
-invent App ID, tester email หรือ credential ใด ๆ การ upload จริงจะทำได้เมื่อ
-ผู้ใช้ตั้งค่าบัญชีและ Firebase project เอง
+v0.8.6 เพิ่ม public QA update provider, strict manifest/APK verification และ
+QA-only Android installer permission ขณะที่ full App Distribution SDK ยังคงอยู่
+ใน QA เท่านั้น ไฟล์ QA Firebase config ถูกเพิ่มจาก Firebase project จริงและ
+ตรวจ package เป็น `com.relio.relio_mobile.test`; จะไม่ invent App ID, tester
+email หรือ credential ใด ๆ การ deploy Hosting ยังรอ approved hosting/billing
+path เพราะ Spark ไม่อนุญาตให้เสิร์ฟ APK executable
 
 ตรวจ isolation ได้ด้วย:
 

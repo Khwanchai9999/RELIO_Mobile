@@ -3,7 +3,7 @@
 ## Purpose
 
 This directory is the Android-first Flutter implementation of RELIO Mobile
-v0.8.5. It is a separate project from the sibling React/Vite
+v0.8.6. It is a separate project from the sibling React/Vite
 `RELIO_SOS` prototype. Do not rewrite the React project or move Flutter files
 into it.
 
@@ -96,6 +96,13 @@ into it.
   delivery channel; Supabase remains the RELIO backend.
 - USB smoke testing may occur before distribution. Do not implement a custom,
   silent, or insecure APK self-updater.
+- Public Android QA updates use Firebase Hosting metadata and a versioned APK.
+  Only QA may request user-controlled unknown-app installation; PROD must not
+  contain `REQUEST_INSTALL_PACKAGES` or public QA update behavior.
+- The public updater validates HTTPS origin/path, package, versionCode, SHA-256,
+  APK signer, and Android Package Installer handoff before installation.
+- Firebase App Distribution remains an internal/fallback QA channel and is not
+  required for ordinary public QA downloads.
 - Preserve Thai copy and accessibility labels when changing UI.
 - Export one default component per screen file when adding new screen modules.
 
@@ -117,6 +124,7 @@ dart format lib test
 flutter analyze
 flutter test
 flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
+.\scripts\release-public-qa.ps1 -NoDeploy
 ```
 
 The Google Services Gradle plugin is configured for the QA-only config with a
@@ -124,10 +132,11 @@ WARN policy for missing config, so DEV and PROD remain Supabase-only and
 buildable. Verify its package target and App Distribution dependency boundary
 with `scripts/verify-qa-update-isolation.ps1` before QA deployment.
 
-`scripts/deploy-test.ps1` resolves the QA App ID from the verified config when
-`FIREBASE_APP_ID` is absent and defaults only to the authorized
-`relio-testers` group. `scripts/bump-qa-build.ps1` is the explicit-only path for
-preparing a later QA build; deployment must never bump the version implicitly.
+`scripts/deploy-test.ps1` preserves the Firebase App Distribution fallback and
+resolves the QA App ID from the verified config when `FIREBASE_APP_ID` is
+absent. `scripts/release-public-qa.ps1` deploys only Firebase Hosting for the
+confirmed `relio-17dc0` site and verifies the remote manifest/APK. Deployment
+must never bump the version implicitly.
 
 Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if
@@ -141,9 +150,9 @@ performing them.
 ## Change boundaries
 
 - Do not add a background worker, cloud-first UI, live credentials, or live
-  uploads in v0.8.5. The foreground/lifecycle SyncEngine is optional and
-  ownership-gated. Firebase App Distribution full self-update implementation
-  must never ship inside the PROD Google Play build; it is QA-only.
+  Supabase uploads in v0.8.6. The foreground/lifecycle SyncEngine is optional
+  and ownership-gated. Public QA update behavior and the full Firebase App
+  Distribution SDK must never ship inside the PROD Google Play build.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and
   future cloud queue.
 - UI must not call Drift-generated tables or the Nearby plugin directly.

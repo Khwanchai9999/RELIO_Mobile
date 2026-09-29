@@ -54,18 +54,87 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
+  Future<void> _handleUpdateTap() async {
+    if (_appUpdateService.snapshot.status == AppUpdateStatus.updateAvailable) {
+      await _showUpdateDialog();
+      return;
+    }
+    await _checkForUpdate();
+  }
+
   Future<void> _checkForUpdate() async {
     setState(() => _updateCheckInProgress = true);
     final snapshot = await _appUpdateService.checkForUpdate(manual: true);
     if (!mounted) return;
     setState(() => _updateCheckInProgress = false);
+    if (snapshot.status == AppUpdateStatus.updateAvailable) {
+      await _showUpdateDialog();
+      return;
+    }
+    _showUpdateMessage(snapshot);
+  }
+
+  Future<void> _showUpdateDialog() async {
+    final manifest = _appUpdateService.snapshot.manifest;
+    if (manifest == null || !mounted) return;
+    final shouldDownload = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('พบอัปเดต RELIO Test'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'เวอร์ชันปัจจุบัน ${_appUpdateService.currentBuild}\n'
+                'เวอร์ชันใหม่ ${manifest.versionName}+${manifest.versionCode}',
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'ขนาดประมาณ ${(manifest.sizeBytes / 1024 / 1024).toStringAsFixed(1)} MB',
+              ),
+              if (manifest.releaseNotes.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Text('รายการเปลี่ยนแปลง'),
+                ...manifest.releaseNotes.map((note) => Text('• $note')),
+              ],
+              const SizedBox(height: 12),
+              const Text(
+                'ระบบจะดาวน์โหลดหลังจากกดยืนยัน และ Android จะขอให้ยืนยันการติดตั้งอีกครั้ง',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('ดาวน์โหลดอัปเดต'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDownload != true || !mounted) return;
+    setState(() => _updateCheckInProgress = true);
+    final snapshot = await _appUpdateService.downloadAndInstall();
+    if (!mounted) return;
+    setState(() => _updateCheckInProgress = false);
+    _showUpdateMessage(snapshot);
+  }
+
+  void _showUpdateMessage(AppUpdateSnapshot snapshot) {
     final message = switch (snapshot.status) {
-      AppUpdateStatus.checked ||
-      AppUpdateStatus.noUpdate => 'ตรวจสอบอัปเดตแล้ว',
-      AppUpdateStatus.updateAvailable || AppUpdateStatus.updateStarted =>
-        'พบอัปเดตใหม่ โปรดยืนยันการติดตั้งจาก Android',
+      AppUpdateStatus.noUpdate ||
+      AppUpdateStatus.checked => 'ยังไม่มีอัปเดตใหม่',
+      AppUpdateStatus.installing => 'เปิด Android Package Installer แล้ว',
+      AppUpdateStatus.installPermissionRequired =>
+        'โปรดอนุญาตให้ RELIO Test ติดตั้ง APK จากภายนอก แล้วกดยืนยันอีกครั้ง',
+      AppUpdateStatus.error => 'ตรวจสอบหรือติดตั้งอัปเดตไม่สำเร็จ',
       AppUpdateStatus.unavailable => 'ยังไม่พร้อมใช้งาน โปรดลองภายหลัง',
-      AppUpdateStatus.error => 'ตรวจสอบอัปเดตไม่สำเร็จ',
       _ => 'ฟีเจอร์นี้ใช้เฉพาะ RELIO Test',
     };
     ScaffoldMessenger.of(
@@ -82,7 +151,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdateStatus.updateAvailable ||
       AppUpdateStatus.updateStarted => 'มี build ใหม่ให้ติดตั้ง',
       AppUpdateStatus.unavailable =>
-        'ยังไม่ได้ตั้งค่า Firebase App Distribution',
+        'ตรวจสอบช่องทางสาธารณะไม่สำเร็จ โปรดลองภายหลัง',
+      AppUpdateStatus.downloading => 'กำลังดาวน์โหลดอัปเดต…',
+      AppUpdateStatus.installPermissionRequired =>
+        'ต้องอนุญาตการติดตั้ง APK จากภายนอก',
+      AppUpdateStatus.installing => 'รอการยืนยันจาก Android',
       AppUpdateStatus.error => 'ตรวจสอบไม่สำเร็จ',
       _ =>
         'เวอร์ชัน ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
@@ -205,7 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : null,
-              onTap: _updateCheckInProgress ? null : _checkForUpdate,
+              onTap: _updateCheckInProgress ? null : _handleUpdateTap,
             ),
           ],
           const SizedBox(height: 8),

@@ -162,7 +162,7 @@ These checks are **DEFERRED — NOT YET PERFORMED**. They require live project
 credentials and network access and are not required to use the automated/mock
 path. Physical radio, GPS, and OEM checks remain deferred as well.
 
-## K. TEST DISTRIBUTION AND WIRELESS UPDATE GATE — DEFERRED
+## K. Historical Firebase Build 11 distribution — DEFERRED
 
 Before a TEST upload, a developer should:
 
@@ -172,20 +172,37 @@ Before a TEST upload, a developer should:
    approved Google account, accept the invitation, and install Build 11.
 4. Allow Android's installation confirmation if requested, open RELIO Test, and
    verify the displayed package/version and a basic local-data smoke test.
-5. After Build 11 is genuinely installed, explicitly bump to Build 12 and
-   distribute the next TEST build.
+5. Build 11 remains historical/internal; the public Build 12 flow is documented
+   in section K1 below.
 6. Confirm Android updates the same TEST app without clearing its local SQLite
    data, then verify the displayed version/build.
 
-7. Open Settings in RELIO Test and press `ตรวจสอบอัปเดต`; confirm the official
-   Firebase tester sign-in/update dialog appears only after a real release is
-   available and the tester explicitly confirms installation.
+7. The Firebase tester update dialog is fallback-only and is not the normal
+   public QA path.
 8. Return to background and foreground; confirm automatic checks are throttled
    and do not show repeated dialogs during the cooldown.
 9. After the update, verify messages, SOS data, attachments, sync queue, relay
    packets, forwarding history, and settings remain available locally.
 
 These distribution steps are not claimed as manually completed by Codex.
+
+## K1. Public Build 12 first-install baseline — DEFERRED
+
+After the automated Hosting deployment is verified:
+
+1. Open `https://relio-17dc0.web.app/qa/` on an Android phone. No Firebase
+   tester account or Google sign-in is required.
+2. Download and install `RELIO Test` v0.8.6+12. If Android asks, allow the
+   browser to install unknown apps and confirm Android Package Installer.
+3. Open RELIO Test and confirm the displayed version/build is `0.8.6+12`.
+4. Create a message or setting, close and reopen the app, and confirm local
+   Drift/SQLite data remains present.
+5. Press `ตรวจสอบอัปเดต`; with no Build 13 published, confirm the app reports
+   that no newer update is available.
+
+Build 13 must not be created until this physical baseline is confirmed. The
+future test is Build 12 → Build 13 through the public manifest, including hash,
+package, version, signer, permission, and Android installer confirmation.
 
 ## L. v0.8 Relay A→B→C — DEFERRED
 

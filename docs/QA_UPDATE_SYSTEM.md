@@ -1,104 +1,141 @@
-# RELIO v0.8.5 QA wireless update system
+# RELIO v0.8.6 Public Android QA Update Channel
 
-## Scope
+## Purpose
 
-`RELIO Test` is the only variant that may contain the full Firebase App
-Distribution Android SDK. The package is `com.relio.relio_mobile.test`, and
-the release version is `0.8.5+11`. DEV and PROD use the API-only library, so
-their Dart code can safely report “not applicable” and their APKs do not carry
-the full self-update implementation.
+RELIO Test `com.relio.relio_mobile.test` uses Firebase Hosting as the normal
+public QA first-install and update channel. The confirmed site is
+`relio-17dc0`, with the public page at:
 
-The app uses the official Firebase basic update flow through a small Kotlin
-MethodChannel. Firebase owns tester sign-in, the update dialog, download
-progress, and the Android installation confirmation. RELIO never downloads an
-APK itself and never requests silent installation.
+```text
+https://relio-17dc0.web.app/qa/
+https://relio-17dc0.web.app/qa/latest.json
+```
 
-## Flutter boundary
+Ordinary testers do not need Firebase App Distribution enrollment, a Firebase
+account, or Google sign-in. Firebase App Distribution Build 11 remains intact
+as an internal/fallback channel and is not removed by this system.
 
-`AppUpdateService` exposes only build/environment metadata, availability,
-status, and `checkForUpdate({manual})`. The gateway is fakeable in Flutter
-tests. The Flutter service invokes the Android gateway only for the QA
-environment; the bridge calls `updateIfNewReleaseAvailable()` and returns a
-safe no-op/unavailable state when the full implementation is absent. Error
-states do not expose account details, tokens, or exception text.
+## Provider boundary
 
-Automatic checks run after app startup and when the app returns to the
-foreground. They are throttled by a 30-minute cooldown. The TEST Settings
-screen has `ตรวจสอบอัปเดต`, which bypasses the cooldown. DEV and PROD do not
-show this control.
+`AppUpdateService` uses these boundaries:
 
-## Firebase SDK isolation
+- `PublicQaAppUpdateProvider` → `PublicQaUpdateProvider`: default in QA;
+  fetches only the small HTTPS manifest and downloads only after an explicit
+  user action.
+- `FirebaseAppDistributionUpdateProvider`: retained as an internal fallback;
+  it is not selected by default and does not trigger tester enrollment.
+- `Fake` provider implementations in tests: deterministic checks without
+  network or Firebase login.
+- `AppUpdateInstaller`: testable boundary for APK inspection, install
+  permission, FileProvider URI creation, and Android Package Installer launch.
 
-The module declares:
+Startup and foreground checks only fetch `latest.json`, remain non-blocking
+when offline, and use the existing 30-minute cooldown. The Settings action
+`ตรวจสอบอัปเดต` bypasses that cooldown. A newer manifest is shown to the user;
+the APK is not downloaded automatically.
 
-- `firebase-appdistribution-api` for every variant. This API-only library has
-  no effect without the implementation.
-- `firebase-appdistribution` under `qaImplementation` only.
+## Manifest schema
 
-Run the machine check from the repository root:
+`latest.json` uses schema version 1:
+
+```json
+{
+  "schemaVersion": 1,
+  "channel": "qa-public",
+  "packageName": "com.relio.relio_mobile.test",
+  "versionName": "0.8.6",
+  "versionCode": 12,
+  "apkUrl": "https://relio-17dc0.web.app/qa/relio-test-0.8.6+12.apk",
+  "sha256": "64 lowercase hexadecimal characters",
+  "sizeBytes": 123,
+  "signingCertSha256": "64 hexadecimal characters",
+  "publishedAt": "2026-09-29T00:00:00.000Z",
+  "releaseNotes": ["Thai or English release notes"]
+}
+```
+
+The parser rejects unsupported schema versions, wrong channel/package, invalid
+version values, non-HTTPS URLs, hosts or paths outside the approved Hosting
+`/qa/` origin, malformed hashes/fingerprints, unreasonable file sizes, bad
+timestamps, and malformed release notes. An update is offered only when
+`versionCode` is greater than the installed build.
+
+## Download and verification flow
+
+1. The user taps `ดาวน์โหลดอัปเดต` after reviewing the current/new version,
+   release notes, and size.
+2. The provider downloads to app-controlled cache storage with a deterministic
+   versioned filename and removes obsolete cached update APKs.
+3. The downloaded byte count and SHA-256 must match `latest.json`; a mismatch
+   deletes the file and never reaches Android.
+4. Native Android `PackageManager` inspects package name and versionCode.
+5. The APK signer is compared with the manifest fingerprint and the currently
+   installed RELIO Test signer. Wrong package, same build, downgrade, malformed
+   APK, or signer mismatch is rejected.
+6. QA checks `canRequestPackageInstalls()`. If needed, the app opens the
+   user-controlled `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES` page.
+7. The app passes a temporary `content://` FileProvider URI to Android Package
+   Installer. Android always asks the user to confirm installation/update.
+
+There is no silent install, root install, ADB install, accessibility click,
+background install, or raw `file://` URI. Local SQLite/Drift data remains under
+Android's normal same-package/same-signer update behavior.
+
+## Flavor safety
+
+- QA has `REQUEST_INSTALL_PACKAGES`, the public updater, and the full Firebase
+  App Distribution SDK.
+- DEV has no public QA updater behavior and no sideload permission.
+- PROD has no public QA updater behavior, no sideload permission, and only the
+  API-only App Distribution dependency. Supabase remains the application cloud
+  backend; no Firebase Auth, Firestore, Storage, or Analytics SDK is added.
+
+The machine check is:
 
 ```powershell
 .\scripts\verify-qa-update-isolation.ps1
 ```
 
-It inspects `qaReleaseRuntimeClasspath` and `prodReleaseRuntimeClasspath` and
-fails if QA lacks the full SDK or PROD contains it.
+## Release and Hosting pipeline
 
-The real QA Firebase config is tracked at
-`android/app/src/qa/google-services.json` and is for the exact package
-`com.relio.relio_mobile.test`. The Google Services Gradle plugin is declared in
-`android/settings.gradle.kts`, applied by the app module, and configured with a
-WARN policy so DEV/PROD remain buildable without Firebase config. The config
-contains only the identifiers required by App Distribution; no Firebase Auth,
-Firestore, Storage, or Analytics SDK is added.
+From `D:\RELIO_Mobile`, use:
 
-## Tester flow
+```powershell
+.\scripts\release-public-qa.ps1 -NoDeploy
+.\scripts\release-public-qa.ps1
+```
 
-First install:
+The script derives its root from `$PSScriptRoot`, requires `0.8.6+12`, runs
+format/analyze/tests, checks QA/PROD isolation, builds the signed QA APK,
+verifies package/version/signing, generates `public_update/qa/latest.json` and
+the download page, then deploys only:
 
-1. Build and distribute the signed QA APK through Firebase App Distribution.
-2. The tester accepts the invitation and signs in to the official tester
-   experience with Google.
-3. The tester installs the first QA build and opens RELIO Test.
-4. The official in-app alert flow may ask the tester to enable alerts.
+```text
+firebase deploy --only hosting:relio-17dc0 --project relio-17dc0
+```
 
-Future updates:
+It verifies the public page, manifest, APK URL, and remote APK SHA-256 after
+deployment. `public_update/` is generated and ignored; the template and
+Firebase Hosting configuration are maintained in the repository. Hosting
+headers keep `latest.json` non-cacheable and versioned APKs immutable.
 
-1. A new QA release is distributed with a higher `versionCode` and the same
-   package and signing key.
-2. Startup/foreground checking can show the official update dialog, or the
-   tester can use `ตรวจสอบอัปเดต`.
-3. The tester confirms the Android installation. There is no silent APK
-   installation.
+### Current Hosting blocker
 
-The same package, signing key, and monotonic version code preserve the app's
-SQLite/Drift data during a normal Android update: messages, SOS data,
-attachments, sync queue, relay packets, forwarding history, and settings.
-An uninstall or lost signing key is a different, destructive event and is not
-part of this update flow.
+The first live deployment was intentionally stopped by Firebase with:
+`Executable files are forbidden on the Spark billing plan`. Firebase Hosting
+did not activate the page, manifest, or APK; all three public URLs remain 404.
+Do not upgrade billing automatically and do not switch to Firebase Storage or
+another Firebase service. The user must explicitly choose an approved
+hosting/billing path before this public channel can become live.
 
-## One-time Firebase setup
+## Manual boundary
 
-1. Register Firebase Android app `com.relio.relio_mobile.test`; do not register
-   the PROD package for this tester channel.
-2. Enable Firebase App Distribution and the Firebase App Testers API.
-3. Install Firebase CLI and authenticate with `firebase login` (or the team's
-   approved CI authentication). Never put tokens or passwords in the repo.
-4. Create the recommended tester group alias `relio-testers` and add real
-   testers in Firebase. No tester email is stored in this repository.
-5. Set `FIREBASE_APP_ID` and either `FIREBASE_GROUPS=relio-testers` or
-   `FIREBASE_TESTERS` in the local environment. If `FIREBASE_APP_ID` is absent,
-   the deployment script uses `mobilesdk_app_id` from the verified QA config.
-   If neither group nor tester is supplied, it uses the authorized
-   `relio-testers` group.
-6. Keep the original `android/relio-test.keystore` and its password backed up.
-7. Run `.\scripts\deploy-test.ps1`; it stops with a clear deferred message
-   when live Firebase values are absent.
+Automated tests prove manifest validation, provider selection, cooldown,
+offline/error mapping, download failure handling, APK metadata/signer gates,
+and install permission states. They do not prove OEM Android installer behavior.
+The physical first-install baseline remains manual: open the public URL on an
+Android phone, install Build 12, open RELIO Test, confirm `0.8.6+12`, create
+persistent local data, and confirm `ตรวจสอบอัปเดต` reports no newer version.
 
-## Verification boundary
-
-Automated tests prove the Flutter state machine, fake gateway, cooldown, and
-safe error mapping. The build isolation script proves the PROD dependency
-graph does not include the full SDK. Actual tester sign-in, Firebase network
-availability, update alerts, Android download/install confirmation, and
-SQLite-preserving over-the-top updates remain manual device verification.
+Build 13 is reserved for a later physical `12 → 13` OTA verification. Do not
+create Build 13 or start v0.9 before the user confirms the Build 12 baseline.

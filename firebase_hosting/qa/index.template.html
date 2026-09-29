@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RELIO Test — Public QA</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; background: #f4fbfa; color: #173b3a; }
+      main { max-width: 34rem; margin: 0 auto; padding: 2rem 1.25rem 3rem; }
+      section { background: white; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 0.4rem 1.5rem #124c4818; }
+      h1 { margin-top: 0; }
+      .qa { color: #b45309; font-weight: 700; }
+      .download { display: block; padding: 0.9rem 1rem; border-radius: 0.7rem; background: #087f7b; color: white; text-align: center; text-decoration: none; font-weight: 700; }
+      code { overflow-wrap: anywhere; font-size: 0.8rem; }
+      li { margin: 0.45rem 0; }
+      @media (prefers-color-scheme: dark) { body { background: #102322; color: #e5f7f5; } section { background: #173b3a; } }
+    </style>
+  </head>
+  <body data-relio-public-qa-channel="true">
+    <main>
+      <section>
+        <p class="qa">RELIO Test · QA build</p>
+        <h1>ดาวน์โหลด RELIO Test</h1>
+        <p>เวอร์ชัน __VERSION_NAME__ · Build __BUILD_NUMBER__</p>
+        <a class="download" href="__APK_URL__">ดาวน์โหลด APK</a>
+        <p><strong>SHA-256</strong><br><code>__SHA256__</code></p>
+        <p><strong>ขนาดไฟล์</strong> __SIZE_MB__ MB</p>
+        <h2>วิธีติดตั้งบน Android</h2>
+        <ol>
+          <li>ดาวน์โหลด APK นี้บนโทรศัพท์ Android</li>
+          <li>หากระบบถาม ให้เปิดสิทธิ์ติดตั้งแอปจากแหล่งนี้</li>
+          <li>กดยืนยันการติดตั้งใน Android Package Installer</li>
+          <li>เปิด RELIO Test หลังติดตั้งเสร็จ</li>
+        </ol>
+        <p>นี่คือรุ่น QA สำหรับทดสอบเท่านั้น ไม่ใช่รุ่นสำหรับ Play Store</p>
+      </section>
+    </main>
+  </body>
+</html>

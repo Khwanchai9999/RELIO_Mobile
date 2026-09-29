@@ -1,9 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../app/environment.dart';
+import 'app_update_installer.dart';
+import 'public_update_manifest.dart';
+import 'public_update_provider.dart';
 
 enum AppUpdateStatus {
   notApplicable,
@@ -13,6 +18,9 @@ enum AppUpdateStatus {
   checked,
   updateAvailable,
   updateStarted,
+  downloading,
+  installPermissionRequired,
+  installing,
   error,
 }
 
@@ -22,6 +30,10 @@ class AppUpdateSnapshot {
     required this.currentBuild,
     required this.environment,
     this.latestBuild,
+    this.manifest,
+    this.downloadedPath,
+    this.downloadedBytes = 0,
+    this.downloadTotalBytes = 0,
     this.code,
   });
 
@@ -38,7 +50,107 @@ class AppUpdateSnapshot {
   final String currentBuild;
   final String environment;
   final String? latestBuild;
+  final PublicQaUpdateManifest? manifest;
+  final String? downloadedPath;
+  final int downloadedBytes;
+  final int downloadTotalBytes;
   final String? code;
+}
+
+class AppUpdateProviderResult {
+  const AppUpdateProviderResult({
+    required this.status,
+    this.manifest,
+    this.code,
+  });
+
+  final AppUpdateStatus status;
+  final PublicQaUpdateManifest? manifest;
+  final String? code;
+}
+
+abstract interface class AppUpdateProvider {
+  bool get isAvailable;
+
+  Future<AppUpdateProviderResult> checkForUpdate({required int currentBuild});
+
+  Future<AppUpdateDownloadResult> download(
+    PublicQaUpdateManifest manifest, {
+    required Directory directory,
+    required bool Function() isCancelled,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  });
+}
+
+class PublicQaAppUpdateProvider implements AppUpdateProvider {
+  PublicQaAppUpdateProvider({
+    required Uri manifestUri,
+    required Uri approvedBaseUri,
+  }) : _provider = PublicQaUpdateProvider(
+         manifestUri: manifestUri,
+         approvedBaseUri: approvedBaseUri,
+       );
+
+  final PublicQaUpdateProvider _provider;
+
+  @override
+  bool get isAvailable => _provider.isAvailable;
+
+  @override
+  Future<AppUpdateProviderResult> checkForUpdate({
+    required int currentBuild,
+  }) async {
+    final manifest = await _provider.fetchLatest(currentBuild: currentBuild);
+    return AppUpdateProviderResult(
+      status: manifest == null
+          ? AppUpdateStatus.noUpdate
+          : AppUpdateStatus.updateAvailable,
+      manifest: manifest,
+    );
+  }
+
+  @override
+  Future<AppUpdateDownloadResult> download(
+    PublicQaUpdateManifest manifest, {
+    required Directory directory,
+    required bool Function() isCancelled,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) => _provider.download(
+    manifest,
+    directory: directory,
+    isCancelled: isCancelled,
+    onProgress: onProgress,
+  );
+}
+
+/// The Firebase provider is retained as an internal fallback, never as the
+/// ordinary public QA provider. Public QA users do not need Firebase login.
+class FirebaseAppDistributionUpdateProvider implements AppUpdateProvider {
+  FirebaseAppDistributionUpdateProvider({AppUpdateGateway? gateway})
+    : _gateway = gateway ?? MethodChannelAppUpdateGateway();
+
+  final AppUpdateGateway _gateway;
+
+  @override
+  bool get isAvailable => _gateway.isAvailable;
+
+  @override
+  Future<AppUpdateProviderResult> checkForUpdate({
+    required int currentBuild,
+  }) async {
+    final result = await _gateway.checkForUpdate();
+    return AppUpdateProviderResult(status: result.status, code: result.code);
+  }
+
+  @override
+  Future<AppUpdateDownloadResult> download(
+    PublicQaUpdateManifest manifest, {
+    required Directory directory,
+    required bool Function() isCancelled,
+    void Function(int receivedBytes, int totalBytes)? onProgress,
+  }) {
+    throw const PublicUpdateProviderException('firebaseDownloadUnsupported');
+  }
 }
 
 class AppUpdateGatewayResult {
@@ -71,14 +183,14 @@ class MethodChannelAppUpdateGateway implements AppUpdateGateway {
   @override
   Future<AppUpdateGatewayResult> checkForUpdate() async {
     try {
-      final raw = await _channel.invokeMethod<Object?>('checkForUpdate');
+      final raw = await _channel.invokeMethod<Object?>(
+        'checkForFirebaseUpdate',
+      );
       final values = raw is Map ? raw : const <Object?, Object?>{};
       final status = switch (values['status']) {
         'updateAvailable' => AppUpdateStatus.updateAvailable,
-        'updateStarted' => AppUpdateStatus.updateStarted,
         'noUpdate' => AppUpdateStatus.noUpdate,
         'checked' => AppUpdateStatus.checked,
-        'notApplicable' => AppUpdateStatus.notApplicable,
         'unavailable' => AppUpdateStatus.unavailable,
         _ => AppUpdateStatus.error,
       };
@@ -117,16 +229,42 @@ class SystemAppUpdateClock implements AppUpdateClock {
   DateTime now() => DateTime.now();
 }
 
+abstract interface class AppUpdateTemporaryDirectory {
+  Future<Directory> get();
+}
+
+class PathProviderAppUpdateTemporaryDirectory
+    implements AppUpdateTemporaryDirectory {
+  const PathProviderAppUpdateTemporaryDirectory();
+
+  @override
+  Future<Directory> get() => getTemporaryDirectory();
+}
+
 class AppUpdateService extends ChangeNotifier {
   AppUpdateService({
+    AppUpdateProvider? provider,
     AppUpdateGateway? gateway,
+    AppUpdateInstaller? installer,
     AppUpdateClock? clock,
+    AppUpdateTemporaryDirectory? temporaryDirectory,
     RelioEnvironment? environment,
     String? currentBuild,
     this.cooldown = const Duration(minutes: 30),
     bool? enabled,
-  }) : _gateway = gateway ?? MethodChannelAppUpdateGateway(),
+  }) : _provider =
+           provider ??
+           (gateway == null
+               ? PublicQaAppUpdateProvider(
+                   manifestUri: RelioBuildInfo.publicUpdateManifestUri,
+                   approvedBaseUri: RelioBuildInfo.publicUpdateBaseUri,
+                 )
+               : FirebaseAppDistributionUpdateProvider(gateway: gateway)),
+       _installer = installer ?? MethodChannelAppUpdateInstaller(),
        _clock = clock ?? const SystemAppUpdateClock(),
+       _temporaryDirectory =
+           temporaryDirectory ??
+           const PathProviderAppUpdateTemporaryDirectory(),
        _enabled =
            enabled ?? (RelioBuildInfo.environment == RelioEnvironment.test),
        _snapshot = AppUpdateSnapshot.initial(
@@ -134,14 +272,17 @@ class AppUpdateService extends ChangeNotifier {
          environment: (environment ?? RelioBuildInfo.environment).name,
        );
 
-  final AppUpdateGateway _gateway;
+  final AppUpdateProvider _provider;
+  final AppUpdateInstaller _installer;
   final AppUpdateClock _clock;
+  final AppUpdateTemporaryDirectory _temporaryDirectory;
   final bool _enabled;
   final Duration cooldown;
   final _changes = StreamController<AppUpdateSnapshot>.broadcast();
   AppUpdateSnapshot _snapshot;
   DateTime? _lastAttemptAt;
   Future<AppUpdateSnapshot>? _operation;
+  bool _cancelDownload = false;
 
   AppUpdateSnapshot get snapshot => _snapshot;
 
@@ -149,7 +290,7 @@ class AppUpdateService extends ChangeNotifier {
 
   String get environment => _snapshot.environment;
 
-  bool get isAvailable => _enabled && _gateway.isAvailable;
+  bool get isAvailable => _enabled && _provider.isAvailable;
 
   Stream<AppUpdateSnapshot> watchState() => _changes.stream;
 
@@ -160,7 +301,7 @@ class AppUpdateService extends ChangeNotifier {
           status: AppUpdateStatus.notApplicable,
           currentBuild: _snapshot.currentBuild,
           environment: _snapshot.environment,
-          code: _enabled ? 'sdkUnavailable' : 'environmentNotEligible',
+          code: _enabled ? 'providerUnavailable' : 'environmentNotEligible',
         ),
       );
       return Future.value(_snapshot);
@@ -184,40 +325,181 @@ class AppUpdateService extends ChangeNotifier {
         environment: _snapshot.environment,
       ),
     );
-    final operation = _checkGateway();
+    final operation = _checkProvider();
     _operation = operation;
     return operation.whenComplete(() => _operation = null);
   }
 
-  Future<AppUpdateSnapshot> _checkGateway() async {
+  Future<AppUpdateSnapshot> _checkProvider() async {
     try {
-      final result = await _gateway.checkForUpdate();
+      final result = await _provider.checkForUpdate(
+        currentBuild: _currentBuildCode,
+      );
+      final manifest = result.manifest;
+      final isNewBuild =
+          manifest != null && manifest.versionCode > _currentBuildCode;
+      final status = manifest == null
+          ? result.status
+          : (isNewBuild
+                ? AppUpdateStatus.updateAvailable
+                : AppUpdateStatus.noUpdate);
       final next = AppUpdateSnapshot(
-        status: result.status,
+        status: status,
         currentBuild: _snapshot.currentBuild,
         environment: _snapshot.environment,
-        latestBuild: result.latestBuild,
+        latestBuild: manifest == null
+            ? null
+            : '${manifest.versionName}+${manifest.versionCode}',
+        manifest: manifest,
         code: result.code,
       );
       _setSnapshot(next);
       return next;
+    } on PublicUpdateValidationException catch (error) {
+      return _setError(error.code);
+    } on PublicUpdateProviderException catch (error) {
+      return _setError(error.code);
     } on Object {
-      const result = AppUpdateSnapshot(
-        status: AppUpdateStatus.error,
-        currentBuild: '',
-        environment: '',
-        code: 'gatewayError',
+      return _setError(
+        _provider is FirebaseAppDistributionUpdateProvider
+            ? 'gatewayError'
+            : 'providerError',
       );
-      final next = AppUpdateSnapshot(
-        status: result.status,
-        currentBuild: _snapshot.currentBuild,
-        environment: _snapshot.environment,
-        code: result.code,
-      );
-      _setSnapshot(next);
-      return next;
     }
   }
+
+  Future<AppUpdateSnapshot> downloadAndInstall() {
+    final currentOperation = _operation;
+    if (currentOperation != null) return currentOperation;
+    final manifest = _snapshot.manifest;
+    if (_snapshot.status != AppUpdateStatus.updateAvailable ||
+        manifest == null) {
+      return Future.value(_snapshot);
+    }
+
+    _cancelDownload = false;
+    final operation = _downloadAndInstall(manifest);
+    _operation = operation;
+    return operation.whenComplete(() => _operation = null);
+  }
+
+  void cancelDownload() {
+    if (_snapshot.status == AppUpdateStatus.downloading) {
+      _cancelDownload = true;
+    }
+  }
+
+  Future<AppUpdateSnapshot> _downloadAndInstall(
+    PublicQaUpdateManifest manifest,
+  ) async {
+    _setSnapshot(
+      AppUpdateSnapshot(
+        status: AppUpdateStatus.downloading,
+        currentBuild: _snapshot.currentBuild,
+        environment: _snapshot.environment,
+        latestBuild: '${manifest.versionName}+${manifest.versionCode}',
+        manifest: manifest,
+        downloadTotalBytes: manifest.sizeBytes,
+      ),
+    );
+    try {
+      final temporaryDirectory = await _temporaryDirectory.get();
+      final directory = Directory(
+        '${temporaryDirectory.path}${Platform.pathSeparator}relio-updates',
+      );
+      final download = await _provider.download(
+        manifest,
+        directory: directory,
+        isCancelled: () => _cancelDownload,
+        onProgress: (received, total) {
+          _setSnapshot(
+            AppUpdateSnapshot(
+              status: AppUpdateStatus.downloading,
+              currentBuild: _snapshot.currentBuild,
+              environment: _snapshot.environment,
+              latestBuild: '${manifest.versionName}+${manifest.versionCode}',
+              manifest: manifest,
+              downloadedBytes: received,
+              downloadTotalBytes: total,
+            ),
+          );
+        },
+      );
+      final info = await _installer.inspectApk(download.path);
+      final installedFingerprint = await _installer
+          .getInstalledSigningFingerprint();
+      if (info.packageName != manifest.packageName ||
+          info.versionCode != manifest.versionCode ||
+          info.versionCode <= _currentBuildCode ||
+          _normaliseFingerprint(info.signingCertSha256) !=
+              manifest.signingCertSha256 ||
+          _normaliseFingerprint(installedFingerprint) !=
+              manifest.signingCertSha256) {
+        await _deleteDownloadedApk(download.path);
+        return _setError('apkVerificationFailed');
+      }
+      final canInstall = await _installer.canRequestPackageInstalls();
+      if (!canInstall) {
+        _setSnapshot(
+          AppUpdateSnapshot(
+            status: AppUpdateStatus.installPermissionRequired,
+            currentBuild: _snapshot.currentBuild,
+            environment: _snapshot.environment,
+            latestBuild: '${manifest.versionName}+${manifest.versionCode}',
+            manifest: manifest,
+            downloadedPath: download.path,
+            downloadedBytes: download.sizeBytes,
+            downloadTotalBytes: manifest.sizeBytes,
+            code: 'installPermissionRequired',
+          ),
+        );
+        await _installer.openInstallPermissionSettings();
+        return _snapshot;
+      }
+      await _installer.launchInstaller(download.path);
+      _setSnapshot(
+        AppUpdateSnapshot(
+          status: AppUpdateStatus.installing,
+          currentBuild: _snapshot.currentBuild,
+          environment: _snapshot.environment,
+          latestBuild: '${manifest.versionName}+${manifest.versionCode}',
+          manifest: manifest,
+          downloadedPath: download.path,
+          downloadedBytes: download.sizeBytes,
+          downloadTotalBytes: manifest.sizeBytes,
+        ),
+      );
+      return _snapshot;
+    } on PublicUpdateProviderException catch (error) {
+      return _setError(error.code);
+    } on Object {
+      return _setError('apkVerificationFailed');
+    }
+  }
+
+  Future<void> _deleteDownloadedApk(String path) async {
+    final file = File(path);
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<AppUpdateSnapshot> _setError(String code) async {
+    final next = AppUpdateSnapshot(
+      status: AppUpdateStatus.error,
+      currentBuild: _snapshot.currentBuild,
+      environment: _snapshot.environment,
+      latestBuild: _snapshot.latestBuild,
+      manifest: _snapshot.manifest,
+      code: code,
+    );
+    _setSnapshot(next);
+    return next;
+  }
+
+  int get _currentBuildCode =>
+      int.tryParse(_snapshot.currentBuild.split('+').last) ?? 0;
+
+  static String _normaliseFingerprint(String value) =>
+      value.replaceAll(':', '').toLowerCase();
 
   void _setSnapshot(AppUpdateSnapshot next) {
     _snapshot = next;

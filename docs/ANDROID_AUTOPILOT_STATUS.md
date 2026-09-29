@@ -4,54 +4,61 @@
 
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
-- Version/build: `0.8.5+11` (Build 11 baseline)
-- Current commit: see `git rev-parse HEAD` in the active workspace
+- Previous release: `0.8.5+11` through Firebase App Distribution
+- Current milestone: `0.8.6+12` through public Firebase Hosting QA
 - Drift schema: v4
-- Tests: 76 passing
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
 - PROD package: `com.relio.relio_mobile`
 
-## Firebase QA identity
+## Firebase identity
 
 - Project ID: `relio-17dc0`
 - QA App ID: `1:789862464099:android:a26ab040a4fdbe1a899656`
-- Config: `android/app/src/qa/google-services.json`
-- Firebase products: App Distribution only; Supabase remains the cloud backend
+- QA config: `android/app/src/qa/google-services.json`
+- Hosting site: `relio-17dc0`
+- Public QA URL: `https://relio-17dc0.web.app/qa/`
+- Public manifest: `https://relio-17dc0.web.app/qa/latest.json`
+- Firebase App Distribution group: `relio-testers` (internal/fallback)
+- Supabase remains the RELIO application cloud backend
 
-## Distribution readiness
+## Public update implementation
 
-- Firebase CLI: installed (`15.32.0`)
-- Authentication: blocked; no authorized Firebase CLI account is logged in
-- Exact-project verification: pending authentication
-- App Distribution: code/config ready; live upload blocked pending authentication
-- App Testers API: not verified; Firebase Console check remains manual
-- `relio-testers` group: not verified; empty-group creation is prepared after
-  exact project access is authenticated
-- Approved tester: none configured
+- QA defaults to `PublicQaAppUpdateProvider` and fetches only `latest.json`.
+- Firebase App Distribution is retained behind an explicit fallback provider;
+  public QA users are not asked to enroll or sign in.
+- Manifest validation gates schema, channel, package, versionCode, HTTPS
+  origin/path, SHA-256, size, release notes, and signing certificate.
+- APK verification gates package, exact higher versionCode, SHA-256, and the
+  signer match against the installed QA application.
+- Android Package Installer receives a temporary `content://` URI only after
+  the user explicitly chooses download and installation remains user-confirmed.
+- `REQUEST_INSTALL_PACKAGES` is QA-only; PROD has no public updater behavior or
+  sideload permission.
 
-## Quality and builds
+## Quality baseline
 
-- `dart format .`: passed
+- `dart format`: passed
 - `flutter analyze`: passed
-- `flutter test`: 76 passed
-- DEV debug: passed
-- QA debug: passed
-- QA signed release: passed
-- PROD debug verification: passed
-- QA/PROD SDK isolation: passed
-- `deploy-test.ps1 -NoUpload`: passed; no live upload performed
-- QA signing: existing `android/relio-test.keystore` certificate verified
+- `flutter test`: 86 passed
+- QA/PROD App Distribution SDK isolation: passed
+- DEV debug, QA debug, QA signed release, and PROD verification builds are
+  required before the public release pipeline can deploy.
+- `scripts/release-public-qa.ps1` is the only public Hosting release entrypoint;
+  it deploys Hosting only and verifies the remote page, manifest, APK, and hash.
 
-## Remaining blockers and next milestone
+## Deployment status
 
-- Complete interactive `firebase login` with the intended Firebase account.
-- Verify App Testers API and create/reuse the empty `relio-testers` group.
-- Explicitly approve at least one tester email before live upload.
-- Install Build 11 on a real Android phone and complete the manual smoke/update
-  flow; wireless update remains pending physical verification.
-- After Build 11 installation is confirmed, explicitly prepare and distribute
-  Build 12 using the documented workflow.
+Build 12 is prepared locally, but public deployment is **BLOCKED** by Firebase
+Hosting's Spark-plan restriction: executable APK files are forbidden. The
+Hosting deploy was not activated and the page, manifest, and APK URLs all
+returned 404 afterward. No billing upgrade or Firebase Storage fallback was
+performed.
 
-Do not start v0.9 or claim wireless-update success until the physical Android
-verification is complete.
+## Physical boundary
+
+The automated work does not claim OEM Android installer behavior. The user must
+open the public QA URL on an Android phone, install Build 12, confirm
+`0.8.6+12`, create persistent local data, and confirm `ตรวจสอบอัปเดต` reports
+no newer build. Build 13 and v0.9 remain blocked until that baseline is
+confirmed.
