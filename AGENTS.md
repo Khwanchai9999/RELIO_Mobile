@@ -124,6 +124,11 @@ WARN policy for missing config, so DEV and PROD remain Supabase-only and
 buildable. Verify its package target and App Distribution dependency boundary
 with `scripts/verify-qa-update-isolation.ps1` before QA deployment.
 
+`scripts/deploy-test.ps1` resolves the QA App ID from the verified config when
+`FIREBASE_APP_ID` is absent and defaults only to the authorized
+`relio-testers` group. `scripts/bump-qa-build.ps1` is the explicit-only path for
+preparing a later QA build; deployment must never bump the version implicitly.
+
 Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.

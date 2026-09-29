@@ -154,6 +154,9 @@ key once, then run the fail-fast deployment pipeline from the active workspace:
 The pipeline runs format, analyze, tests, and a signed TEST APK build before any
 Firebase upload. Missing Firebase configuration produces a ready artifact and
 `FIREBASE LIVE DISTRIBUTION — DEFERRED`; it never invents IDs or credentials.
+When `FIREBASE_APP_ID` is absent, the pipeline reads the verified QA App ID from
+`android/app/src/qa/google-services.json`. The default authorized tester group
+is `relio-testers`; no tester email is inferred or added.
 See [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
 
 The QA variant contains the full Firebase App Distribution Android SDK for the
@@ -165,6 +168,14 @@ build. The real QA Firebase config is
 only as QA configuration. No Firebase Auth, Firestore, Storage, or Analytics
 SDK is added; Supabase remains the cloud backend. See
 [docs/QA_UPDATE_SYSTEM.md](docs/QA_UPDATE_SYSTEM.md).
+
+Build numbers are never changed automatically. Prepare a later wireless-update
+build only with an explicit command such as:
+
+```powershell
+.\scripts\bump-qa-build.ps1 -NextBuildNumber 12 -WhatIf
+.\scripts\bump-qa-build.ps1 -NextBuildNumber 12
+```
 
 ## Architecture
 

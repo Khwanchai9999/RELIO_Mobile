@@ -38,6 +38,30 @@ $version = ([regex]::Match($pubspec, '(?m)^version:\s+([^\s#]+)')).Groups[1].Val
 $versionParts = $version.Split('+', 2)
 $versionName = $versionParts[0]
 $buildNumber = $versionParts[1]
+$qaConfigPath = Join-Path $projectRoot 'android\app\src\qa\google-services.json'
+$qaPackageName = 'com.relio.relio_mobile.test'
+if (-not (Test-Path -LiteralPath $qaConfigPath)) {
+    throw "QA Firebase config was not found: $qaConfigPath"
+}
+# อ่าน App ID จากไฟล์ QA ที่ลงทะเบียนกับ Firebase จริง และเช็ก package ซ้ำก่อน deploy
+# เพื่อกันส่ง APK ผิดโปรเจกต์หรือผิด application identity
+$qaFirebaseConfig = Get-Content -Raw -LiteralPath $qaConfigPath | ConvertFrom-Json
+$qaClient = @($qaFirebaseConfig.client | Where-Object {
+        $_.client_info.android_client_info.package_name -eq $qaPackageName
+    }) | Select-Object -First 1
+if (-not $qaClient) {
+    throw "QA Firebase config does not target $qaPackageName."
+}
+$qaProjectId = [string]$qaFirebaseConfig.project_info.project_id
+$qaAppIdFromConfig = [string]$qaClient.client_info.mobilesdk_app_id
+if (-not $qaProjectId -or $qaAppIdFromConfig -notmatch '^1:\d+:android:[A-Za-z0-9_-]+$') {
+    throw 'QA Firebase config is missing a valid project ID or Android App ID.'
+}
+$providedAppId = if ($FirebaseAppId) { $FirebaseAppId } else { $env:FIREBASE_APP_ID }
+if ($providedAppId -and $providedAppId -ne $qaAppIdFromConfig) {
+    throw "FIREBASE_APP_ID must match the QA config App ID for $qaPackageName."
+}
+$resolvedFirebaseAppId = if ($providedAppId) { $providedAppId } else { $qaAppIdFromConfig }
 $defines = @(
     "--dart-define=RELIO_ENV=test",
     "--dart-define=RELIO_VERSION=$versionName",
@@ -179,17 +203,83 @@ if ($NoUpload) {
     exit 0
 }
 
-$appId = if ($FirebaseAppId) { $FirebaseAppId } else { $env:FIREBASE_APP_ID }
+$appId = $resolvedFirebaseAppId
 $groupsValue = if ($Groups) { $Groups } else { $env:FIREBASE_GROUPS }
 $testersValue = if ($Testers) { $Testers } else { $env:FIREBASE_TESTERS }
+if (-not $groupsValue -and -not $testersValue) {
+    $groupsValue = 'relio-testers'
+    # ใช้ group มาตรฐานเมื่อไม่ได้ระบุ เพื่อไม่ต้องคัดลอก App ID หรือ alias ซ้ำทุกครั้ง
+    Write-Host 'Firebase tester group defaulted to relio-testers.'
+}
+if ($groupsValue -and $groupsValue -ne 'relio-testers') {
+    throw 'Only the authorized Firebase tester group relio-testers may be used.'
+}
 $firebase = Get-Command firebase -ErrorAction SilentlyContinue
-if (-not $firebase -or -not $appId -or (-not $groupsValue -and -not $testersValue)) {
+if (-not $firebase) {
     Write-Host 'FIREBASE LIVE DISTRIBUTION — DEFERRED'
-    Write-Host 'QA APK is ready. Set up Firebase CLI authentication, FIREBASE_APP_ID, and FIREBASE_GROUPS or FIREBASE_TESTERS to upload.'
+    Write-Host 'QA APK is ready. Install the official Firebase CLI and authenticate before upload.'
     exit 0
 }
 if ($appId -notmatch '^1:\d+:android:[A-Za-z0-9_-]+$') {
     throw 'FIREBASE_APP_ID has an invalid Firebase Android App ID format.'
+}
+
+# Firebase CLI may print account details; capture them so logs never expose identity
+# or credential material while still failing before any upload when login is absent.
+$env:FIREBASE_CLI_DISABLE_UPDATE_CHECK = '1'
+$loginOutput = & $firebase.Source login:list 2>&1
+if ($LASTEXITCODE -ne 0 -or ($loginOutput -join "`n") -match 'No authorized accounts') {
+    throw 'Firebase CLI is not authenticated. Complete firebase login before live QA upload.'
+}
+
+$projectsJson = & $firebase.Source projects:list --json 2>$null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Firebase CLI could not list projects for the authenticated account.'
+}
+try {
+    $projectsResponse = ($projectsJson -join "`n") | ConvertFrom-Json
+} catch {
+    throw 'Firebase CLI returned an unreadable project list.'
+}
+$projectItems = if ($projectsResponse.result) { $projectsResponse.result } else { $projectsResponse }
+$matchingProject = @($projectItems | Where-Object {
+        $_.projectId -eq $qaProjectId
+    }) | Select-Object -First 1
+if (-not $matchingProject) {
+    throw "Authenticated Firebase account cannot be proven to access QA project $qaProjectId."
+}
+
+if ($groupsValue) {
+    $groupsJson = & $firebase.Source appdistribution:groups:list --project $qaProjectId --json 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Firebase App Distribution groups could not be listed for project $qaProjectId."
+    }
+    try {
+        $groupsResponse = ($groupsJson -join "`n") | ConvertFrom-Json
+    } catch {
+        throw 'Firebase CLI returned an unreadable App Distribution group list.'
+    }
+    $groupItems = if ($groupsResponse.result.groups) {
+        $groupsResponse.result.groups
+    } elseif ($groupsResponse.groups) {
+        $groupsResponse.groups
+    } else {
+        $groupsResponse.result
+    }
+    $matchingGroup = @($groupItems | Where-Object {
+            $_.name -and $_.name.Split('/')[-1] -eq $groupsValue
+        }) | Select-Object -First 1
+    if (-not $matchingGroup) {
+        Write-Host 'Creating the empty authorized tester group RELIO Testers...'
+        & $firebase.Source appdistribution:groups:create 'RELIO Testers' $groupsValue --project $qaProjectId
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Firebase App Distribution tester group creation failed.'
+        }
+        throw 'The relio-testers group is empty. Add an explicitly approved tester before upload.'
+    }
+    if ([int]$matchingGroup.testerCount -lt 1) {
+        throw 'The relio-testers group is empty. Add an explicitly approved tester before upload.'
+    }
 }
 
 $uploadArgs = @(

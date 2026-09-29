@@ -37,7 +37,8 @@ Firebase CLI distribution ใช้ Firebase App ID, release notes และ tes
 สำหรับการอัปโหลด ส่วน Android runtime ใช้ API-only library ทุก variant และ
 full App Distribution SDK เฉพาะ `qaImplementation`; repository มี real
 `android/app/src/qa/google-services.json` สำหรับ package เดียวกันเท่านั้น และ
-ไม่เพิ่ม Firebase Auth, Firestore, Storage หรือ Analytics
+ไม่เพิ่ม Firebase Auth, Firestore, Storage หรือ Analytics โดย deployment script
+จะอ่าน App ID จากไฟล์นี้เมื่อไม่มี `FIREBASE_APP_ID`
 
 ## Quality gate และการแจก
 
@@ -61,6 +62,10 @@ full App Distribution SDK เฉพาะ `qaImplementation`; repository มี 
    milestone นี้
 8. อัปโหลดเมื่อ Firebase CLI, `FIREBASE_APP_ID` และ tester/group config พร้อม
 
+ถ้าไม่ส่ง `FIREBASE_GROUPS` หรือ `FIREBASE_TESTERS`, script จะใช้ group มาตรฐาน
+`relio-testers` และจะสร้าง group ว่างชื่อ `RELIO Testers` ได้ต่อเมื่อ account ที่
+login อยู่พิสูจน์สิทธิ์ใน Firebase project เดียวกับ QA config แล้วเท่านั้น
+
 ถ้า format, analyze, test หรือ build ไม่ผ่าน สคริปต์จะหยุดและไม่ upload
 
 ถ้าต้องการสร้าง artifact โดยยังไม่ upload:
@@ -78,6 +83,28 @@ $env:FIREBASE_GROUPS = 'relio-testers'
 ```
 
 หรือส่ง `-FirebaseAppId`, `-Groups`, `-Testers` ให้สคริปต์โดยตรง
+
+App ID ที่ส่งผ่าน parameter หรือ environment ต้องตรงกับ `mobilesdk_app_id` ใน
+QA config เสมอ ถ้าไม่ตรง script จะหยุดก่อน upload และจะไม่อ่านหรือพิมพ์ API key
+
+## เตรียม Build 12 สำหรับ wireless-update test
+
+อย่า bump version ระหว่างการลอง deploy Build 11 และอย่าแจก Build 12 จนกว่า
+ผู้ทดสอบจะติดตั้ง Build 11 บน Android จริงแล้ว เตรียมเลข build แบบ explicit ได้ด้วย:
+
+```powershell
+.\scripts\bump-qa-build.ps1 -NextBuildNumber 12 -WhatIf
+.\scripts\bump-qa-build.ps1 -NextBuildNumber 12
+```
+
+ใช้ release-note template ที่เตรียมไว้ด้วย `-ReleaseNotesPath`:
+
+```powershell
+.\scripts\deploy-test.ps1 -ReleaseNotesPath .\release_notes\0.8.5-build-12-template.md
+```
+
+คำสั่งนี้เป็นเพียง workflow ที่เตรียมไว้ ไม่ได้เปลี่ยน current build หรือ
+ทำ live upload อัตโนมัติใน milestone นี้
 
 ## Signing และ update
 

@@ -87,7 +87,10 @@ part of this update flow.
 4. Create the recommended tester group alias `relio-testers` and add real
    testers in Firebase. No tester email is stored in this repository.
 5. Set `FIREBASE_APP_ID` and either `FIREBASE_GROUPS=relio-testers` or
-   `FIREBASE_TESTERS` in the local environment.
+   `FIREBASE_TESTERS` in the local environment. If `FIREBASE_APP_ID` is absent,
+   the deployment script uses `mobilesdk_app_id` from the verified QA config.
+   If neither group nor tester is supplied, it uses the authorized
+   `relio-testers` group.
 6. Keep the original `android/relio-test.keystore` and its password backed up.
 7. Run `.\scripts\deploy-test.ps1`; it stops with a clear deferred message
    when live Firebase values are absent.

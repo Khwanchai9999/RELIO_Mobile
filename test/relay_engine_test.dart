@@ -10,6 +10,8 @@ import 'package:relio_mobile/core/relay/relay_models.dart';
 import 'package:relio_mobile/core/relay/relay_repository.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 
+import 'test_database.dart';
+
 void main() {
   test(
     'relay envelope keeps relay packet identity separate from payload ID',
@@ -353,7 +355,7 @@ class _Node {
 }
 
 Future<_Node> _node(String deviceId) async {
-  final database = AppDatabase.memory();
+  final database = createTestDatabase();
   final repositories = RelioRepositories(database);
   final identity = RelioDeviceIdentityRepository(database);
   final transport = MockNearbyTransport();

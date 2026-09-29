@@ -6,12 +6,14 @@ import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/core/sync/sync_types.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
+import 'test_database.dart';
+
 void main() {
   late AppDatabase database;
   late RelioRepositories repositories;
 
   setUp(() {
-    database = AppDatabase.memory();
+    database = createTestDatabase();
     repositories = RelioRepositories(database);
     addTearDown(database.close);
   });
@@ -151,7 +153,7 @@ void main() {
   });
 
   test('dependency bootstrap completes in the Flutter test runtime', () async {
-    final dependencies = RelioDependencies(database: AppDatabase.memory());
+    final dependencies = RelioDependencies(database: createTestDatabase());
     addTearDown(dependencies.dispose);
 
     await dependencies.initialize();

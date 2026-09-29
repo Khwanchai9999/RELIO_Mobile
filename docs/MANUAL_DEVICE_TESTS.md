@@ -167,19 +167,22 @@ path. Physical radio, GPS, and OEM checks remain deferred as well.
 Before a TEST upload, a developer should:
 
 1. Run the automated quality gate and build `RELIO Test`.
-2. Install the TEST APK through USB once and complete a smoke test.
-3. Upload only the approved artifact through Firebase App Distribution.
-4. Install it from the Firebase tester experience and verify the displayed
-   version/build.
-5. Distribute the next TEST build and confirm Android updates the same TEST app
-   without clearing its local SQLite data.
+2. Upload only the approved Build 11 artifact through Firebase App Distribution.
+3. Open the Firebase tester invitation on the Android phone, sign in with the
+   approved Google account, accept the invitation, and install Build 11.
+4. Allow Android's installation confirmation if requested, open RELIO Test, and
+   verify the displayed package/version and a basic local-data smoke test.
+5. After Build 11 is genuinely installed, explicitly bump to Build 12 and
+   distribute the next TEST build.
+6. Confirm Android updates the same TEST app without clearing its local SQLite
+   data, then verify the displayed version/build.
 
-6. Open Settings in RELIO Test and press `ตรวจสอบอัปเดต`; confirm the official
+7. Open Settings in RELIO Test and press `ตรวจสอบอัปเดต`; confirm the official
    Firebase tester sign-in/update dialog appears only after a real release is
    available and the tester explicitly confirms installation.
-7. Return to background and foreground; confirm automatic checks are throttled
+8. Return to background and foreground; confirm automatic checks are throttled
    and do not show repeated dialogs during the cooldown.
-8. After the update, verify messages, SOS data, attachments, sync queue, relay
+9. After the update, verify messages, SOS data, attachments, sync queue, relay
    packets, forwarding history, and settings remain available locally.
 
 These distribution steps are not claimed as manually completed by Codex.
