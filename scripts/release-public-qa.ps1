@@ -134,7 +134,7 @@ function Test-RemoteApk {
         [string]$Aapt2Path,
         [string]$ApkSignerPath
     )
-    if ($Url -notmatch '^https://github\.com/[^/]+/RELIO-Android-Updates/releases/download/[^/]+/relio-test-0\.8\.6\+12\.apk$') {
+    if ($Url -notmatch '^https://github\.com/[^/]+/RELIO-Android-Updates/releases/download/[^/]+/relio-test-0\.8\.6(?:\+|%2[Bb])12\.apk$') {
         throw "GitHub asset URL is not an exact approved release URL: $Url"
     }
     $downloadPath = Join-Path ([IO.Path]::GetTempPath()) "relio-public-qa-$PID.apk"
