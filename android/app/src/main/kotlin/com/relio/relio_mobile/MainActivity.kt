@@ -16,11 +16,15 @@ import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
     private val updateChannel = "relio/app_update"
+    private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannel)
             .setMethodCallHandler(::handleUpdateCall)
+        runtimeConnectivityChannels = RuntimeConnectivityChannels(this).also {
+            it.register(flutterEngine)
+        }
     }
 
     private fun handleUpdateCall(call: MethodCall, result: MethodChannel.Result) {

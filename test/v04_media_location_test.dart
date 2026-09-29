@@ -268,6 +268,19 @@ void main() {
         await root.delete(recursive: true);
       });
       await service.initialize();
+      transport.simulatePeer(id: 'endpoint-1', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+      await service.connect('endpoint-1');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      transport.simulateIncoming(
+        peerId: 'endpoint-1',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'peer-device',
+          senderUserId: 'peer-user',
+          displayName: 'Peer',
+        ).toBytes(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       final packet = RelioPacket.mediaMetadata(
         senderDeviceId: 'peer-device',
         senderUserId: 'peer-user',

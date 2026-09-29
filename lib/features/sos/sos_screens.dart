@@ -5,6 +5,7 @@ import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/relio_dependencies.dart';
 import '../../core/domain/relio_entities.dart';
+import '../../data/models/prototype_models.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 class SOSScreen extends StatefulWidget {
@@ -130,17 +131,27 @@ class _SOSScreenState extends State<SOSScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(
-                      Icons.radar_rounded,
-                      color: RelioColors.primary,
-                    ),
-                    title: const Text('จะส่งถึง'),
-                    subtitle: const Text(
-                      'อุปกรณ์ RELIO ทั้งหมด 5 เครื่องที่อยู่ในระยะ รวมถึงทีมกู้ภัย A',
-                    ),
-                  ),
+                AnimatedBuilder(
+                  animation: RelioDependencyScope.of(context).nearbyService,
+                  builder: (context, _) {
+                    final count = RelioDependencyScope.of(
+                      context,
+                    ).nearbyService.connectedPeerCount;
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.radar_rounded,
+                          color: RelioColors.primary,
+                        ),
+                        title: const Text('Nearby ที่เชื่อมต่อจริง'),
+                        subtitle: Text(
+                          count == 0
+                              ? 'ยังไม่มีอุปกรณ์เชื่อมต่อ • SOS จะเก็บสถานะไว้ในเครื่อง'
+                              : '$count เครื่อง • สถานะ SOS จะส่งผ่าน Nearby โดยไม่ใช้ Cloud',
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 18),
                 SizedBox(
@@ -158,7 +169,7 @@ class _SOSScreenState extends State<SOSScreen> {
                 Center(
                   child: TextButton(
                     onPressed: () => context.push('/sos/received'),
-                    child: const Text('ดูตัวอย่าง SOS ใกล้คุณ'),
+                    child: const Text('ดู SOS ที่ได้รับจริง'),
                   ),
                 ),
               ],
@@ -312,15 +323,27 @@ class _SOSActiveScreenState extends State<SOSActiveScreen>
                   ),
                 ),
                 const SizedBox(height: 18),
-                Card(
-                  child: const ListTile(
-                    leading: Icon(
-                      Icons.check_circle_rounded,
-                      color: RelioColors.success,
-                    ),
-                    title: Text('ส่งถึงอุปกรณ์ใกล้เคียงแล้ว'),
-                    subtitle: Text('5 เครื่อง • รวมถึงทีมกู้ภัย A'),
-                  ),
+                AnimatedBuilder(
+                  animation: RelioDependencyScope.of(context).nearbyService,
+                  builder: (context, _) {
+                    final count = RelioDependencyScope.of(
+                      context,
+                    ).nearbyService.connectedPeerCount;
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(
+                          Icons.warning_amber_rounded,
+                          color: RelioColors.sos,
+                        ),
+                        title: const Text('SOS กำลังทำงานในเครื่องนี้'),
+                        subtitle: Text(
+                          count == 0
+                              ? 'ยังไม่มี peer เชื่อมต่อ • ข้อมูลในเครื่องยังคงอยู่'
+                              : 'Nearby เชื่อมต่อ $count เครื่อง • สถานะส่งผ่าน transport แล้ว',
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 12),
                 FutureBuilder<RelioSosEvent?>(
@@ -378,87 +401,48 @@ class SOSReceivedScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: RelioAppBar(title: 'SOS ใกล้คุณ', onBack: () => context.pop()),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(RelioSpacing.lg),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 720),
-            child: Column(
-              children: [
-                Card(
-                  color: RelioColors.sos.withValues(alpha: 0.08),
-                  child: const Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.warning_rounded,
-                          color: RelioColors.sos,
-                          size: 36,
-                        ),
-                        SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'สมชาย ต้องการความช่วยเหลือ',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 17,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text('อยู่ใกล้คุณ • ≈ 120 ม.'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+      body: AnimatedBuilder(
+        animation: RelioDependencyScope.of(context).nearbyService,
+        builder: (context, _) {
+          final nearby = RelioDependencyScope.of(context).nearbyService;
+          final sosPeers = nearby.discoveredPeers
+              .where(
+                (peer) =>
+                    peer.deviceId != null &&
+                    nearby.peerStatuses[peer.deviceId] == DeviceStatus.sos,
+              )
+              .toList(growable: false);
+          if (sosPeers.isEmpty) {
+            return const RelioEmptyState(
+              icon: Icons.warning_amber_rounded,
+              title: 'ยังไม่ได้รับ SOS จากอุปกรณ์จริง',
+              subtitle:
+                  'สถานะจะแสดงที่นี่เมื่อ peer ส่ง SOS packet ผ่าน Nearby',
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(RelioSpacing.lg),
+            itemCount: sosPeers.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 10),
+            itemBuilder: (context, index) {
+              final peer = sosPeers[index];
+              final deviceId = peer.deviceId!;
+              return Card(
+                color: RelioColors.sos.withValues(alpha: 0.08),
+                child: ListTile(
+                  leading: const Icon(
+                    Icons.warning_rounded,
+                    color: RelioColors.sos,
                   ),
+                  title: Text(peer.name),
+                  subtitle: const Text('REAL • ต้องการความช่วยเหลือ'),
+                  trailing: const Icon(Icons.chat_bubble_outline),
+                  onTap: () => context.push('/chat/$deviceId'),
                 ),
-                const SizedBox(height: 14),
-                const RelioLocationCard(title: 'ตำแหน่งของผู้ส่ง SOS'),
-                const SizedBox(height: 14),
-                const Card(
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.message_outlined,
-                      color: RelioColors.sos,
-                    ),
-                    title: Text('ข้อความฉุกเฉิน'),
-                    subtitle: Text('บาดเจ็บที่ขา ต้องการความช่วยเหลือ'),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () => context.push('/chat/somchai'),
-                        icon: const Icon(Icons.chat_bubble_outline),
-                        label: const Text('เปิดแชท'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () =>
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('แผนที่เป็น prototype ใน v0.1'),
-                              ),
-                            ),
-                        icon: const Icon(Icons.map_outlined),
-                        label: const Text('ดูตำแหน่ง'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+              );
+            },
+          );
+        },
       ),
     );
   }

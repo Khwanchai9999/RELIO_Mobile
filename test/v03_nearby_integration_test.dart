@@ -160,10 +160,70 @@ void main() {
     },
   );
 
-  test('incoming SOS is persisted once and updates the peer status', () async {
+  test(
+    'pending local text flushes only after a peer hello identifies it',
+    () async {
+      const peerDeviceId = 'device-peer-queued';
+      await repositories.conversations.ensureConversation(
+        id: peerDeviceId,
+        participantId: peerDeviceId,
+        displayName: 'Queued Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      final message = await repositories.messages.createOutgoingText(
+        conversationId: peerDeviceId,
+        senderId: 'minnie',
+        senderDeviceId: await RelioDeviceIdentityRepository(
+          database,
+        ).getDeviceId(),
+        text: 'ส่งเมื่อเชื่อมต่อได้',
+      );
+
+      transport.simulatePeer(id: 'endpoint-queued', name: 'Queued Peer');
+      await settle();
+      await service.connect('endpoint-queued');
+      await settle();
+      expect(
+        (await repositories.messages.getMessage(message.id))?.status,
+        DeliveryStatus.pending,
+      );
+
+      transport.simulateIncoming(
+        peerId: 'endpoint-queued',
+        bytes: RelioPacket.hello(
+          senderDeviceId: peerDeviceId,
+          senderUserId: 'peer-user',
+          displayName: 'Queued Peer',
+        ).toBytes(),
+      );
+      await settle();
+
+      final sent = transport.sentPayloads
+          .map(RelioPacket.fromBytes)
+          .where((packet) => packet.type == RelioPacketType.textMessage)
+          .single;
+      expect(sent.payload['messageId'], message.id);
+      expect(sent.payload['text'], 'ส่งเมื่อเชื่อมต่อได้');
+      expect(
+        (await repositories.messages.getMessage(message.id))?.status,
+        DeliveryStatus.nearbySent,
+      );
+    },
+  );
+
+  test('incoming SOS and clear are persisted and update peer status', () async {
     transport.simulatePeer(id: 'endpoint-sos', name: 'SOS Peer');
     await settle();
     await service.connect('endpoint-sos');
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.hello(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+      ).toBytes(),
+    );
     await settle();
     final packet = RelioPacket.sos(
       senderDeviceId: 'device-sos',
@@ -183,6 +243,27 @@ void main() {
     expect(
       (await repositories.nearbyDevices.listDevices()).single.status,
       DeviceStatus.sos,
+    );
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.sos(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        sosId: 'sos-1',
+        message: 'need help',
+        createdAt: DateTime.now(),
+        isActive: false,
+      ).toBytes(),
+    );
+    await settle();
+
+    expect((await repositories.sos.getById('sos-1'))?.isActive, isFalse);
+    expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
+    expect(
+      (await repositories.nearbyDevices.listDevices()).single.status,
+      DeviceStatus.normal,
     );
   });
 

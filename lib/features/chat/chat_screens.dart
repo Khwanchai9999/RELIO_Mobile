@@ -25,7 +25,23 @@ class ChatListScreen extends StatelessWidget {
       body: StreamBuilder<List<RelioConversation>>(
         stream: repositories.conversations.watchConversations(),
         builder: (context, snapshot) {
-          final conversations = snapshot.data ?? const <RelioConversation>[];
+          final allConversations = snapshot.data ?? const <RelioConversation>[];
+          final nearby = RelioDependencyScope.of(context).nearbyService;
+          final conversations = [
+            ...allConversations.where(
+              (conversation) =>
+                  !RelioMockData.isDemoId(conversation.id) &&
+                  nearby.isDeviceConnected(conversation.participantId),
+            ),
+            ...allConversations.where(
+              (conversation) =>
+                  !RelioMockData.isDemoId(conversation.id) &&
+                  !nearby.isDeviceConnected(conversation.participantId),
+            ),
+            ...allConversations.where(
+              (conversation) => RelioMockData.isDemoId(conversation.id),
+            ),
+          ];
           if (conversations.isEmpty) {
             return const RelioEmptyState(
               icon: Icons.chat_bubble_outline,
@@ -64,6 +80,7 @@ class ChatListScreen extends StatelessWidget {
         : '${conversation.lastMessageAt!.hour.toString().padLeft(2, '0')}:${conversation.lastMessageAt!.minute.toString().padLeft(2, '0')}',
     status: conversation.participantStatus,
     unread: 0,
+    isDemo: RelioMockData.isDemoId(conversation.id),
   );
 }
 
@@ -79,17 +96,16 @@ class ChatRoomScreen extends StatefulWidget {
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _composer = TextEditingController();
   final _scrollController = ScrollController();
-  late final RelioDevice _device;
+  RelioDevice? _demoDevice;
   late Stream<List<RelioMessage>> _messagesStream;
   String? _persistedPeerName;
 
   @override
   void initState() {
     super.initState();
-    _device = RelioMockData.devices.firstWhere(
-      (device) => device.id == widget.chatId,
-      orElse: () => RelioMockData.devices.first,
-    );
+    for (final device in RelioMockData.devices) {
+      if (device.id == widget.chatId) _demoDevice = device;
+    }
   }
 
   @override
@@ -268,29 +284,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final nearby = RelioDependencyScope.of(context).nearbyService;
+    final isDemo = RelioMockData.isDemoId(widget.chatId);
     return Scaffold(
-      appBar: RelioAppBar(
-        title: _persistedPeerName ?? _device.name,
-        subtitle: _device.distanceMetersApprox == null
-            ? 'อยู่ใกล้เคียง • Nearby'
-            : 'อยู่ใกล้คุณ • ${_device.approximateDistance}',
-        onBack: () => context.pop(),
-        actions: [
-          IconButton(
-            onPressed: () => _prototypeAction('โทร'),
-            tooltip: 'โทร',
-            icon: const Icon(Icons.phone_outlined),
-          ),
-          IconButton(
-            onPressed: () => _prototypeAction('เมนู'),
-            tooltip: 'เมนู',
-            icon: const Icon(Icons.more_vert_rounded),
-          ),
-        ],
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: AnimatedBuilder(
+          animation: nearby,
+          builder: (context, _) {
+            final connected = nearby.isDeviceConnected(widget.chatId);
+            return RelioAppBar(
+              title: _persistedPeerName ?? _demoDevice?.name ?? 'อุปกรณ์ RELIO',
+              subtitle: isDemo
+                  ? 'ตัวอย่าง • ประวัติสนทนา DEMO'
+                  : connected
+                  ? 'Nearby • เชื่อมต่อโดยตรงแล้ว'
+                  : 'Nearby • ยังไม่เชื่อมต่อ — ข้อความจะค้างในเครื่อง',
+              onBack: () => context.pop(),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Chip(label: Text(isDemo ? 'DEMO' : 'REAL')),
+                ),
+                IconButton(
+                  onPressed: () => _prototypeAction('โทร'),
+                  tooltip: 'โทร',
+                  icon: const Icon(Icons.phone_outlined),
+                ),
+                IconButton(
+                  onPressed: () => _prototypeAction('เมนู'),
+                  tooltip: 'เมนู',
+                  icon: const Icon(Icons.more_vert_rounded),
+                ),
+              ],
+            );
+          },
+        ),
       ),
       body: Column(
         children: [
-          const RelioConnectivityBanner(internetOnline: false),
           Expanded(
             child: StreamBuilder<List<RelioMessage>>(
               stream: _messagesStream,

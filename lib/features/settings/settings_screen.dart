@@ -10,6 +10,7 @@ import '../../app/theme/relio_spacing.dart';
 import '../../core/app_update/app_update_service.dart';
 import '../../core/app_update/public_update_errors.dart';
 import '../../core/relio_dependencies.dart';
+import 'connectivity_diagnostics_card.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,8 +21,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool bluetooth = true;
-  bool wifi = true;
   bool notifications = true;
   bool rescue = false;
   bool _settingsLoaded = false;
@@ -194,33 +193,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           24,
         ),
         children: [
-          Text(
-            'การเชื่อมต่อ',
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.bluetooth_rounded,
-            title: 'Bluetooth',
-            subtitle: bluetooth ? 'เปิดใช้งาน' : 'ปิดใช้งาน',
-            trailing: Switch(
-              value: bluetooth,
-              onChanged: (value) => setState(() => bluetooth = value),
-            ),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.wifi_rounded,
-            title: 'Wi-Fi Direct',
-            subtitle: wifi ? 'พร้อมใช้งาน' : 'ปิดใช้งาน',
-            trailing: Switch(
-              value: wifi,
-              onChanged: (value) => setState(() => wifi = value),
-            ),
-          ),
-          const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.shield_outlined,
             title: 'โหมดหน่วยกู้ภัย',
@@ -271,6 +243,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (value) => setState(() => notifications = value),
             ),
           ),
+          const SizedBox(height: 18),
+          Text(
+            'การเชื่อมต่อ',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const ConnectivityDiagnosticsCard(),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.sync_rounded,

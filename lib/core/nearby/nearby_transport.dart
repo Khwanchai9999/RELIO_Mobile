@@ -9,6 +9,7 @@ class NearbyPeer {
     this.connected = false,
     this.deviceId,
     this.capabilities = const [],
+    this.isLost = false,
   });
 
   /// Transport endpoint identity. This may change between sessions.
@@ -22,6 +23,9 @@ class NearbyPeer {
 
   /// Capabilities learned from the completed RELIO hello handshake.
   final List<String> capabilities;
+
+  /// True when the transport explicitly reports the endpoint is no longer seen.
+  final bool isLost;
 }
 
 class NearbyPayloadEvent {

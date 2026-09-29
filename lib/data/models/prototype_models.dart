@@ -2,6 +2,16 @@ import 'package:flutter/material.dart';
 
 enum DeviceStatus { normal, sos, rescue, offline }
 
+enum PeerPresence {
+  demo,
+  discovered,
+  connecting,
+  connected,
+  disconnected,
+  failed,
+  stale,
+}
+
 extension DeviceStatusX on DeviceStatus {
   String get label => switch (this) {
     DeviceStatus.normal => 'ปกติ',
@@ -26,6 +36,9 @@ class RelioDevice {
     this.distanceMetersApprox,
     required this.signalQuality,
     this.isConnected = true,
+    this.isDemo = true,
+    this.presence = PeerPresence.demo,
+    this.lastSeenAt,
   });
 
   final String id;
@@ -37,6 +50,9 @@ class RelioDevice {
   final int? distanceMetersApprox;
   final int signalQuality;
   final bool isConnected;
+  final bool isDemo;
+  final PeerPresence presence;
+  final DateTime? lastSeenAt;
 
   String get approximateDistance => distanceMetersApprox == null
       ? 'อยู่ใกล้เคียง'
@@ -51,6 +67,7 @@ class RelioChatPreview {
     required this.time,
     required this.status,
     required this.unread,
+    this.isDemo = false,
   });
 
   final String id;
@@ -59,6 +76,7 @@ class RelioChatPreview {
   final String time;
   final DeviceStatus status;
   final int unread;
+  final bool isDemo;
 }
 
 enum DeliveryStatus { pending, nearbySent, delivered, synced, failed }

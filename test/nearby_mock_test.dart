@@ -29,7 +29,7 @@ void main() {
     );
     await service.initialize();
     addTearDown(() async {
-      service.dispose();
+      await service.close();
       await database.close();
     });
   });
@@ -51,6 +51,19 @@ void main() {
         displayName: 'Peer One',
         participantStatus: DeviceStatus.normal,
       );
+      transport.simulatePeer(id: 'peer-1', name: 'Peer One');
+      await Future<void>.delayed(Duration.zero);
+      await service.connect('peer-1');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      transport.simulateIncoming(
+        peerId: 'peer-1',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'peer-1',
+          senderUserId: 'peer-1',
+          displayName: 'Peer One',
+        ).toBytes(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       final message = await repositories.messages.createOutgoingText(
         conversationId: 'peer-1',
         senderId: 'minnie',
@@ -66,9 +79,11 @@ void main() {
         DeliveryStatus.nearbySent,
       );
 
-      final sent = RelioPacket.fromBytes(transport.sentPayloads.single);
+      final sent = transport.sentPayloads
+          .map(RelioPacket.fromBytes)
+          .firstWhere((packet) => packet.type == RelioPacketType.textMessage);
       final ack = RelioPacket.ack(
-        senderDeviceId: 'peer-device',
+        senderDeviceId: 'peer-1',
         senderUserId: 'peer-1',
         acknowledgedPacketId: sent.packetId,
         messageId: message.id,
@@ -86,8 +101,12 @@ void main() {
   );
 
   test(
-    'incoming text is persisted and mock connection loss is observable',
+    'incoming text requires hello and mock connection loss is observable',
     () async {
+      transport.simulatePeer(id: 'peer-1', name: 'Peer One');
+      await Future<void>.delayed(Duration.zero);
+      await service.connect('peer-1');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       final packet = RelioPacket.textMessage(
         senderDeviceId: 'peer-device',
         senderUserId: 'peer-1',
@@ -98,14 +117,32 @@ void main() {
       );
       transport.simulateIncoming(peerId: 'peer-1', bytes: packet.toBytes());
       await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(await repositories.messages.listMessages('peer-device'), isEmpty);
+
+      final hello = RelioPacket.hello(
+        senderDeviceId: 'peer-device',
+        senderUserId: 'peer-1',
+        displayName: 'Peer One',
+      );
+      transport.simulateIncoming(peerId: 'peer-1', bytes: hello.toBytes());
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      transport.simulateIncoming(peerId: 'peer-1', bytes: packet.toBytes());
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(
-        (await repositories.messages.listMessages('peer-1')).single.text,
+        (await repositories.messages.listMessages('peer-device')).single.text,
         'รับข้อความแล้ว',
       );
-      expect(transport.sentPayloads, hasLength(1));
+      expect(
+        transport.sentPayloads.map(RelioPacket.fromBytes),
+        contains(
+          isA<RelioPacket>().having(
+            (packet) => packet.type,
+            'type',
+            RelioPacketType.ack,
+          ),
+        ),
+      );
 
-      transport.simulatePeer(id: 'peer-1', name: 'Peer One');
-      await service.connect('peer-1');
       transport.simulateConnectionLoss('peer-1');
       await Future<void>.delayed(Duration.zero);
       expect(

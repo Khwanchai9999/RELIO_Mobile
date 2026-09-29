@@ -40,7 +40,12 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 - Welcome, login/register prototype, offline entry, and permission explainer
 - Home dashboard with separate Internet and Nearby connectivity status
+- Runtime connectivity distinguishes Internet reachability, Wi-Fi radio,
+  Bluetooth, Nearby permission readiness, connected peers, and optional Cloud
+  state instead of presenting demo toggles as actual system status
 - Nearby device list with All, SOS, Rescue, and Normal filters
+- Seeded peers are marked and grouped as `DEMO`; actual peers use transport
+  discovery and a hello handshake before stable device identity is accepted
 - Nearby discovery/advertising/connect/disconnect coordination with explicit
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
@@ -64,7 +69,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - Application-level hello handshake mapping a transport endpoint to stable
   local `deviceId` metadata
 - Direct one-to-one chat routing, local-first pending/nearbySent/delivered
-  lifecycle, duplicate protection, ACK idempotence, and user retry
+  lifecycle, post-handshake pending flush, duplicate protection, ACK
+  idempotence, and user retry
 - RELIO-owned media storage, MIME/signature validation, bounded image/video
   policy, native Nearby file payloads, progress, completion ACK, and retry
 - On-demand LocationService for location messages and SOS, with current/last
@@ -140,11 +146,11 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current public QA build is version `0.8.6+16`; production remains reserved
-as `com.relio.relio_mobile`. Build 13 remains immutable history. Build 15
-verified QA updater configuration parity locally and was confirmed on Realme.
-Build 16 is publicly available for physical in-app OTA verification; no phone
-was modified during publication.
+The current source version is `0.8.6+17`. Build 17 is a local-only QA
+verification artifact for real offline two-device demo hardening; it has not
+been published, uploaded, or installed on a phone. The latest public QA build
+remains Build 16 for the pending Build 12 → Build 16 physical OTA check. PROD
+remains reserved as `com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.8.6)
 
@@ -166,6 +172,9 @@ Database, Storage, App Distribution, or Supabase resources. Use `-NoDeploy` to
 skip Hosting after the GitHub asset has been verified, or `-NoUpload` to
 prepare local metadata without changing GitHub. See
 [docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
+Build 17 is not authorized for that public pipeline: keep it local with
+`scripts/deploy-test.ps1 -NoUpload` until its two-phone physical verification
+is complete and publication is explicitly requested.
 
 The QA variant contains the full Firebase App Distribution Android SDK for the
 internal/fallback channel. DEV and PROD contain only the safe API-only stub;
@@ -187,8 +196,9 @@ account or Google sign-in. Android still requires the user to approve unknown-
 app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
-use Firebase Storage. Build 13 is reserved for a later physical 12 → 13
-verification and must not be created in this milestone.
+use Firebase Storage. Build 13 is immutable history; Build 16 is the current
+public QA release, while Build 17 remains local-only pending physical
+verification.
 
 ## Architecture
 

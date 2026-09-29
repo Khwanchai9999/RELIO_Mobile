@@ -272,6 +272,19 @@ class RelioDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = device.status.color;
+    final stateLabel = switch (device.presence) {
+      PeerPresence.demo => 'ตัวอย่าง • ${device.approximateDistance}',
+      PeerPresence.discovered => 'REAL • ค้นพบ',
+      PeerPresence.connecting => 'REAL • กำลังเชื่อมต่อ',
+      PeerPresence.connected => 'REAL • เชื่อมต่อแล้ว',
+      PeerPresence.disconnected => 'REAL • ขาดการเชื่อมต่อ',
+      PeerPresence.failed => 'REAL • เชื่อมต่อไม่สำเร็จ',
+      PeerPresence.stale =>
+        'REAL • พบล่าสุด ${_lastSeenLabel(device.lastSeenAt)}',
+    };
+    final stableDeviceId = RegExp(r'^[0-9a-fA-F-]{16,}$').hasMatch(device.id)
+        ? 'RELIO-${device.id.replaceAll('-', '').substring(device.id.replaceAll('-', '').length - 4).toUpperCase()}'
+        : 'รอยืนยัน RELIO ID';
     return Card(
       clipBehavior: Clip.antiAlias,
       color: color.withValues(alpha: 0.06),
@@ -298,15 +311,21 @@ class RelioDeviceCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 8),
                         RelioStatusChip(status: device.status, compact: true),
+                        const SizedBox(width: 6),
+                        _SourceBadge(label: device.isDemo ? 'DEMO' : 'REAL'),
                       ],
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      '${device.approximateDistance} • ${device.isConnected ? 'เชื่อมต่อแล้ว' : 'ออฟไลน์'}',
+                      device.isDemo
+                          ? stateLabel
+                          : '$stableDeviceId • $stateLabel',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    const SizedBox(height: 3),
-                    _SignalBars(quality: device.signalQuality, color: color),
+                    if (device.isDemo) ...[
+                      const SizedBox(height: 3),
+                      _SignalBars(quality: device.signalQuality, color: color),
+                    ],
                   ],
                 ),
               ),
@@ -317,6 +336,38 @@ class RelioDeviceCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String _lastSeenLabel(DateTime? value) {
+  if (value == null) return 'ไม่ทราบเวลา';
+  final age = DateTime.now().difference(value);
+  if (age.inMinutes < 1) return 'เมื่อครู่';
+  if (age.inHours < 1) return '${age.inMinutes} นาทีที่แล้ว';
+  if (age.inDays < 1) return '${age.inHours} ชั่วโมงที่แล้ว';
+  return '${age.inDays} วันที่แล้ว';
+}
+
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: label == 'REAL'
+          ? RelioColors.primary.withValues(alpha: 0.12)
+          : Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Text(
+      label,
+      style: Theme.of(
+        context,
+      ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
+    ),
+  );
 }
 
 class _SignalBars extends StatelessWidget {
@@ -425,6 +476,8 @@ class RelioChatListTile extends StatelessWidget {
                         ),
                         const SizedBox(width: 7),
                         RelioStatusChip(status: chat.status, compact: true),
+                        const SizedBox(width: 6),
+                        _SourceBadge(label: chat.isDemo ? 'DEMO' : 'REAL'),
                       ],
                     ),
                     const SizedBox(height: 4),

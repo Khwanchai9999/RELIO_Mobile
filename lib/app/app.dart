@@ -148,6 +148,8 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
       // เมื่อกลับมา foreground ให้ลองซิงก์คิวที่เป็นของบัญชีปัจจุบันอีกครั้ง
       unawaited(_dependencies.syncEngine.run());
       unawaited(_dependencies.appUpdateService.checkForUpdate());
+      unawaited(_dependencies.connectivityStatus.refresh());
+      unawaited(_dependencies.startNearbySessionIfPermitted());
     }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||

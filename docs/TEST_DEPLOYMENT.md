@@ -1,6 +1,6 @@
 # RELIO Test Deployment — v0.8.6
 
-## Public QA channel — v0.8.6+13
+## Public QA channel — Build 16 (published baseline)
 
 The normal QA distribution path is a Firebase Hosting metadata page plus a
 GitHub Releases APK, not tester enrollment.
@@ -12,9 +12,9 @@ From `D:\RELIO_Mobile` run:
 ```
 
 The script derives the project root from `$PSScriptRoot`, requires version
-`0.8.6+13`, runs quality/build/signing gates, prepares isolated
+`0.8.6+16`, runs quality/build/signing gates, prepares isolated
 `public_update\hosting\qa\` metadata, creates or verifies the immutable
-`qa-v0.8.6-b13` release in the authenticated owner's public
+`qa-v0.8.6-b16` release in the authenticated owner's public
 `RELIO-Android-Updates` repository, deploys only Hosting in Firebase project
 `relio-17dc0`, and verifies both public origins. The public page is
 `https://relio-17dc0.web.app/qa/`; ordinary download needs no Firebase tester
@@ -26,6 +26,11 @@ before invoking Android Package Installer. Android user confirmation remains
 mandatory. Firebase App Distribution Build 11 (`0.8.5+11`) remains intact as
 an internal/fallback channel. This script never deploys App Distribution,
 Functions, Firestore, Realtime Database, Storage, or Supabase resources.
+
+Build 17 (`0.8.6+17`) is local-only and must not be sent through this public
+release script. Its QA release build is produced with
+`scripts/deploy-test.ps1 -NoUpload`; physical two-device checks and a separate
+explicit publication request are required before any public release action.
 
 เอกสารนี้อธิบายทั้ง public Firebase Hosting QA channel และ Firebase App
 Distribution fallback ของ RELIO Test โดย Supabase ยังคงเป็น cloud backend ของ

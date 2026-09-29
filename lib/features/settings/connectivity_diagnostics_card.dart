@@ -1,0 +1,211 @@
+import 'package:flutter/material.dart';
+
+import '../../app/environment.dart';
+import '../../app/theme/relio_colors.dart';
+import '../../app/theme/relio_spacing.dart';
+import '../../core/cloud/cloud_models.dart';
+import '../../core/connectivity/runtime_connectivity.dart';
+import '../../core/permissions/permission_service.dart';
+import '../../core/relio_dependencies.dart';
+import '../../core/sync/sync_engine.dart';
+
+class ConnectivityDiagnosticsCard extends StatefulWidget {
+  const ConnectivityDiagnosticsCard({super.key});
+
+  @override
+  State<ConnectivityDiagnosticsCard> createState() =>
+      _ConnectivityDiagnosticsCardState();
+}
+
+class _ConnectivityDiagnosticsCardState
+    extends State<ConnectivityDiagnosticsCard> {
+  late RelioDependencies _dependencies;
+  late Future<String> _deviceId;
+  late Future<NearbyPermissionSnapshot> _permissions;
+  bool _loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    _loaded = true;
+    _dependencies = RelioDependencyScope.of(context);
+    _deviceId = _dependencies.identity.getDeviceId();
+    _permissions = _dependencies.permissionService.readNearbyPermissions();
+  }
+
+  Future<void> _requestPermissions() async {
+    await _dependencies.permissionService.requestNearbyPermissions();
+    if (!mounted) return;
+    setState(() {
+      _permissions = _dependencies.permissionService.readNearbyPermissions();
+    });
+    await _dependencies.startNearbySessionIfPermitted();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connectivity = _dependencies.connectivityStatus;
+    final nearby = _dependencies.nearbyService;
+    return AnimatedBuilder(
+      animation: Listenable.merge([connectivity, nearby]),
+      builder: (context, _) => StreamBuilder<SyncEngineSnapshot>(
+        stream: _dependencies.syncEngine.watchState(),
+        initialData: _dependencies.syncEngine.snapshot,
+        builder: (context, syncSnapshot) {
+          final status = connectivity.status;
+          final runtime = status.runtime;
+          final cloud =
+              syncSnapshot.data?.cloudState ?? CloudState.notConfigured;
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(RelioSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'สถานะระบบจริง',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: connectivity.refresh,
+                        tooltip: 'ตรวจสอบใหม่',
+                        icon: const Icon(Icons.refresh_rounded),
+                      ),
+                    ],
+                  ),
+                  FutureBuilder<String>(
+                    future: _deviceId,
+                    builder: (context, snapshot) => _StatusRow(
+                      label: 'Device ID',
+                      value: snapshot.data == null
+                          ? 'กำลังโหลด'
+                          : 'RELIO-${snapshot.data!.replaceAll('-', '').substring(snapshot.data!.replaceAll('-', '').length - 4).toUpperCase()}',
+                    ),
+                  ),
+                  _StatusRow(
+                    label: 'App version',
+                    value:
+                        '${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
+                  ),
+                  _StatusRow(
+                    label: 'Internet',
+                    value: _internetLabel(status.reachability),
+                    color: _internetColor(status.reachability),
+                  ),
+                  _StatusRow(
+                    label: 'Wi-Fi radio',
+                    value: _radioLabel(runtime.wifiEnabled),
+                  ),
+                  _StatusRow(
+                    label: 'Bluetooth',
+                    value: _radioLabel(runtime.bluetoothEnabled),
+                  ),
+                  _StatusRow(
+                    label: 'Nearby readiness',
+                    value: nearby.connectedPeerCount > 0
+                        ? 'เชื่อมต่อแล้ว'
+                        : status.nearbyReady
+                        ? 'พร้อมค้นหา'
+                        : 'ยังไม่พร้อม',
+                    color: RelioColors.primary,
+                  ),
+                  _StatusRow(
+                    label: 'Connected peers',
+                    value: '${nearby.connectedPeerCount}',
+                  ),
+                  _StatusRow(label: 'Cloud', value: _cloudLabel(cloud)),
+                  FutureBuilder<NearbyPermissionSnapshot>(
+                    future: _permissions,
+                    builder: (context, snapshot) {
+                      if (snapshot.data?.allGranted ?? true) {
+                        return const SizedBox.shrink();
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'อนุญาตอุปกรณ์ใกล้เคียงเพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว',
+                            ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _requestPermissions,
+                                child: const Text('ตรวจสอบสิทธิ์ Nearby'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({required this.label, required this.value, this.color});
+
+  final String label;
+  final String value;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      children: [
+        Expanded(child: Text(label)),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _internetLabel(InternetReachability state) => switch (state) {
+  InternetReachability.checking => 'กำลังตรวจสอบ',
+  InternetReachability.online => 'ออนไลน์',
+  InternetReachability.offline => 'ออฟไลน์',
+  InternetReachability.limited => 'จำกัด / ปลายทางตอบกลับไม่ได้',
+  InternetReachability.unknown => 'ไม่ทราบ',
+};
+
+String _radioLabel(bool? enabled) => switch (enabled) {
+  true => 'พร้อมใช้งาน',
+  false => 'ปิดอยู่',
+  null => 'ไม่ทราบ',
+};
+
+Color _internetColor(InternetReachability state) => switch (state) {
+  InternetReachability.online => RelioColors.success,
+  InternetReachability.offline ||
+  InternetReachability.limited => RelioColors.warning,
+  InternetReachability.checking ||
+  InternetReachability.unknown => RelioColors.muted,
+};
+
+String _cloudLabel(CloudState state) => switch (state) {
+  CloudState.ready => 'พร้อมซิงก์',
+  CloudState.offline => 'รออินเทอร์เน็ต',
+  CloudState.notConfigured => 'ใช้เฉพาะในเครื่อง',
+  CloudState.signedOut => 'Guest / ในเครื่อง',
+  CloudState.error => 'ยังซิงก์ไม่ได้',
+};

@@ -37,6 +37,12 @@ transport endpoint ID ↔ stable RELIO deviceId
 The mapping is refreshed after every connection and peer metadata is persisted
 through `NearbyDeviceRepository`.
 
+Until `hello` establishes this mapping, the endpoint is not treated as an
+identified RELIO peer. A data/control packet from an unmapped endpoint, or a
+packet whose `senderDeviceId` differs from the established mapping, is rejected
+before application state is changed. Pending direct messages are flushed only
+after the hello packet identifies the connected recipient.
+
 ## Packet types and delivery
 
 `textMessage` carries `messageId`, `conversationId`, `text`, and `timestamp`.

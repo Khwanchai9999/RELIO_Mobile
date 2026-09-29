@@ -5,7 +5,7 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous release: `0.8.5+11` through Firebase App Distribution
-- Current milestone: `0.8.6+13` through the hybrid public QA channel
+- Current source milestone: `0.8.6+17` (local-only QA verification)
 - Drift schema: v4
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
@@ -23,6 +23,17 @@
   `RELIO-Android-Updates`, tag `qa-v0.8.6-b13`
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
+
+## Build 17 — offline two-device demo hardening
+
+- Build 17 (`0.8.6+17`) is prepared as a local QA verification build only.
+- It is not uploaded to Firebase App Distribution, GitHub Releases, or Firebase
+  Hosting, and has not been installed on any phone.
+- Automated tests cover runtime connectivity state, permission selection,
+  hello identity mapping, pending-message flush after handshake, and SOS
+  activation/clear propagation.
+- Android radio behavior, runtime prompts, reconnection, and two-phone message
+  and SOS flows remain deferred until a manual physical-device run.
 
 ## Public update implementation
 
@@ -44,10 +55,10 @@
 
 - `dart format`: passed
 - `flutter analyze`: passed
-- `flutter test`: 88 passed
+- `flutter test`: 103 passed for the current Build 17 source
 - QA/PROD App Distribution SDK isolation: passed
 - DEV debug, QA debug, QA signed release, and PROD verification builds are
-  required before the public release pipeline can deploy.
+  required for local QA verification. Build 17 is not a public release.
 - `scripts/release-public-qa.ps1` is the only public release entrypoint; it
   verifies the signed APK, creates/verifies the GitHub release asset, deploys
   Hosting metadata only, and verifies both remote origins.
@@ -68,5 +79,5 @@ validating the corrected updater configuration on-device. The latest ADB check
 found no connected devices, so Huawei's installed package and APK hash remain
 unverified; Huawei is intended to remain on Build 12. Build 16 is published
 and its live manifest, page, APK hash, package, version, and signer were
-verified. No phone was modified. Physical status:
+verified. No phone was modified for Build 17. Physical status:
 **Build 12 → Build 16 in-app OTA: PENDING PHYSICAL TEST**.

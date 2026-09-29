@@ -70,7 +70,12 @@ into it.
 - Android app runtime uses `AndroidNearbyTransport` by default once Flutter is
   running; Mock transport is an explicit test/developer override.
 - Keep transport endpoint IDs separate from stable RELIO `deviceId` values.
-- Complete a hello handshake before treating a peer as identified.
+- Accept `hello` as the identity-establishing packet for a Nearby endpoint;
+  reject other data/control packets until its stable `deviceId` matches the
+  completed handshake.
+- Keep real discovered peers separate from seeded demo identities in every
+  screen, and do not show simulated distance, signal, Internet, or delivery
+  values as runtime facts.
 - Direct chat is routed to the mapped endpoint for one participant; never
   broadcast private text to every connected endpoint.
 - SOS has precedence over Rescue, and Rescue has precedence over Normal.
@@ -128,12 +133,17 @@ into it.
 Run these from `RELIO_Mobile` after changes:
 
 ```bash
-dart format lib test
+dart format .
 flutter analyze
 flutter test
 flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
-.\scripts\release-public-qa.ps1 -NoDeploy
+flutter build apk --flavor prod --debug
+.\scripts\deploy-test.ps1 -NoUpload
 ```
+
+QA debug builds must receive the approved updater dart-defines from
+`scripts/public-qa-config.ps1`. Build 17 is local-only: do not install it on a
+phone or publish/upload it without a new explicit request.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -153,9 +163,10 @@ hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.
 
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
-and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.8. Keep them in
-`docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
-performing them.
+and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.8. Keep
+them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
+without performing them. A local Build 17 QA artifact is not permission to
+install it on a phone, publish it, or upload it to Firebase/GitHub/Hosting.
 
 ## Change boundaries
 

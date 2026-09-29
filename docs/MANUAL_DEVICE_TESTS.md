@@ -218,3 +218,64 @@ Internet/mobile data disabled:
 
 These checks are **DEFERRED — NOT YET PERFORMED**. `MockNearbyTransport` and
 automated tests cover the deterministic path.
+
+## M. Build 17 offline two-device demo hardening — DEFERRED
+
+Build 17 is a local-only QA artifact at
+`D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk`. It has not been uploaded,
+published, or installed. No device result is implied by the automated checks.
+Use two non-production test phones; do not use a phone whose installed Build 12
+must be preserved as the OTA baseline. Do not uninstall the app or clear its
+data.
+
+The following ADB commands are prepared for a later, explicitly authorized
+physical test. None of them was run during Build 17 preparation:
+
+```powershell
+adb devices -l
+adb -s <PHONE_A_SERIAL> install -r D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk
+adb -s <PHONE_B_SERIAL> install -r D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk
+adb -s <PHONE_A_SERIAL> shell dumpsys package com.relio.relio_mobile.test
+adb -s <PHONE_B_SERIAL> shell dumpsys package com.relio.relio_mobile.test
+adb -s <PHONE_A_SERIAL> shell monkey -p com.relio.relio_mobile.test 1
+adb -s <PHONE_B_SERIAL> shell monkey -p com.relio.relio_mobile.test 1
+adb -s <PHONE_A_SERIAL> logcat -d -v time | findstr /i "nearby relio"
+adb -s <PHONE_B_SERIAL> logcat -d -v time | findstr /i "nearby relio"
+```
+
+Before any install command, confirm the exact serials with the user and verify
+the artifact package, version, and signing certificate. Never run `adb
+uninstall`, clear app data, or target a device implicitly.
+
+1. Record phone models, Android versions, Build 17 package/version, and
+   permission choices. Grant only the foreground Nearby permissions the app
+   explains; do not grant location unless explicitly testing Send Location or
+   SOS location capture.
+2. Turn off mobile data and Internet access on both phones while leaving the
+   radios needed by Android Nearby Connections enabled. Confirm Home shows
+   Internet separately from Wi-Fi, Bluetooth, Nearby, and Cloud; no UI should
+   claim Internet merely because Wi-Fi is enabled.
+3. In Nearby, confirm prototype entries are labeled `DEMO` and listed separately
+   from discovered real phones. Start discovery on both devices and verify
+   actual device names/statuses appear only after transport discovery and the
+   hello handshake; no estimated distance or signal strength is shown as fact.
+4. Connect A and B, exchange text in both directions, and verify each message
+   is locally persisted before send, becomes Nearby-sent on transport success,
+   and becomes delivered only after ACK. Force-stop/reopen without clearing
+   data and verify the local conversation remains.
+5. With A disconnected, send a message to B and verify it remains pending. Put
+   the phones back in range, complete the hello handshake, and verify the
+   pending message is sent to that identified peer only.
+6. Activate SOS on A and verify B sees A's live SOS state and can open the
+   direct conversation. Clear SOS on A and verify B returns the peer to Normal.
+   Enable Rescue and verify Rescue propagates to Normal when disabled, while
+   SOS remains higher priority than Rescue.
+7. Toggle Bluetooth/Wi-Fi and deny then grant Nearby permissions. Confirm the
+   UI reflects the actual state and gives a clear recovery action without
+   claiming background discovery or Internet connectivity.
+8. Record pass/fail per step, device models/OS versions, and non-sensitive
+   diagnostics. Do not include message contents, exact coordinates, tokens, or
+   account data in logs or reports.
+
+All items in this section remain **DEFERRED — NOT YET PERFORMED** until a
+human-run two-phone test is completed.

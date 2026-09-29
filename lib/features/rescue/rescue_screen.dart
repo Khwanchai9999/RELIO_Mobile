@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/relio_dependencies.dart';
-import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
@@ -168,95 +167,99 @@ class _ActiveRescue extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cases = RelioMockData.devices
-        .where((device) => device.status == DeviceStatus.sos)
-        .toList();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(
-        RelioSpacing.lg,
-        16,
-        RelioSpacing.lg,
-        24,
-      ),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Card(
-                color: RelioColors.rescue.withValues(alpha: 0.08),
-                child: const ListTile(
-                  leading: Icon(
-                    Icons.shield_rounded,
-                    color: RelioColors.rescue,
-                  ),
-                  title: Text(
-                    'RESCUE ACTIVE',
-                    style: TextStyle(
-                      color: RelioColors.rescue,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  subtitle: Text('กำลังแสดงสถานะหน่วยกู้ภัย'),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'พบผู้ขอความช่วยเหลือ ${cases.length} คน',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 10),
-              ...cases.map(
-                (device) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Card(
-                    child: ListTile(
-                      leading: RelioUserAvatar(
-                        name: device.name,
-                        status: device.status,
-                      ),
-                      title: Text(device.name),
-                      subtitle: Text(
-                        '${device.approximateDistance} • ${device.name == 'สมชาย ใจดี' ? 'บาดเจ็บที่ขา ต้องการความช่วยเหลือ' : 'ติดอยู่ในบ้าน น้ำท่วมสูง'}',
-                      ),
-                      trailing: Wrap(
-                        children: [
-                          IconButton(
-                            onPressed: () => context.push('/chat/${device.id}'),
-                            tooltip: 'แชท',
-                            icon: const Icon(Icons.chat_bubble_outline),
-                          ),
-                          IconButton(
-                            onPressed: () =>
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'แผนที่เป็น prototype ใน v0.1',
-                                    ),
-                                  ),
-                                ),
-                            tooltip: 'ดูตำแหน่ง',
-                            icon: const Icon(Icons.map_outlined),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: onDeactivate,
-                  child: const Text('ปิดโหมดกู้ภัย'),
-                ),
-              ),
-            ],
+    final nearby = RelioDependencyScope.of(context).nearbyService;
+    return AnimatedBuilder(
+      animation: nearby,
+      builder: (context, _) {
+        final cases = nearby.discoveredPeers
+            .where(
+              (peer) =>
+                  peer.deviceId != null &&
+                  nearby.peerStatuses[peer.deviceId] == DeviceStatus.sos,
+            )
+            .toList();
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(
+            RelioSpacing.lg,
+            16,
+            RelioSpacing.lg,
+            24,
           ),
-        ),
-      ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 900),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Card(
+                    color: RelioColors.rescue.withValues(alpha: 0.08),
+                    child: const ListTile(
+                      leading: Icon(
+                        Icons.shield_rounded,
+                        color: RelioColors.rescue,
+                      ),
+                      title: Text(
+                        'RESCUE ACTIVE',
+                        style: TextStyle(
+                          color: RelioColors.rescue,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      subtitle: Text('กำลังแสดงสถานะหน่วยกู้ภัย'),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'SOS จากอุปกรณ์จริง ${cases.length} เครื่อง',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 10),
+                  if (cases.isEmpty)
+                    const Card(
+                      child: ListTile(
+                        leading: Icon(Icons.radar_outlined),
+                        title: Text('ยังไม่ได้รับ SOS จาก peer จริง'),
+                        subtitle: Text(
+                          'รายการจะปรากฏเมื่อได้รับ SOS packet ผ่าน Nearby',
+                        ),
+                      ),
+                    ),
+                  ...cases.map((peer) {
+                    final deviceId = peer.deviceId!;
+                    final connected = nearby.isDeviceConnected(deviceId);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Card(
+                        color: RelioColors.sos.withValues(alpha: 0.08),
+                        child: ListTile(
+                          leading: const Icon(
+                            Icons.warning_amber_rounded,
+                            color: RelioColors.sos,
+                          ),
+                          title: Text(peer.name),
+                          subtitle: Text(
+                            'REAL • SOS • ${connected ? 'เชื่อมต่อแล้ว' : 'ขาดการเชื่อมต่อ'}',
+                          ),
+                          trailing: const Icon(Icons.chat_bubble_outline),
+                          onTap: () => context.push('/chat/$deviceId'),
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: onDeactivate,
+                      child: const Text('ปิดโหมดกู้ภัย'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

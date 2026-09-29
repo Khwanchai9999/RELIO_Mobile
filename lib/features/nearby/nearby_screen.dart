@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
-import '../../core/relio_dependencies.dart';
+import '../../core/connectivity/runtime_connectivity.dart';
+import '../../core/domain/relio_entities.dart';
 import '../../core/nearby/nearby_service.dart';
 import '../../core/nearby/nearby_transport.dart';
 import '../../core/permissions/permission_service.dart';
+import '../../core/relio_dependencies.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import '../../shared/widgets/relio_widgets.dart';
@@ -22,36 +26,22 @@ class NearbyScreen extends StatefulWidget {
 
 class _NearbyScreenState extends State<NearbyScreen> {
   NearbyFilter _filter = NearbyFilter.all;
-  bool _scanning = false;
   bool _loaded = false;
-  List<RelioDevice> _devices = RelioMockData.devices;
-  late final NearbyService _nearby;
+  late RelioDependencies _dependencies;
+  late NearbyService _nearby;
+  late Future<NearbyPermissionSnapshot> _permissions;
+  List<RelioNearbyDevice> _savedDevices = const [];
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_loaded) return;
     _loaded = true;
-    _nearby = RelioDependencyScope.of(context).nearbyService;
+    _dependencies = RelioDependencyScope.of(context);
+    _nearby = _dependencies.nearbyService;
     _nearby.addListener(_onNearbyChanged);
-    RelioDependencyScope.of(
-      context,
-    ).repositories.nearbyDevices.listDevices().then((devices) {
-      if (!mounted || devices.isEmpty) return;
-      setState(() {
-        _devices = devices
-            .map(
-              (device) => RelioDevice(
-                id: device.deviceId,
-                name: device.displayName,
-                status: device.status,
-                distanceMetersApprox: device.approxDistance,
-                signalQuality: device.signalQuality ?? 0,
-              ),
-            )
-            .toList(growable: false);
-      });
-    });
+    _permissions = _dependencies.permissionService.readNearbyPermissions();
+    unawaited(_loadSavedDevices());
   }
 
   @override
@@ -61,184 +51,327 @@ class _NearbyScreenState extends State<NearbyScreen> {
   }
 
   void _onNearbyChanged() {
-    if (!mounted || _nearby.discoveredPeers.isEmpty) return;
-    final next = [..._devices];
-    for (final peer in _nearby.discoveredPeers) {
-      final deviceId = peer.deviceId ?? peer.endpointId;
-      final index = next.indexWhere((device) => device.id == deviceId);
-      final live = RelioDevice(
-        id: deviceId,
-        name: peer.name,
-        status: _nearby.peerStatuses[deviceId] ?? DeviceStatus.normal,
-        signalQuality: 0,
-        isConnected:
-            _nearby.peerStates[peer.endpointId] ==
-            NearbyConnectionState.connected,
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_loadSavedDevices());
+  }
+
+  Future<void> _loadSavedDevices() async {
+    final devices = await _dependencies.repositories.nearbyDevices
+        .listDevices();
+    if (!mounted) return;
+    setState(() => _savedDevices = devices);
+  }
+
+  Future<void> _startSearching() async {
+    final started = await _dependencies.startNearbySessionIfPermitted();
+    if (!mounted) return;
+    setState(() {
+      _permissions = _dependencies.permissionService.readNearbyPermissions();
+    });
+    if (!started) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ต้องอนุญาต Nearby ก่อนเริ่มค้นหา')),
       );
-      if (index == -1) {
-        next.add(live);
-      } else {
-        next[index] = live;
-      }
     }
-    setState(() => _devices = next);
   }
 
-  List<RelioDevice> get filtered {
-    if (_filter == NearbyFilter.all) return _devices;
-    if (_filter == NearbyFilter.normal) {
-      return _devices
-          .where(
-            (device) =>
-                device.status == DeviceStatus.normal ||
-                device.status == DeviceStatus.offline,
-          )
-          .toList();
-    }
-    return _devices
-        .where((device) => device.status.name == _filter.name)
-        .toList();
+  Future<void> _requestPermissions() async {
+    await _dependencies.permissionService.requestNearbyPermissions();
+    if (!mounted) return;
+    setState(() {
+      _permissions = _dependencies.permissionService.readNearbyPermissions();
+    });
+    await _startSearching();
   }
 
-  Future<void> _scan() async {
-    setState(() => _scanning = true);
-    final nearby = RelioDependencyScope.of(context).nearbyService;
-    await nearby.startDiscovery();
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    await nearby.stopDiscovery();
-    if (mounted) setState(() => _scanning = false);
+  Future<void> _openRealPeer(NearbyPeer peer) async {
+    final state = _nearby.peerStates[peer.endpointId];
+    if (state == NearbyConnectionState.connected && peer.deviceId != null) {
+      if (mounted) context.push('/chat/${peer.deviceId}');
+      return;
+    }
+    if (state != NearbyConnectionState.connecting) {
+      await _nearby.connect(peer.endpointId);
+    }
+  }
+
+  List<NearbyPeer> get _livePeers {
+    final seen = <String>{};
+    final peers = _nearby.discoveredPeers.where((peer) {
+      final key = peer.deviceId ?? peer.endpointId;
+      return seen.add(key);
+    }).toList();
+    peers.sort((a, b) {
+      final aConnected =
+          _nearby.peerStates[a.endpointId] == NearbyConnectionState.connected;
+      final bConnected =
+          _nearby.peerStates[b.endpointId] == NearbyConnectionState.connected;
+      if (aConnected != bConnected) return aConnected ? -1 : 1;
+      final aStatus = _nearby.peerStatuses[a.deviceId];
+      final bStatus = _nearby.peerStatuses[b.deviceId];
+      final aPriority = aStatus == DeviceStatus.sos
+          ? 0
+          : aStatus == DeviceStatus.rescue
+          ? 1
+          : 2;
+      final bPriority = bStatus == DeviceStatus.sos
+          ? 0
+          : bStatus == DeviceStatus.rescue
+          ? 1
+          : 2;
+      return aPriority.compareTo(bPriority);
+    });
+    return peers;
+  }
+
+  List<RelioDevice> get _stalePeers {
+    final liveIds = _livePeers.map((peer) => peer.deviceId).whereType<String>();
+    final now = DateTime.now();
+    return _savedDevices
+        .where(
+          (device) =>
+              !RelioMockData.isDemoId(device.deviceId) &&
+              !liveIds.contains(device.deviceId),
+        )
+        .map((device) {
+          final age = now.difference(device.lastSeenAt);
+          return RelioDevice(
+            id: device.deviceId,
+            name: device.displayName,
+            status: device.status,
+            signalQuality: 0,
+            isConnected: false,
+            isDemo: false,
+            presence: age > const Duration(minutes: 2)
+                ? PeerPresence.stale
+                : PeerPresence.disconnected,
+            lastSeenAt: device.lastSeenAt,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  bool _matches(DeviceStatus status) => switch (_filter) {
+    NearbyFilter.all => true,
+    NearbyFilter.sos => status == DeviceStatus.sos,
+    NearbyFilter.rescue => status == DeviceStatus.rescue,
+    NearbyFilter.normal => status == DeviceStatus.normal,
+  };
+
+  RelioDevice _toLiveDevice(NearbyPeer peer) {
+    final state = _nearby.peerStates[peer.endpointId];
+    final status = _nearby.peerStatuses[peer.deviceId] ?? DeviceStatus.normal;
+    return RelioDevice(
+      id: peer.deviceId ?? 'pending:${peer.endpointId}',
+      name: peer.name,
+      status: status,
+      signalQuality: 0,
+      isConnected: state == NearbyConnectionState.connected,
+      isDemo: false,
+      presence: switch (state) {
+        NearbyConnectionState.connecting => PeerPresence.connecting,
+        NearbyConnectionState.connected => PeerPresence.connected,
+        NearbyConnectionState.disconnected || null => PeerPresence.discovered,
+        NearbyConnectionState.failed => PeerPresence.failed,
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final status = _dependencies.connectivityStatus.status;
+    final livePeers = _livePeers;
+    final realDevices = [
+      ...livePeers
+          .map(_toLiveDevice)
+          .where((device) => _matches(device.status)),
+      ..._stalePeers.where((device) => _matches(device.status)),
+    ];
+    final demoDevices = RelioMockData.devices
+        .where((device) => _matches(device.status))
+        .toList(growable: false);
+
     return Scaffold(
       appBar: RelioAppBar(
         title: 'อุปกรณ์ใกล้เคียง',
-        subtitle: 'อุปกรณ์จากฐานข้อมูลและ Nearby',
+        subtitle: 'ค้นหาและเชื่อมต่อโทรศัพท์จริงแบบออฟไลน์',
         actions: [
           IconButton(
-            onPressed: _scan,
-            tooltip: 'สแกน',
-            icon: const Icon(Icons.search_rounded),
+            onPressed: _dependencies.connectivityStatus.refresh,
+            tooltip: 'ตรวจสอบ Internet',
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.fromLTRB(
           RelioSpacing.lg,
           4,
           RelioSpacing.lg,
-          12,
+          24,
         ),
-        child: Column(
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: NearbyFilter.values
-                    .map(
-                      (filter) => Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(_filterLabel(filter)),
-                          selected: _filter == filter,
-                          selectedColor: _filterColor(filter),
-                          labelStyle: TextStyle(
-                            color: _filter == filter ? Colors.white : null,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          onSelected: (_) => setState(() => _filter = filter),
-                        ),
-                      ),
-                    )
-                    .toList(),
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(RelioSpacing.md),
+              child: Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                children: [
+                  Text('Internet • ${_internetLabel(status.reachability)}'),
+                  Text('Wi-Fi • ${_radioLabel(status.runtime.wifiEnabled)}'),
+                  Text(
+                    'Bluetooth • ${_radioLabel(status.runtime.bluetoothEnabled)}',
+                  ),
+                  Text('Nearby • ${_nearbyLabel(status.nearbyReady)}'),
+                  Text('เชื่อมต่อแล้ว • ${_nearby.connectedPeerCount} เครื่อง'),
+                ],
               ),
             ),
-            const SizedBox(height: 8),
-            FutureBuilder<NearbyPermissionSnapshot>(
-              future: RelioDependencyScope.of(
-                context,
-              ).permissionService.readNearbyPermissions(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData || snapshot.data!.allGranted) {
-                  return const SizedBox.shrink();
-                }
-                return Card(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  child: ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.admin_panel_settings_outlined),
-                    title: const Text('ต้องอนุญาตอุปกรณ์ใกล้เคียง'),
-                    subtitle: const Text(
-                      'เปิดสิทธิ์ Bluetooth / Wi-Fi เพื่อค้นหา peer',
-                    ),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        await RelioDependencyScope.of(
-                          context,
-                        ).permissionService.requestNearbyPermissions();
-                        if (mounted) setState(() {});
-                      },
-                      child: const Text('อนุญาต'),
-                    ),
+          ),
+          FutureBuilder<NearbyPermissionSnapshot>(
+            future: _permissions,
+            builder: (context, snapshot) {
+              final permissions = snapshot.data;
+              if (permissions == null || permissions.allGranted) {
+                return const SizedBox.shrink();
+              }
+              return Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.admin_panel_settings_outlined),
+                  title: const Text('ต้องอนุญาตเพื่อค้นหาอุปกรณ์ใกล้เคียง'),
+                  subtitle: Text(
+                    _permissionExplanation(permissions.androidSdk),
                   ),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: _scanning
-                  ? const _ScanningState()
-                  : filtered.isEmpty
-                  ? RelioEmptyState(
-                      icon: Icons.radar_outlined,
-                      title: 'ยังไม่พบอุปกรณ์ใกล้เคียง',
-                      subtitle: 'ตรวจสอบว่า Bluetooth และ Wi-Fi เปิดอยู่',
-                      action: FilledButton(
-                        onPressed: _scan,
-                        child: const Text('ค้นหาอีกครั้ง'),
+                  trailing: TextButton(
+                    onPressed: _requestPermissions,
+                    child: const Text('อนุญาต'),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: NearbyFilter.values
+                  .map(
+                    (filter) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(
+                          _filterLabel(filter, realDevices, demoDevices),
+                        ),
+                        selected: _filter == filter,
+                        selectedColor: _filterColor(filter),
+                        labelStyle: TextStyle(
+                          color: _filter == filter ? Colors.white : null,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        onSelected: (_) => setState(() => _filter = filter),
                       ),
-                    )
-                  : LayoutBuilder(
-                      builder: (context, constraints) {
-                        return ListView.separated(
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 8),
-                          itemBuilder: (context, index) => RelioDeviceCard(
-                            device: filtered[index],
-                            onTap: () =>
-                                context.push('/chat/${filtered[index].id}'),
-                          ),
-                        );
-                      },
                     ),
+                  )
+                  .toList(),
             ),
-            if (!_scanning && filtered.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
                 child: FilledButton.icon(
-                  onPressed: _scan,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('สแกนหาอุปกรณ์ใกล้เคียง'),
+                  onPressed: _nearby.isDiscovering ? null : _startSearching,
+                  icon: const Icon(Icons.radar_rounded),
+                  label: const Text('ค้นหาอุปกรณ์จริง'),
                 ),
               ),
+              if (_nearby.isDiscovering) ...[
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  tooltip: 'หยุดค้นหา',
+                  onPressed: _nearby.stopSession,
+                  icon: const Icon(Icons.stop_rounded),
+                ),
+              ],
             ],
-          ],
-        ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'อุปกรณ์ที่พบจริง',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          if (realDevices.isEmpty)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.radar_outlined),
+                title: Text('ยังไม่พบอุปกรณ์จริง'),
+                subtitle: Text(
+                  'เปิด RELIO และ Nearby บนอุปกรณ์ทั้งสองเครื่อง โดยไม่จำเป็นต้องมี Internet',
+                ),
+              ),
+            )
+          else
+            ...realDevices.map((device) {
+              final peer = livePeers.cast<NearbyPeer?>().firstWhere(
+                (item) =>
+                    item?.deviceId == device.id ||
+                    (device.id.startsWith('pending:') &&
+                        item?.endpointId == device.id.substring(8)),
+                orElse: () => null,
+              );
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: RelioDeviceCard(
+                  device: device,
+                  onTap: peer == null ? null : () => _openRealPeer(peer),
+                ),
+              );
+            }),
+          const SizedBox(height: 20),
+          Text(
+            'ข้อมูลตัวอย่าง',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'ข้อมูล DEMO ใช้ประกอบการนำเสนอ ไม่ใช่อุปกรณ์ที่ค้นพบจริง',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          ...demoDevices.map(
+            (device) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: RelioDeviceCard(
+                device: device,
+                onTap: () => context.push('/chat/${device.id}'),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  String _filterLabel(NearbyFilter filter) => switch (filter) {
-    NearbyFilter.all => 'ทั้งหมด (${_devices.length})',
-    NearbyFilter.sos =>
-      'SOS (${_devices.where((device) => device.status == DeviceStatus.sos).length})',
-    NearbyFilter.rescue =>
-      'Rescue (${_devices.where((device) => device.status == DeviceStatus.rescue).length})',
-    NearbyFilter.normal =>
-      'ปกติ (${_devices.where((device) => device.status == DeviceStatus.normal || device.status == DeviceStatus.offline).length})',
-  };
+  String _filterLabel(
+    NearbyFilter filter,
+    List<RelioDevice> real,
+    List<RelioDevice> demo,
+  ) {
+    final total = real.length + demo.length;
+    return switch (filter) {
+      NearbyFilter.all => 'ทั้งหมด ($total)',
+      NearbyFilter.sos =>
+        'SOS (${real.where((d) => d.status == DeviceStatus.sos).length + demo.where((d) => d.status == DeviceStatus.sos).length})',
+      NearbyFilter.rescue =>
+        'Rescue (${real.where((d) => d.status == DeviceStatus.rescue).length + demo.where((d) => d.status == DeviceStatus.rescue).length})',
+      NearbyFilter.normal =>
+        'ปกติ (${real.where((d) => d.status == DeviceStatus.normal).length + demo.where((d) => d.status == DeviceStatus.normal).length})',
+    };
+  }
 
   Color _filterColor(NearbyFilter filter) => switch (filter) {
     NearbyFilter.sos => RelioColors.sos,
@@ -247,29 +380,24 @@ class _NearbyScreenState extends State<NearbyScreen> {
   };
 }
 
-class _ScanningState extends StatelessWidget {
-  const _ScanningState();
+String _internetLabel(InternetReachability state) => switch (state) {
+  InternetReachability.checking => 'กำลังตรวจสอบ',
+  InternetReachability.online => 'ออนไลน์',
+  InternetReachability.offline => 'ออฟไลน์',
+  InternetReachability.limited => 'จำกัด',
+  InternetReachability.unknown => 'ไม่ทราบ',
+};
 
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 120,
-            height: 120,
-            child: CircularProgressIndicator(strokeWidth: 3),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'กำลังค้นหาอุปกรณ์ใกล้เคียง...',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 5),
-          Text('โปรดรอสักครู่', style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    );
-  }
-}
+String _radioLabel(bool? enabled) => switch (enabled) {
+  true => 'เปิด',
+  false => 'ปิด',
+  null => 'ไม่ทราบ',
+};
+
+String _nearbyLabel(bool ready) => ready ? 'พร้อมใช้งาน' : 'ยังไม่พร้อม';
+
+String _permissionExplanation(int? sdk) => sdk != null && sdk >= 33
+    ? 'RELIO ต้องใช้สิทธิ์อุปกรณ์ใกล้เคียงและ Bluetooth เพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว โดยไม่ต้องเปิด Internet'
+    : sdk != null && sdk >= 31
+    ? 'RELIO ต้องใช้สิทธิ์ Bluetooth เพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว โดยไม่ต้องเปิด Internet'
+    : 'RELIO ต้องใช้สิทธิ์ตำแหน่งขณะใช้งานเพื่อให้ Android อนุญาตการค้นหา Bluetooth Nearby โดยไม่ต้องส่งตำแหน่ง';

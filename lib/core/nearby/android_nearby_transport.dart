@@ -90,7 +90,10 @@ class AndroidNearbyTransport implements NearbyTransport {
           _peers.add(NearbyPeer(id: id, name: name));
         },
         onEndpointLost: (id) {
-          if (id != null) _peerNames.remove(id);
+          if (id != null) {
+            final name = _peerNames.remove(id) ?? id;
+            _peers.add(NearbyPeer(id: id, name: name, isLost: true));
+          }
         },
       );
       if (!started) {

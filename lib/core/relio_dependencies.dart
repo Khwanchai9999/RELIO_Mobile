@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 
 import 'database/app_database.dart';
+import 'connectivity/runtime_connectivity.dart';
 import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
@@ -28,6 +30,7 @@ class RelioDependencies {
     MediaStorageService? mediaStorage,
     CloudDataSource? cloudDataSource,
     AppUpdateService? appUpdateService,
+    ConnectivityStatusService? connectivityStatusService,
   }) : database = database ?? AppDatabase(),
        useMockTransport = useMockTransport ?? _defaultMockTransport,
        transport =
@@ -35,6 +38,8 @@ class RelioDependencies {
            ((useMockTransport ?? _defaultMockTransport)
                ? MockNearbyTransport(autoAcknowledge: true)
                : AndroidNearbyTransport()) {
+    connectivityStatus =
+        connectivityStatusService ?? ConnectivityStatusService();
     this.locationService =
         locationService ??
         (this.transport is! MockNearbyTransport &&
@@ -51,7 +56,10 @@ class RelioDependencies {
       ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
     );
     identity = RelioDeviceIdentityRepository(this.database);
-    permissionService = PermissionService();
+    permissionService = PermissionService(
+      androidSdkReader: () async =>
+          (await connectivityStatus.readRuntimeSnapshot()).androidSdk,
+    );
     relayRepository = DriftRelayRepository(this.database);
     relayEngine = RelayEngine(
       transport: this.transport,
@@ -88,6 +96,7 @@ class RelioDependencies {
   final AppDatabase database;
   final NearbyTransport transport;
   final bool useMockTransport;
+  late final ConnectivityStatusService connectivityStatus;
   late final RelioRepositories repositories;
   late final RelioDeviceIdentityRepository identity;
   late final PermissionService permissionService;
@@ -104,7 +113,15 @@ class RelioDependencies {
 
   Future<void> initialize() => _initialization ??= _initialize();
 
+  Future<bool> startNearbySessionIfPermitted() async {
+    final snapshot = await permissionService.readNearbyPermissions();
+    if (!snapshot.allGranted && !useMockTransport) return false;
+    await nearbyService.startSession();
+    return nearbyService.isAdvertising && nearbyService.isDiscovering;
+  }
+
   Future<void> _initialize() async {
+    unawaited(connectivityStatus.initialize());
     await identity.getDeviceId();
     await identity.getDisplayName();
     await repositories.seedPrototypeData();
@@ -116,6 +133,9 @@ class RelioDependencies {
       // healthy when credentials are absent or the network is unavailable.
     }
     await nearbyService.initialize();
+    if (Platform.isAndroid && transport is! MockNearbyTransport) {
+      await startNearbySessionIfPermitted();
+    }
     await relayEngine.initialize();
     await syncEngine.initialize();
     // Startup sync runs asynchronously; rendering the local app never waits
@@ -127,6 +147,7 @@ class RelioDependencies {
   }
 
   Future<void> dispose() async {
+    await connectivityStatus.dispose();
     await relayEngine.dispose();
     await nearbyService.close();
     await syncEngine.dispose();

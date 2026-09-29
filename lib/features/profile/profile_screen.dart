@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/environment.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
@@ -71,11 +72,9 @@ class ProfileScreen extends StatelessWidget {
           RelioSettingTile(
             icon: Icons.shield_outlined,
             title: 'โหมดหน่วยกู้ภัย (Rescue)',
-            subtitle: 'ปิดใช้งาน',
-            trailing: Switch(
-              value: false,
-              onChanged: (_) => context.push('/rescue'),
-            ),
+            subtitle: 'ดูสถานะและเปลี่ยนโหมดจริง',
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => context.push('/rescue'),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
@@ -107,27 +106,28 @@ class ProfileScreen extends StatelessWidget {
           RelioSettingTile(
             icon: Icons.notifications_none_rounded,
             title: 'การแจ้งเตือน',
+            subtitle: 'ตัวอย่างการตั้งค่า • ยังไม่ผูกการแจ้งเตือนระบบ',
             onTap: () => _prototype(context, 'การแจ้งเตือน'),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.link_rounded,
             title: 'การเชื่อมต่อ',
-            subtitle: 'Nearby พร้อมใช้งาน',
-            onTap: () => _prototype(context, 'การเชื่อมต่อ'),
+            subtitle: 'ตรวจดูสถานะ Internet, Bluetooth และ Nearby จริง',
+            onTap: () => context.push('/settings'),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.storage_outlined,
             title: 'พื้นที่จัดเก็บ',
-            subtitle: 'ใช้ไป 320 MB จาก 1 GB',
+            subtitle: 'ตัวอย่างข้อมูลพื้นที่ • ไม่ใช่ค่าจากระบบ',
             onTap: () => context.push('/sync'),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.sync_rounded,
             title: 'สถานะการซิงก์',
-            subtitle: 'ซิงก์ข้อมูลล่าสุด 10:24',
+            subtitle: 'ดูสถานะคิว Cloud จริง',
             onTap: () => context.push('/sync'),
           ),
           const SizedBox(height: 8),
@@ -140,7 +140,8 @@ class ProfileScreen extends StatelessWidget {
           RelioSettingTile(
             icon: Icons.info_outline,
             title: 'เกี่ยวกับ RELIO',
-            subtitle: 'เวอร์ชัน 0.1.0',
+            subtitle:
+                'เวอร์ชัน ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
             onTap: () => _prototype(context, 'เกี่ยวกับ RELIO'),
           ),
           const SizedBox(height: 14),

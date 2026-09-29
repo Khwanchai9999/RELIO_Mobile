@@ -3,7 +3,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
+import '../../core/cloud/cloud_models.dart';
+import '../../core/connectivity/runtime_connectivity.dart';
+import '../../core/relio_dependencies.dart';
+import '../../core/sync/sync_engine.dart';
 import '../../data/mock_data.dart';
+import '../../data/models/prototype_models.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -14,7 +19,17 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _internetOnline = true;
+  late final RelioDependencies _dependencies;
+  bool _dependenciesLoaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_dependenciesLoaded) {
+      _dependencies = RelioDependencyScope.of(context);
+      _dependenciesLoaded = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,13 +50,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () => setState(() => _internetOnline = !_internetOnline),
-            icon: Icon(
-              _internetOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
-              size: 14,
-            ),
-            label: Text(_internetOnline ? 'ออนไลน์' : 'ออฟไลน์'),
+          IconButton(
+            onPressed: () => _dependencies.connectivityStatus.refresh(),
+            tooltip: 'ตรวจสอบสถานะเครือข่ายจริง',
+            icon: const Icon(Icons.refresh_rounded),
           ),
           IconButton(
             onPressed: () {},
@@ -53,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          RelioConnectivityBanner(internetOnline: _internetOnline),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -71,6 +82,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          const _LiveConnectivityPanel(),
+                          const SizedBox(height: 18),
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -202,6 +215,7 @@ class _NearbyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final nearby = RelioDependencyScope.of(context).nearbyService;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -209,66 +223,53 @@ class _NearbyPreview extends StatelessWidget {
           title: 'อุปกรณ์ใกล้เคียง',
           action: () => onNavigate('/nearby'),
         ),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  ...RelioMockData.devices
-                      .take(4)
-                      .map(
-                        (device) => Padding(
-                          padding: const EdgeInsets.only(right: 14),
-                          child: InkWell(
-                            onTap: () => onNavigate('/chat/${device.id}'),
-                            borderRadius: BorderRadius.circular(12),
-                            child: Column(
-                              children: [
-                                RelioUserAvatar(
-                                  name: device.name,
-                                  size: 48,
-                                  status: device.status,
+        AnimatedBuilder(
+          animation: nearby,
+          builder: (context, _) {
+            final peers = nearby.connectedPeers;
+            return Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: peers.isEmpty
+                    ? const Text('ยังไม่มีอุปกรณ์จริงเชื่อมต่อ')
+                    : Wrap(
+                        spacing: 14,
+                        runSpacing: 12,
+                        children: peers
+                            .map((peer) {
+                              final id = peer.deviceId;
+                              final name = peer.name;
+                              return InkWell(
+                                onTap: id == null
+                                    ? null
+                                    : () => onNavigate('/chat/$id'),
+                                borderRadius: BorderRadius.circular(12),
+                                child: Column(
+                                  children: [
+                                    RelioUserAvatar(
+                                      name: name,
+                                      size: 48,
+                                      status: id == null
+                                          ? null
+                                          : nearby.peerStatuses[id],
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Text(name),
+                                    Text(
+                                      'REAL • ${id == null ? 'กำลังยืนยันตัวตน' : 'เชื่อมต่อแล้ว'}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.labelSmall,
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(height: 5),
-                                Text(
-                                  device.approximateDistance,
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                              );
+                            })
+                            .toList(growable: false),
                       ),
-                  InkWell(
-                    onTap: () => onNavigate('/nearby'),
-                    borderRadius: BorderRadius.circular(30),
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest,
-                          ),
-                          child: const Center(child: Text('+1')),
-                        ),
-                        const SizedBox(height: 5),
-                        Text(
-                          'อีก 1',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
               ),
-            ),
-          ),
+            );
+          },
         ),
       ],
     );
@@ -331,29 +332,148 @@ class _HomeLeftColumn extends StatelessWidget {
               (chat) => Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: RelioChatListTile(
-                  chat: chat,
+                  chat: RelioChatPreview(
+                    id: chat.id,
+                    name: chat.name,
+                    message: chat.message,
+                    time: chat.time,
+                    status: chat.status,
+                    unread: chat.unread,
+                    isDemo: true,
+                  ),
                   onTap: () => onNavigate('/chat/${chat.id}'),
                 ),
               ),
             ),
-        Card(
-          child: InkWell(
-            onTap: () => onNavigate('/sync'),
-            borderRadius: BorderRadius.circular(16),
-            child: const Padding(
-              padding: EdgeInsets.all(RelioSpacing.md),
-              child: Row(
-                children: [
-                  Icon(Icons.sync_rounded, color: RelioColors.primary),
-                  SizedBox(width: 8),
-                  Expanded(child: Text('ซิงก์ข้อมูลแล้ว')),
-                  Text('10:24'),
-                ],
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
 }
+
+class _LiveConnectivityPanel extends StatelessWidget {
+  const _LiveConnectivityPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final dependencies = RelioDependencyScope.of(context);
+    final merged = Listenable.merge([
+      dependencies.connectivityStatus,
+      dependencies.nearbyService,
+    ]);
+    return AnimatedBuilder(
+      animation: merged,
+      builder: (context, _) => StreamBuilder<SyncEngineSnapshot>(
+        stream: dependencies.syncEngine.watchState(),
+        initialData: dependencies.syncEngine.snapshot,
+        builder: (context, snapshot) {
+          final internet = dependencies.connectivityStatus.status;
+          final runtime = internet.runtime;
+          final nearby = dependencies.nearbyService;
+          final cloud = snapshot.data?.cloudState ?? CloudState.notConfigured;
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.all(RelioSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'สถานะการเชื่อมต่อจริง',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 18,
+                    runSpacing: 9,
+                    children: [
+                      _LiveStatusLine(
+                        label: 'Internet',
+                        value: _internetLabel(internet.reachability),
+                        color: _internetColor(internet.reachability),
+                      ),
+                      _LiveStatusLine(
+                        label: 'Wi-Fi',
+                        value: _radioLabel(runtime.wifiEnabled),
+                      ),
+                      _LiveStatusLine(
+                        label: 'Bluetooth',
+                        value: _radioLabel(runtime.bluetoothEnabled),
+                      ),
+                      _LiveStatusLine(
+                        label: 'Nearby',
+                        value: nearby.connectedPeerCount > 0
+                            ? 'เชื่อมต่อแล้ว'
+                            : internet.nearbyReady
+                            ? 'พร้อมค้นหา'
+                            : 'ยังไม่พร้อม',
+                        color: RelioColors.primary,
+                      ),
+                      _LiveStatusLine(
+                        label: 'เชื่อมต่อแล้ว',
+                        value: '${nearby.connectedPeerCount} เครื่อง',
+                      ),
+                      _LiveStatusLine(
+                        label: 'Cloud Sync',
+                        value: _cloudLabel(cloud),
+                        color: cloud == CloudState.ready
+                            ? RelioColors.success
+                            : RelioColors.warning,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LiveStatusLine extends StatelessWidget {
+  const _LiveStatusLine({required this.label, required this.value, this.color});
+
+  final String label;
+  final String value;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.circle, size: 9, color: color ?? RelioColors.primary),
+      const SizedBox(width: 6),
+      Text('$label: $value', style: Theme.of(context).textTheme.bodySmall),
+    ],
+  );
+}
+
+String _internetLabel(InternetReachability state) => switch (state) {
+  InternetReachability.checking => 'กำลังตรวจสอบ',
+  InternetReachability.online => 'ออนไลน์',
+  InternetReachability.offline => 'ออฟไลน์',
+  InternetReachability.limited => 'จำกัด / ตรวจสอบปลายทางไม่ได้',
+  InternetReachability.unknown => 'ไม่ทราบ',
+};
+
+Color _internetColor(InternetReachability state) => switch (state) {
+  InternetReachability.online => RelioColors.success,
+  InternetReachability.offline => RelioColors.warning,
+  InternetReachability.limited => RelioColors.warning,
+  InternetReachability.checking ||
+  InternetReachability.unknown => RelioColors.muted,
+};
+
+String _radioLabel(bool? enabled) => switch (enabled) {
+  true => 'พร้อมใช้งาน',
+  false => 'ปิดอยู่',
+  null => 'ไม่ทราบ',
+};
+
+String _cloudLabel(CloudState state) => switch (state) {
+  CloudState.ready => 'พร้อมซิงก์',
+  CloudState.offline => 'รออินเทอร์เน็ต',
+  CloudState.notConfigured => 'ใช้เฉพาะในเครื่อง',
+  CloudState.signedOut => 'Guest / ในเครื่อง',
+  CloudState.error => 'ยังซิงก์ไม่ได้',
+};
