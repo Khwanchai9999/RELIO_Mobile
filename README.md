@@ -156,11 +156,11 @@ remains reserved as `com.relio.relio_mobile`.
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
 `com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
-key once, then run the fail-fast deployment pipeline from the active workspace:
+key once, then use the canonical publisher from the active workspace:
 
 ```powershell
 .\scripts\setup-test-signing.ps1
-.\scripts\release-public-qa.ps1
+.\scripts\publish-qa.ps1
 ```
 
 The public pipeline runs format, analyze, tests, QA/PROD isolation, and a
@@ -168,13 +168,9 @@ signed QA build before creating an immutable GitHub release and deploying only
 Firebase Hosting metadata for `relio-17dc0`. Firebase Hosting contains only
 `/qa/index.html` and `/qa/latest.json`; the signed APK and `SHA256SUMS.txt`
 are GitHub release assets. It never deploys Functions, Firestore, Realtime
-Database, Storage, App Distribution, or Supabase resources. Use `-NoDeploy` to
-skip Hosting after the GitHub asset has been verified, or `-NoUpload` to
-prepare local metadata without changing GitHub. See
-[docs/TEST_DEPLOYMENT.md](docs/TEST_DEPLOYMENT.md).
-Build 17 is not authorized for that public pipeline: keep it local with
-`scripts/deploy-test.ps1 -NoUpload` until its two-phone physical verification
-is complete and publication is explicitly requested.
+Database, Storage, App Distribution, or Supabase resources. Future builds use
+a fresh APK by default; `-ReuseExistingArtifact` is explicit. See
+[docs/QA_RELEASE_WORKFLOW.md](docs/QA_RELEASE_WORKFLOW.md).
 
 The QA variant contains the full Firebase App Distribution Android SDK for the
 internal/fallback channel. DEV and PROD contain only the safe API-only stub;

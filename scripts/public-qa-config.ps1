@@ -4,6 +4,9 @@ function Get-RelioPublicQaUpdateConfig {
         Owner = 'Khwanchai9999'
         Repository = 'RELIO-Android-Updates'
         Channel = 'qa-public'
+        FirebaseProjectId = 'relio-17dc0'
+        PackageName = 'com.relio.relio_mobile.test'
+        SigningCertSha256 = 'a5b3b13122d6a8cdbef9f933b4c6fdcc292ba7345649f9f5fe8632deaff62b1d'
     }
 
     $manifestUri = $null
@@ -15,7 +18,10 @@ function Get-RelioPublicQaUpdateConfig {
         $manifestUri.Fragment -or
         $config.Owner -ne 'Khwanchai9999' -or
         $config.Repository -ne 'RELIO-Android-Updates' -or
-        $config.Channel -ne 'qa-public') {
+        $config.Channel -ne 'qa-public' -or
+        $config.FirebaseProjectId -ne 'relio-17dc0' -or
+        $config.PackageName -ne 'com.relio.relio_mobile.test' -or
+        $config.SigningCertSha256 -notmatch '^[0-9a-f]{64}$') {
         throw 'Canonical public QA updater configuration is invalid.'
     }
 

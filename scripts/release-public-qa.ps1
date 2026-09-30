@@ -1,20 +1,24 @@
 [CmdletBinding()]
 param(
     [switch]$NoDeploy,
-    [switch]$NoUpload
+    [switch]$NoUpload,
+    [switch]$DryRun,
+    [switch]$ReuseExistingArtifact,
+    [string]$ExpectedSha256
 )
 
 $ErrorActionPreference = 'Stop'
+if ($env:RELIO_QA_PUBLISH_INTERNAL -ne '1') {
+    & (Join-Path $PSScriptRoot 'publish-qa.ps1') @PSBoundParameters
+    return
+}
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 . (Join-Path $PSScriptRoot 'public-qa-config.ps1')
 $publicQaUpdateConfig = Get-RelioPublicQaUpdateConfig
-$projectId = 'relio-17dc0'
-$expectedVersion = '0.8.6+16'
-$expectedPackage = 'com.relio.relio_mobile.test'
+$projectId = $publicQaUpdateConfig.FirebaseProjectId
+$expectedPackage = $publicQaUpdateConfig.PackageName
 $githubRepositoryName = $publicQaUpdateConfig.Repository
-$releaseTag = 'qa-v0.8.6-b16'
-$releaseTitle = 'RELIO Test v0.8.6 Build 16'
 $expectedQaAppId = '1:789862464099:android:a26ab040a4fdbe1a899656'
 
 if ($currentRoot -ne $projectRoot) {
@@ -127,6 +131,7 @@ function Get-ReleaseApiObject {
 function Test-RemoteApk {
     param(
         [string]$Url,
+        [string]$ExpectedOwner,
         [string]$ExpectedHash,
         [int64]$ExpectedSize,
         [string]$ExpectedPackage,
@@ -136,7 +141,7 @@ function Test-RemoteApk {
         [string]$Aapt2Path,
         [string]$ApkSignerPath
     )
-    $expectedAssetPattern = '^https://github\.com/[^/]+/RELIO-Android-Updates/releases/download/[^/]+/relio-test-' +
+    $expectedAssetPattern = '^https://github\.com/' + [regex]::Escape($ExpectedOwner) + '/RELIO-Android-Updates/releases/download/[^/]+/relio-test-' +
         [regex]::Escape($ExpectedVersionName) + '(?:\+|%2[Bb])' + $ExpectedVersionCode + '\.apk$'
     if ($Url -notmatch $expectedAssetPattern) {
         throw "GitHub asset URL is not an exact approved release URL: $Url"
@@ -161,16 +166,22 @@ function Test-RemoteApk {
     }
 }
 
-Write-Host "RELIO hybrid public QA release pipeline v$expectedVersion"
-& "$PSScriptRoot\preflight.ps1" -RequireTestSigning
-
 $pubspec = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'pubspec.yaml')
 $version = ([regex]::Match($pubspec, '(?m)^version:\s+([^\s#]+)')).Groups[1].Value
-if ($version -ne $expectedVersion) { throw "Public QA release requires $expectedVersion; found $version." }
+if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\+\d+$') { throw "Could not parse pubspec version '$version'." }
 $versionParts = $version.Split('+', 2)
 $versionName = $versionParts[0]
 $buildNumber = [int]$versionParts[1]
 $artifactName = "relio-test-$version.apk"
+$releaseTag = "qa-v$versionName-b$buildNumber"
+$releaseTitle = "RELIO Test v$versionName Build $buildNumber"
+
+if ((git branch --show-current) -ne 'main') { throw 'Public QA publishing requires branch main.' }
+if ((git status --porcelain) -ne '') { throw 'Public QA publishing requires a clean source tree.' }
+$sourceCommit = (git rev-parse HEAD).Trim()
+$originCommit = (git rev-parse origin/main).Trim()
+if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $originCommit) { throw 'Public QA publishing requires HEAD to equal origin/main.' }
+& "$PSScriptRoot\preflight.ps1" -RequireTestSigning
 
 $qaConfig = Join-Path $projectRoot 'android\app\src\qa\google-services.json'
 $config = Get-Content -Raw -LiteralPath $qaConfig | ConvertFrom-Json
@@ -185,7 +196,12 @@ if (-not $qaClient -or $config.project_info.project_id -ne $projectId -or
 Write-Host "Verified QA Firebase project $projectId and App ID $qaAppId for $expectedPackage."
 
 $gh = Get-Command gh -ErrorAction SilentlyContinue
-if (-not $gh) { throw 'GitHub CLI is required. Install the official gh CLI, run gh auth login, then rerun this pipeline.' }
+if (-not $gh -and (Test-Path -LiteralPath 'C:\Program Files\GitHub CLI\gh.exe')) { $gh = Get-Item 'C:\Program Files\GitHub CLI\gh.exe' }
+if (-not $gh) {
+    $ghWhere = where.exe gh 2>$null | Select-Object -First 1
+    if ($ghWhere -and (Test-Path -LiteralPath $ghWhere)) { $gh = [pscustomobject]@{ Source = $ghWhere } }
+}
+if (-not $gh) { throw 'GitHub CLI is required but was not found.' }
 $null = & $gh.Source auth status 2>&1
 if ($LASTEXITCODE -ne 0) { throw 'GitHub CLI is not authenticated. Run gh auth login, then rerun this pipeline.' }
 $githubOwner = (& $gh.Source api user --jq .login 2>$null).Trim()
@@ -201,6 +217,14 @@ $apkUrl = "$githubReleaseBaseUrl$releaseTag/$artifactName"
 Write-Host "Verified authenticated GitHub owner: $githubOwner"
 
 $firebase = Get-Command firebase -ErrorAction SilentlyContinue
+if (-not $firebase) {
+    $firebaseWhere = where.exe firebase 2>$null | Where-Object { $_ -match '\.(cmd|exe)$' } | Select-Object -First 1
+    if ($firebaseWhere -and (Test-Path -LiteralPath $firebaseWhere)) { $firebase = [pscustomobject]@{ Source = $firebaseWhere } }
+}
+if (-not $firebase -and $env:APPDATA) {
+    $firebaseGlobal = Join-Path $env:APPDATA 'npm\firebase.cmd'
+    if (Test-Path -LiteralPath $firebaseGlobal) { $firebase = [pscustomobject]@{ Source = $firebaseGlobal } }
+}
 if (-not $firebase) { throw 'Firebase CLI is required for Hosting metadata deployment.' }
 $env:FIREBASE_CLI_DISABLE_UPDATE_CHECK = '1'
 $loginOutput = & $firebase.Source login:list 2>&1
@@ -222,6 +246,20 @@ if ($publicBaseUrl.TrimEnd('/') -ne 'https://relio-17dc0.web.app') {
     throw "Unexpected Firebase Hosting URL: $publicBaseUrl"
 }
 Write-Host "Verified Firebase project identity and Hosting site: $publicBaseUrl"
+
+try {
+    $liveResponse = Invoke-WebRequest -Uri $publicQaUpdateConfig.ManifestUrl -UseBasicParsing
+} catch {
+    throw 'Could not read the current public QA manifest; refusing to publish without a monotonic-version check.'
+}
+if ($liveResponse.StatusCode -ne 200) { throw 'Current public QA manifest did not return HTTP 200.' }
+$liveManifest = $liveResponse.Content | ConvertFrom-Json
+if ($liveManifest.channel -ne $publicQaUpdateConfig.Channel -or $liveManifest.packageName -ne $expectedPackage -or
+    [int]$liveManifest.versionCode -le 0) { throw 'Current public QA manifest failed channel/package/version validation.' }
+if ($buildNumber -lt [int]$liveManifest.versionCode) { throw 'Refusing to publish a downgrade over the current public QA version.' }
+if ($buildNumber -eq [int]$liveManifest.versionCode -and -not $ReuseExistingArtifact) {
+    throw 'The requested version is already live; use -ReuseExistingArtifact only for exact-release verification.'
+}
 
 $defines = @(
     '--dart-define=RELIO_ENV=test',
@@ -245,12 +283,16 @@ Invoke-CheckedStep 'Running flutter test...' {
 Invoke-CheckedStep 'Checking QA/PROD update isolation...' {
     & "$PSScriptRoot\verify-qa-update-isolation.ps1"
 }
-Invoke-CheckedStep 'Building signed QA release APK...' {
-    & flutter build apk --no-pub --flavor qa --release @defines
+if ($ReuseExistingArtifact -or $DryRun) {
+    $builtApk = Join-Path $projectRoot "dist\$artifactName"
+    if (-not (Test-Path -LiteralPath $builtApk)) { throw "Requested existing QA artifact was not found: $builtApk" }
+} else {
+    Invoke-CheckedStep 'Building fresh signed QA release APK...' {
+        & flutter build apk --no-pub --flavor qa --release @defines
+    }
+    $builtApk = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-qa-release.apk'
+    if (-not (Test-Path -LiteralPath $builtApk)) { throw "QA APK was not created: $builtApk" }
 }
-
-$builtApk = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-qa-release.apk'
-if (-not (Test-Path -LiteralPath $builtApk)) { throw "QA APK was not created: $builtApk" }
 $aapt2 = Get-SdkTool -CommandName 'aapt2' -FileName 'aapt2.exe' -FailureMessage 'aapt2 was not found; package verification cannot continue.'
 $apksigner = Get-SdkTool -CommandName 'apksigner' -FileName 'apksigner.bat' -FailureMessage 'apksigner was not found; signing verification cannot continue.'
 $metadata = Get-ApkMetadata -ApkPath $builtApk -Aapt2Path $aapt2 -ApkSignerPath $apksigner
@@ -268,11 +310,22 @@ if (-not $keyAlias -or -not $storePassword) { throw 'QA signing metadata could n
 $keytool = Get-KeytoolPath
 $keystorePath = Join-Path $projectRoot 'android\relio-test.keystore'
 $keystoreCertificate = & $keytool -list -v -alias $keyAlias -keystore $keystorePath -storepass $storePassword 2>$null
-$expectedFingerprint = [regex]::Match(($keystoreCertificate -join "`n"), '(?i)SHA256:\s*([0-9A-F:]+)').Groups[1].Value.Replace(':', '').ToLowerInvariant()
-if ($expectedFingerprint -notmatch '^[0-9a-f]{64}$' -or $metadata.SigningFingerprint -ne $expectedFingerprint) {
+if ($LASTEXITCODE -ne 0) { throw 'QA signing key could not be verified.' }
+$keystoreFingerprint = [regex]::Match(($keystoreCertificate -join "`n"), '(?i)SHA256:\s*([0-9A-F:]+)').Groups[1].Value.Replace(':', '').ToLowerInvariant()
+if ($metadata.SigningFingerprint -ne $publicQaUpdateConfig.SigningCertSha256 -or
+    $keystoreFingerprint -ne $publicQaUpdateConfig.SigningCertSha256) {
     throw 'QA APK certificate does not match the preserved TEST signing identity.'
 }
 Write-Host "Verified QA package/version/signing identity: $expectedPackage $version ($($metadata.SigningFingerprint))"
+
+$sourceHash = (Get-FileHash -LiteralPath $builtApk -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($ExpectedSha256 -and $sourceHash -ne $ExpectedSha256.ToLowerInvariant()) { throw 'Artifact SHA-256 did not match the explicitly expected digest.' }
+if ($DryRun) {
+    $null = Get-ReleaseApiObject -Repository "$($publicQaUpdateConfig.Owner)/$githubRepositoryName" -Tag $releaseTag
+    Write-Host "DRY RUN: source=$sourceCommit live=$($liveManifest.versionCode) planned=$buildNumber tag=$releaseTag apk=$artifactName sha256=$sourceHash"
+    Write-Host 'DRY RUN: no GitHub or Hosting mutation performed.'
+    return
+}
 
 $releaseRoot = Join-Path $projectRoot 'dist\public-qa'
 $hostingRoot = Join-Path $projectRoot 'public_update\hosting'
@@ -322,6 +375,9 @@ if (-not $NoUpload) {
     }
 
     $release = Get-ReleaseApiObject -Repository $githubRepository -Tag $releaseTag
+    if ([int]$liveManifest.versionCode -eq $buildNumber -and -not $release) {
+        throw 'The same version is live but its immutable GitHub release is missing; refusing to recreate or overwrite it.'
+    }
     if (-not $release) {
         $notesPath = Join-Path $projectRoot "release_notes\$versionName-build-$buildNumber.md"
         if (-not (Test-Path -LiteralPath $notesPath)) {
@@ -329,7 +385,7 @@ if (-not $NoUpload) {
         }
         if (-not (Test-Path -LiteralPath $notesPath)) { throw "Release notes were not found: $notesPath" }
         Write-Host "Creating immutable GitHub release $releaseTag..."
-        & $gh.Source release create $releaseTag $releaseApk $checksumPath --repo $githubRepository --title $releaseTitle --notes-file $notesPath
+        & $gh.Source release create $releaseTag $releaseApk --repo $githubRepository --title $releaseTitle --notes-file $notesPath
         if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed. Firebase Hosting was not deployed.' }
         $release = Get-ReleaseApiObject -Repository $githubRepository -Tag $releaseTag
     } elseif ($release.name -ne $releaseTitle -or $release.draft -eq $true -or $release.prerelease -eq $true) {
@@ -338,7 +394,7 @@ if (-not $NoUpload) {
 
     $existingApk = @($release.assets | Where-Object { $_.name -eq $artifactName }) | Select-Object -First 1
     if ($existingApk) {
-        Test-RemoteApk -Url $existingApk.browser_download_url -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
+        Test-RemoteApk -Url $existingApk.browser_download_url -ExpectedOwner $publicQaUpdateConfig.Owner -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
         Write-Host "Existing GitHub APK asset matches the newly verified Build $buildNumber; it was not replaced."
     } else {
         & $gh.Source release upload $releaseTag $releaseApk --repo $githubRepository
@@ -347,7 +403,7 @@ if (-not $NoUpload) {
     $release = Get-ReleaseApiObject -Repository $githubRepository -Tag $releaseTag
     $finalAsset = @($release.assets | Where-Object { $_.name -eq $artifactName }) | Select-Object -First 1
     if (-not $finalAsset) { throw 'GitHub release did not expose the expected APK asset.' }
-    Test-RemoteApk -Url $finalAsset.browser_download_url -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
+    Test-RemoteApk -Url $finalAsset.browser_download_url -ExpectedOwner $publicQaUpdateConfig.Owner -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
     Write-Host 'Verified the public GitHub APK asset before generating the Hosting manifest.'
 } else {
     Write-Host 'GitHub release upload skipped by -NoUpload.'
@@ -362,7 +418,7 @@ $manifest = [ordered]@{
     apkUrl = $apkUrl
     sha256 = $sha256
     sizeBytes = [int64]$fileInfo.Length
-    signingCertSha256 = $metadata.SigningFingerprint
+    signingCertSha256 = $publicQaUpdateConfig.SigningCertSha256
     publishedAt = [DateTime]::UtcNow.ToString('o')
     releaseNotes = @(
         "RELIO Test v$versionName Build $buildNumber",
@@ -371,14 +427,20 @@ $manifest = [ordered]@{
         'ใช้สำหรับตรวจสอบการดาวน์โหลดและติดตั้งอัปเดตจากภายใน RELIO'
     )
 }
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $qaHostingRoot 'latest.json') -Encoding utf8
+$manifestJson = $manifest | ConvertTo-Json -Depth 5
+[IO.File]::WriteAllText((Join-Path $qaHostingRoot 'latest.json'), $manifestJson, [Text.UTF8Encoding]::new($false))
+$validator = Join-Path $projectRoot 'tool\validate_public_qa_manifest.dart'
+$installedBuilds = @([Math]::Max(1, [int]$liveManifest.versionCode - 1), [int]$liveManifest.versionCode, $buildNumber)
+Invoke-CheckedStep 'Validating generated manifest with the production updater parser...' {
+    & dart run $validator (Join-Path $qaHostingRoot 'latest.json') $versionName $buildNumber $apkUrl $sha256 $fileInfo.Length $publicQaUpdateConfig.SigningCertSha256 @installedBuilds
+}
 $template = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'firebase_hosting\qa\index.template.html')
 $page = $template.Replace('__VERSION_NAME__', $versionName).
     Replace('__BUILD_NUMBER__', [string]$buildNumber).
     Replace('__APK_URL__', $apkUrl).
     Replace('__SHA256__', $sha256).
     Replace('__SIZE_MB__', ('{0:N1}' -f ($fileInfo.Length / 1MB)))
-$page | Set-Content -LiteralPath (Join-Path $qaHostingRoot 'index.html') -Encoding utf8
+[IO.File]::WriteAllText((Join-Path $qaHostingRoot 'index.html'), $page, [Text.UTF8Encoding]::new($false))
 $hostingApks = @(Get-ChildItem -LiteralPath $hostingRoot -Filter '*.apk' -File -Recurse -ErrorAction SilentlyContinue)
 if ($hostingApks.Count -gt 0) { throw 'Firebase Hosting staging contains an APK; Hosting must contain metadata/page only.' }
 
@@ -403,12 +465,21 @@ if ($remoteManifest.packageName -ne $expectedPackage -or
     $remoteManifest.apkUrl -ne $apkUrl) {
     throw "Remote public manifest values do not match Build $buildNumber or the exact GitHub asset URL."
 }
+$liveManifestPath = Join-Path ([IO.Path]::GetTempPath()) "relio-live-manifest-$PID.json"
+try {
+    [IO.File]::WriteAllText($liveManifestPath, $remoteManifestResponse.Content, [Text.UTF8Encoding]::new($false))
+    Invoke-CheckedStep 'Validating live manifest with the production updater parser...' {
+        & dart run $validator $liveManifestPath $versionName $buildNumber $apkUrl $sha256 $fileInfo.Length $publicQaUpdateConfig.SigningCertSha256 @installedBuilds
+    }
+} finally {
+    if (Test-Path -LiteralPath $liveManifestPath) { Remove-Item -LiteralPath $liveManifestPath -Force }
+}
 $remotePage = Invoke-WebRequest -Uri "$publicBaseUrl/qa/" -UseBasicParsing
 if ($remotePage.StatusCode -ne 200 -or $remotePage.Content -notmatch 'data-relio-public-qa-channel="true"' -or
     $remotePage.Content -notmatch [regex]::Escape($apkUrl)) {
     throw 'Public download page verification failed.'
 }
-Test-RemoteApk -Url $apkUrl -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
+Test-RemoteApk -Url $apkUrl -ExpectedOwner $publicQaUpdateConfig.Owner -ExpectedHash $sha256 -ExpectedSize $fileInfo.Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
 
 Write-Host "PUBLIC QA PAGE: $publicBaseUrl/qa/"
 Write-Host "PUBLIC MANIFEST: $manifestUrl"

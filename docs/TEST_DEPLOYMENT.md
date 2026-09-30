@@ -1,20 +1,20 @@
 # RELIO Test Deployment — v0.8.6
 
-## Public QA channel — Build 16 (published baseline)
+## Public QA channel — versioned publisher
 
 The normal QA distribution path is a Firebase Hosting metadata page plus a
 GitHub Releases APK, not tester enrollment.
 From `D:\RELIO_Mobile` run:
 
 ```powershell
-.\scripts\release-public-qa.ps1 -NoDeploy
-.\scripts\release-public-qa.ps1
+.\scripts\publish-qa.ps1 -DryRun
+.\scripts\publish-qa.ps1
 ```
 
-The script derives the project root from `$PSScriptRoot`, requires version
-`0.8.6+16`, runs quality/build/signing gates, prepares isolated
+The publisher derives the project root from `$PSScriptRoot`, reads the version
+from `pubspec.yaml`, runs quality/build/signing gates, prepares isolated
 `public_update\hosting\qa\` metadata, creates or verifies the immutable
-`qa-v0.8.6-b16` release in the authenticated owner's public
+version-derived release in the authenticated owner's public
 `RELIO-Android-Updates` repository, deploys only Hosting in Firebase project
 `relio-17dc0`, and verifies both public origins. The public page is
 `https://relio-17dc0.web.app/qa/`; ordinary download needs no Firebase tester
