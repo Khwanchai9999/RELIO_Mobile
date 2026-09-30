@@ -49,6 +49,20 @@ function ConvertFrom-CliJson {
     return $text.Substring($start) | ConvertFrom-Json
 }
 
+function Invoke-FirebaseCli {
+    param([string[]]$Arguments)
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = & $firebase.Source @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($exitCode -ne 0) { throw "Firebase CLI command failed: firebase $($Arguments -join ' ')." }
+    return ,$output
+}
+
 function Get-SdkTool {
     param(
         [string]$CommandName,
@@ -229,16 +243,16 @@ if (-not $firebase -and $env:APPDATA) {
 }
 if (-not $firebase) { throw 'Firebase CLI is required for Hosting metadata deployment.' }
 $env:FIREBASE_CLI_DISABLE_UPDATE_CHECK = '1'
-$loginOutput = & $firebase.Source login:list 2>&1
-if ($LASTEXITCODE -ne 0 -or ($loginOutput -join "`n") -match 'No authorized accounts') {
+$loginOutput = Invoke-FirebaseCli -Arguments @('login:list')
+if (($loginOutput -join "`n") -match 'No authorized accounts') {
     throw 'Firebase CLI is not authenticated.'
 }
-$projects = ConvertFrom-CliJson (& $firebase.Source projects:list --json 2>$null)
+$projects = ConvertFrom-CliJson (Invoke-FirebaseCli -Arguments @('projects:list', '--json'))
 $projectItems = if ($projects.result) { @($projects.result) } else { @($projects) }
 if (-not @($projectItems | Where-Object { $_.projectId -eq $projectId })) {
     throw "Authenticated Firebase account cannot access $projectId."
 }
-$sites = ConvertFrom-CliJson (& $firebase.Source hosting:sites:list --project $projectId --json 2>$null)
+$sites = ConvertFrom-CliJson (Invoke-FirebaseCli -Arguments @('hosting:sites:list', '--project', $projectId, '--json'))
 $siteItems = if ($sites.result.sites) { @($sites.result.sites) } elseif ($sites.sites) { @($sites.sites) } else { @() }
 $site = $siteItems | Where-Object { $_.name -eq "projects/$projectId/sites/$projectId" } | Select-Object -First 1
 if (-not $site) { throw "Firebase Hosting site $projectId was not found." }
