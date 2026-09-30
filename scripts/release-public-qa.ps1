@@ -177,7 +177,8 @@ $releaseTag = "qa-v$versionName-b$buildNumber"
 $releaseTitle = "RELIO Test v$versionName Build $buildNumber"
 
 if ((git branch --show-current) -ne 'main') { throw 'Public QA publishing requires branch main.' }
-if ((git status --porcelain) -ne '') { throw 'Public QA publishing requires a clean source tree.' }
+$sourceStatus = git status --porcelain
+if (-not [string]::IsNullOrWhiteSpace(($sourceStatus -join "`n"))) { throw 'Public QA publishing requires a clean source tree.' }
 $sourceCommit = (git rev-parse HEAD).Trim()
 $originCommit = (git rev-parse origin/main).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $originCommit) { throw 'Public QA publishing requires HEAD to equal origin/main.' }
