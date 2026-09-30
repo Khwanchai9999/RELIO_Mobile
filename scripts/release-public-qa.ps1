@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$NoDeploy,
     [switch]$NoUpload,
@@ -258,7 +258,7 @@ $liveManifest = $liveResponse.Content | ConvertFrom-Json
 if ($liveManifest.channel -ne $publicQaUpdateConfig.Channel -or $liveManifest.packageName -ne $expectedPackage -or
     [int]$liveManifest.versionCode -le 0) { throw 'Current public QA manifest failed channel/package/version validation.' }
 if ($buildNumber -lt [int]$liveManifest.versionCode) { throw 'Refusing to publish a downgrade over the current public QA version.' }
-if ($buildNumber -eq [int]$liveManifest.versionCode -and -not $ReuseExistingArtifact) {
+if ($buildNumber -eq [int]$liveManifest.versionCode -and -not ($ReuseExistingArtifact -or $DryRun)) {
     throw 'The requested version is already live; use -ReuseExistingArtifact only for exact-release verification.'
 }
 
@@ -322,9 +322,38 @@ Write-Host "Verified QA package/version/signing identity: $expectedPackage $vers
 $sourceHash = (Get-FileHash -LiteralPath $builtApk -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($ExpectedSha256 -and $sourceHash -ne $ExpectedSha256.ToLowerInvariant()) { throw 'Artifact SHA-256 did not match the explicitly expected digest.' }
 if ($DryRun) {
-    $null = Get-ReleaseApiObject -Repository "$($publicQaUpdateConfig.Owner)/$githubRepositoryName" -Tag $releaseTag
-    Write-Host "DRY RUN: source=$sourceCommit live=$($liveManifest.versionCode) planned=$buildNumber tag=$releaseTag apk=$artifactName sha256=$sourceHash"
-    Write-Host 'DRY RUN: no GitHub or Hosting mutation performed.'
+    $tempManifest = Join-Path ([IO.Path]::GetTempPath()) "relio-qa-dry-run-$PID.json"
+    try {
+        [IO.File]::WriteAllText($tempManifest, $liveResponse.Content, [Text.UTF8Encoding]::new($false))
+        $dryInstalledBuilds = @(
+            [Math]::Max(1, [int]$liveManifest.versionCode - 2),
+            [Math]::Max(1, [int]$liveManifest.versionCode - 1),
+            [int]$liveManifest.versionCode
+        )
+        Invoke-CheckedStep 'Validating the live manifest with the production updater parser...' {
+            & dart run $validator $tempManifest $liveManifest.versionName $liveManifest.versionCode $liveManifest.apkUrl $liveManifest.sha256 $liveManifest.sizeBytes $liveManifest.signingCertSha256 @dryInstalledBuilds
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempManifest) { Remove-Item -LiteralPath $tempManifest -Force }
+    }
+
+    $dryRelease = Get-ReleaseApiObject -Repository "$($publicQaUpdateConfig.Owner)/$githubRepositoryName" -Tag $releaseTag
+    if ($dryRelease) {
+        if ($dryRelease.name -ne $releaseTitle -or $dryRelease.draft -eq $true -or $dryRelease.prerelease -eq $true) {
+            throw 'The existing GitHub release tag conflicts with the planned public QA release.'
+        }
+        $dryAsset = @($dryRelease.assets | Where-Object { $_.name -eq $artifactName }) | Select-Object -First 1
+        if ($dryAsset) {
+            Test-RemoteApk -Url $dryAsset.browser_download_url -ExpectedOwner $publicQaUpdateConfig.Owner -ExpectedHash $sourceHash -ExpectedSize (Get-Item -LiteralPath $builtApk).Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
+        } elseif ([int]$liveManifest.versionCode -eq $buildNumber) {
+            throw 'Build 17 is live but its GitHub release APK asset is missing.'
+        }
+    } elseif ([int]$liveManifest.versionCode -eq $buildNumber) {
+        throw 'The live version has no corresponding GitHub release; dry-run cannot verify the published state.'
+    }
+
+    Write-Host "DRY RUN VERIFIED: source=$sourceCommit live=$($liveManifest.versionName)+$($liveManifest.versionCode) planned=$version tag=$releaseTag APK=$artifactName SHA-256=$sourceHash"
+    Write-Host 'GitHub release state: VERIFIED; Firebase deployment skipped; no remote mutation performed.'
     return
 }
 

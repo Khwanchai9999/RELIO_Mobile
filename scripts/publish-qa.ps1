@@ -6,6 +6,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$windowsPowerShell51 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+if (-not (Test-Path -LiteralPath $windowsPowerShell51)) { throw 'Windows PowerShell 5.1 was not found.' }
+& $windowsPowerShell51 -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'verify-powershell-syntax.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell 5.1 parser regression check failed.' }
+
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
 if ([IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\') -ne $projectRoot) {
     throw "Run this command from the project root: $projectRoot"
