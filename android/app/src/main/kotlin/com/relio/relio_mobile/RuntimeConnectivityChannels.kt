@@ -12,6 +12,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.wifi.WifiManager
+import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -98,6 +99,7 @@ class RuntimeConnectivityChannels(private val context: Context) : EventChannel.S
         val capabilities = network?.let(connectivityManager::getNetworkCapabilities)
         val wifiManager = context.applicationContext
             .getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val sdk = Build.VERSION.SDK_INT
 
         val bluetoothEnabled = try {
@@ -117,6 +119,9 @@ class RuntimeConnectivityChannels(private val context: Context) : EventChannel.S
             "wifiEnabled" to try { wifiManager.isWifiEnabled } catch (_: SecurityException) { null },
             "bluetoothEnabled" to bluetoothEnabled,
             "nearbyPermissionsGranted" to hasRequiredNearbyPermissions(sdk),
+            "locationEnabled" to if (sdk <= Build.VERSION_CODES.R) {
+                try { locationManager.isLocationEnabled } catch (_: RuntimeException) { null }
+            } else null,
             "androidSdk" to sdk,
         )
     }

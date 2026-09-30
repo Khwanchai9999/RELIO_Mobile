@@ -116,6 +116,14 @@ class RelioDependencies {
   Future<bool> startNearbySessionIfPermitted() async {
     final snapshot = await permissionService.readNearbyPermissions();
     if (!snapshot.allGranted && !useMockTransport) return false;
+    if (!useMockTransport) {
+      final runtime = await connectivityStatus.readRuntimeSnapshot();
+      if (runtime.androidSdk != null &&
+          runtime.androidSdk! <= 30 &&
+          runtime.locationEnabled != true) {
+        return false;
+      }
+    }
     await nearbyService.startSession();
     return nearbyService.isAdvertising && nearbyService.isDiscovering;
   }

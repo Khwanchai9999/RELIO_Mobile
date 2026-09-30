@@ -267,6 +267,54 @@ void main() {
     );
   });
 
+  test('incoming Rescue and normal status propagate and clear', () async {
+    transport.simulatePeer(id: 'endpoint-rescue', name: 'Rescue Peer');
+    await settle();
+    await service.connect('endpoint-rescue');
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-rescue',
+      bytes: RelioPacket.hello(
+        senderDeviceId: 'device-rescue',
+        senderUserId: 'rescue-user',
+        displayName: 'Rescue Peer',
+      ).toBytes(),
+    );
+    await settle();
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-rescue',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-rescue',
+        senderUserId: 'rescue-user',
+        displayName: 'Rescue Peer',
+        status: DeviceStatus.rescue,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-rescue'], DeviceStatus.rescue);
+    expect(
+      (await repositories.nearbyDevices.listDevices()).single.status,
+      DeviceStatus.rescue,
+    );
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-rescue',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-rescue',
+        senderUserId: 'rescue-user',
+        displayName: 'Rescue Peer',
+        status: DeviceStatus.normal,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-rescue'], DeviceStatus.normal);
+    expect(
+      (await repositories.nearbyDevices.listDevices()).single.status,
+      DeviceStatus.normal,
+    );
+  });
+
   test('send failure keeps the message locally and marks it failed', () async {
     await repositories.conversations.ensureConversation(
       id: 'peer-fail',

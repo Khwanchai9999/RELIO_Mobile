@@ -70,8 +70,21 @@ class _NearbyScreenState extends State<NearbyScreen> {
       _permissions = _dependencies.permissionService.readNearbyPermissions();
     });
     if (!started) {
+      final runtime = await _dependencies.connectivityStatus
+          .readRuntimeSnapshot();
+      if (!mounted) return;
+      final locationRequired =
+          runtime.androidSdk != null &&
+          runtime.androidSdk! <= 30 &&
+          runtime.locationEnabled != true;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ต้องอนุญาต Nearby ก่อนเริ่มค้นหา')),
+        SnackBar(
+          content: Text(
+            locationRequired
+                ? 'เปิด Location ของโทรศัพท์เพื่อค้นหา Nearby บน Android รุ่นนี้'
+                : 'ต้องอนุญาต Nearby ก่อนเริ่มค้นหา',
+          ),
+        ),
       );
     }
   }
@@ -224,6 +237,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   Text(
                     'Bluetooth • ${_radioLabel(status.runtime.bluetoothEnabled)}',
                   ),
+                  if ((status.runtime.androidSdk ?? 0) <= 30)
+                    Text(
+                      'Location • ${_radioLabel(status.runtime.locationEnabled)}',
+                    ),
                   Text('Nearby • ${_nearbyLabel(status.nearbyReady)}'),
                   Text('เชื่อมต่อแล้ว • ${_nearby.connectedPeerCount} เครื่อง'),
                 ],

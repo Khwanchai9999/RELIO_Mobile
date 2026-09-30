@@ -196,4 +196,24 @@ void main() {
     expect(android12.allGranted, isTrue);
     expect(android11.allGranted, isTrue);
   });
+
+  test('API 29 Nearby readiness requires the system Location toggle', () {
+    const base = RuntimeConnectivitySnapshot(
+      bluetoothEnabled: true,
+      nearbyPermissionsGranted: true,
+      androidSdk: 29,
+    );
+    expect(InternetStatus(runtime: base).nearbyReady, isFalse);
+    expect(
+      InternetStatus(
+        runtime: const RuntimeConnectivitySnapshot(
+          bluetoothEnabled: true,
+          nearbyPermissionsGranted: true,
+          locationEnabled: true,
+          androidSdk: 29,
+        ),
+      ).nearbyReady,
+      isTrue,
+    );
+  });
 }

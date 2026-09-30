@@ -1060,6 +1060,7 @@ class NearbyService extends ChangeNotifier {
   void _log(String message) {
     eventLog.insert(0, '${DateTime.now().toIso8601String()} $message');
     if (eventLog.length > 80) eventLog.removeLast();
+    debugPrint('[RELIO][NEARBY] $message');
   }
 
   void _track(Future<void> operation) {

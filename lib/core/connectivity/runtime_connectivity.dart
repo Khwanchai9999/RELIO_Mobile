@@ -11,6 +11,7 @@ class RuntimeConnectivitySnapshot {
     this.wifiEnabled,
     this.bluetoothEnabled,
     this.nearbyPermissionsGranted,
+    this.locationEnabled,
     this.androidSdk,
   });
 
@@ -19,6 +20,7 @@ class RuntimeConnectivitySnapshot {
   final bool? wifiEnabled;
   final bool? bluetoothEnabled;
   final bool? nearbyPermissionsGranted;
+  final bool? locationEnabled;
   final int? androidSdk;
 
   factory RuntimeConnectivitySnapshot.fromPlatform(Object? value) {
@@ -29,6 +31,7 @@ class RuntimeConnectivitySnapshot {
       wifiEnabled: value['wifiEnabled'] as bool?,
       bluetoothEnabled: value['bluetoothEnabled'] as bool?,
       nearbyPermissionsGranted: value['nearbyPermissionsGranted'] as bool?,
+      locationEnabled: value['locationEnabled'] as bool?,
       androidSdk: (value['androidSdk'] as num?)?.toInt(),
     );
   }
@@ -41,6 +44,7 @@ class RuntimeConnectivitySnapshot {
       other.wifiEnabled == wifiEnabled &&
       other.bluetoothEnabled == bluetoothEnabled &&
       other.nearbyPermissionsGranted == nearbyPermissionsGranted &&
+      other.locationEnabled == locationEnabled &&
       other.androidSdk == androidSdk;
 
   @override
@@ -50,6 +54,7 @@ class RuntimeConnectivitySnapshot {
     wifiEnabled,
     bluetoothEnabled,
     nearbyPermissionsGranted,
+    locationEnabled,
     androidSdk,
   );
 }
@@ -115,7 +120,10 @@ class InternetStatus {
 
   bool get nearbyReady =>
       runtime.bluetoothEnabled == true &&
-      runtime.nearbyPermissionsGranted == true;
+      runtime.nearbyPermissionsGranted == true &&
+      (runtime.androidSdk == null ||
+          runtime.androidSdk! > 30 ||
+          runtime.locationEnabled == true);
 }
 
 abstract interface class InternetReachabilityProbe {
