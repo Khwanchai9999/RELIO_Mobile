@@ -13,6 +13,7 @@ if ($env:RELIO_QA_PUBLISH_INTERNAL -ne '1') {
     return
 }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+$validator = Join-Path $projectRoot 'tool\validate_public_qa_manifest.dart'
 $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 . (Join-Path $PSScriptRoot 'public-qa-config.ps1')
 $publicQaUpdateConfig = Get-RelioPublicQaUpdateConfig
