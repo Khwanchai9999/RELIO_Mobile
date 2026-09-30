@@ -53,7 +53,7 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
         onBack: () => context.pop(),
       ),
       body: AnimatedBuilder(
-        animation: nearby,
+        animation: Listenable.merge([nearby, _dependencies.connectivityStatus]),
         builder: (context, _) => ListView(
           padding: const EdgeInsets.fromLTRB(
             RelioSpacing.lg,
@@ -66,9 +66,15 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
               color: Theme.of(context).colorScheme.primaryContainer,
               child: ListTile(
                 leading: Icon(Icons.developer_mode_outlined),
-                title: Text('Development-only screen'),
+                title: Text(
+                  transport is MockNearbyTransport
+                      ? 'MOCK transport — developer diagnostics'
+                      : 'REAL Android Nearby transport',
+                ),
                 subtitle: Text(
-                  'Mock transport ไม่ใช่การค้นหาอุปกรณ์จริง และยังไม่มีการยืนยันด้วยโทรศัพท์สองเครื่อง',
+                  transport is MockNearbyTransport
+                      ? 'ข้อมูลจำลองเท่านั้น ไม่ใช่การค้นหาอุปกรณ์จริง'
+                      : 'Nearby Connections จริง • เริ่มค้นหาอัตโนมัติเมื่อสิทธิ์และวิทยุพร้อม • ใช้หน้าจอ Nearby ปกติเพื่อเชื่อมต่อ',
                 ),
                 trailing: transport is MockNearbyTransport
                     ? const Chip(label: Text('MOCK TRANSPORT'))
@@ -107,63 +113,63 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Transport controls',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.icon(
-                  onPressed: nearby.startAdvertising,
-                  icon: const Icon(Icons.wifi_tethering_outlined),
-                  label: const Text('Start Advertising'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: nearby.stopAdvertising,
-                  icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('Stop Advertising'),
-                ),
-                FilledButton.icon(
-                  onPressed: nearby.startDiscovery,
-                  icon: const Icon(Icons.radar_outlined),
-                  label: const Text('Start Discovery'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: nearby.stopDiscovery,
-                  icon: const Icon(Icons.radar_outlined),
-                  label: const Text('Stop Discovery'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: nearby.sendHello,
-                  icon: const Icon(Icons.waving_hand_outlined),
-                  label: const Text('Send Hello RELIO'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: nearby.sendTestText,
-                  icon: const Icon(Icons.textsms_outlined),
-                  label: const Text('Send test text'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: nearby.sendTestSos,
-                  icon: const Icon(Icons.warning_amber_outlined),
-                  label: const Text('Send test SOS'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: nearby.sendTestRescue,
-                  icon: const Icon(Icons.shield_outlined),
-                  label: const Text('Send test Rescue'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: nearby.clearLog,
-                  icon: const Icon(Icons.clear_all_outlined),
-                  label: const Text('Clear log'),
-                ),
-              ],
-            ),
             if (transport is MockNearbyTransport) ...[
+              Text(
+                'Mock transport controls',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.icon(
+                    onPressed: nearby.startAdvertising,
+                    icon: const Icon(Icons.wifi_tethering_outlined),
+                    label: const Text('Start Advertising'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: nearby.stopAdvertising,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('Stop Advertising'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: nearby.startDiscovery,
+                    icon: const Icon(Icons.radar_outlined),
+                    label: const Text('Start Discovery'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: nearby.stopDiscovery,
+                    icon: const Icon(Icons.radar_outlined),
+                    label: const Text('Stop Discovery'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: nearby.sendHello,
+                    icon: const Icon(Icons.waving_hand_outlined),
+                    label: const Text('Send Hello RELIO'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: nearby.sendTestText,
+                    icon: const Icon(Icons.textsms_outlined),
+                    label: const Text('Send test text'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: nearby.sendTestSos,
+                    icon: const Icon(Icons.warning_amber_outlined),
+                    label: const Text('Send test SOS'),
+                  ),
+                  FilledButton.tonalIcon(
+                    onPressed: nearby.sendTestRescue,
+                    icon: const Icon(Icons.shield_outlined),
+                    label: const Text('Send test Rescue'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: nearby.clearLog,
+                    icon: const Icon(Icons.clear_all_outlined),
+                    label: const Text('Clear log'),
+                  ),
+                ],
+              ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: () => transport.simulatePeer(
@@ -174,6 +180,56 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                 label: const Text('Simulate peer discovered'),
               ),
             ],
+            const SizedBox(height: 12),
+            Builder(
+              builder: (context) {
+                final runtime = _dependencies.connectivityStatus.status.runtime;
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(
+                      label: Text(
+                        'Bluetooth ${runtime.bluetoothEnabled == true
+                            ? 'ON'
+                            : runtime.bluetoothEnabled == false
+                            ? 'OFF'
+                            : 'unknown'}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Wi-Fi ${runtime.wifiEnabled == true
+                            ? 'ON'
+                            : runtime.wifiEnabled == false
+                            ? 'OFF'
+                            : 'unknown'}',
+                      ),
+                    ),
+                    if ((runtime.androidSdk ?? 0) <= 30 &&
+                        runtime.androidSdk != null)
+                      Chip(
+                        label: Text(
+                          'Location ${runtime.locationEnabled == true
+                              ? 'ON'
+                              : runtime.locationEnabled == false
+                              ? 'OFF'
+                              : 'unknown'}',
+                        ),
+                      ),
+                    Chip(
+                      label: Text(
+                        'Permissions ${runtime.nearbyPermissionsGranted == true
+                            ? 'granted'
+                            : runtime.nearbyPermissionsGranted == false
+                            ? 'needed'
+                            : 'unknown'}',
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
             const SizedBox(height: 18),
             Text('State', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),

@@ -58,6 +58,7 @@ class NearbyService extends ChangeNotifier {
   final Map<String, String> deviceToEndpointId = {};
   final Map<String, NearbyConnectionState> peerStates = {};
   final Map<String, String> peerErrors = {};
+  final Map<String, Timer> _helloTimeouts = {};
   final Map<String, DeviceStatus> peerStatuses = {};
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final Set<Future<void>> _inFlightOperations = {};
@@ -530,6 +531,7 @@ class NearbyService extends ChangeNotifier {
   void _onPeer(NearbyPeer peer) {
     if (peer.isLost) {
       if (peerStates[peer.endpointId] != NearbyConnectionState.connected) {
+        _helloTimeouts.remove(peer.endpointId)?.cancel();
         discoveredPeers.removeWhere(
           (item) => item.endpointId == peer.endpointId,
         );
@@ -561,6 +563,16 @@ class NearbyService extends ChangeNotifier {
     final endpointId = event.peer.endpointId;
     peerStates[endpointId] = event.state;
     if (event.state == NearbyConnectionState.connected) {
+      peerErrors.remove(endpointId);
+      _helloTimeouts.remove(endpointId)?.cancel();
+      _helloTimeouts[endpointId] = Timer(const Duration(seconds: 8), () {
+        if (peerStates[endpointId] == NearbyConnectionState.connected &&
+            !endpointToDeviceId.containsKey(endpointId)) {
+          peerErrors[endpointId] = 'hello_timeout';
+          _log('ERROR: RELIO hello timeout for endpoint $endpointId');
+          notifyListeners();
+        }
+      });
       final index = discoveredPeers.indexWhere((item) => item.id == endpointId);
       final peer = NearbyPeer(
         id: endpointId,
@@ -575,9 +587,12 @@ class NearbyService extends ChangeNotifier {
       }
       _track(_handshakeAndShareActiveSos(endpointId));
     } else if (event.state == NearbyConnectionState.disconnected) {
+      _helloTimeouts.remove(endpointId)?.cancel();
+      peerErrors.remove(endpointId);
       final deviceId = endpointToDeviceId.remove(endpointId);
       if (deviceId != null) deviceToEndpointId.remove(deviceId);
     } else if (event.state == NearbyConnectionState.failed) {
+      _helloTimeouts.remove(endpointId)?.cancel();
       peerErrors[endpointId] = event.error ?? 'connection failed';
     }
     if (event.error != null) peerErrors[endpointId] = event.error!;
@@ -586,6 +601,8 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handshakeAndShareActiveSos(String endpointId) async {
+    _log('connection success: endpoint $endpointId');
+    _log('hello send: endpoint $endpointId');
     await sendHello(peerId: endpointId);
     final deviceId = await identity.getDeviceId();
     final active = await sos?.readActive(ownerDeviceId: deviceId);
@@ -675,8 +692,12 @@ class NearbyService extends ChangeNotifier {
       notifyListeners();
     } on RelioPacketException catch (error) {
       protocolErrorCount += 1;
+      peerErrors[event.peerId] = 'invalid_packet';
+      notifyListeners();
       _fail('packet ไม่ถูกต้อง: ${error.message}');
     } on Object catch (error) {
+      peerErrors[event.peerId] = 'packet_processing_failed';
+      notifyListeners();
       _fail('ประมวลผล packet ไม่สำเร็จ: $error');
     }
   }
@@ -829,6 +850,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handleHello(String endpointId, RelioPacket packet) async {
+    _log('hello receive: endpoint $endpointId');
     final status = _statusFrom(packet.payload['status'] as String);
     peerStatuses[packet.senderDeviceId] = status;
     final displayName = packet.payload['displayName']! as String;
@@ -854,8 +876,10 @@ class NearbyService extends ChangeNotifier {
       displayName: displayName,
       capabilities: _capabilitiesFrom(packet.payload['capabilities']),
     );
+    _helloTimeouts.remove(endpointId)?.cancel();
+    peerErrors.remove(endpointId);
     _track(_flushPendingMessages(conversationId));
-    _log('จับคู่ endpoint $endpointId ↔ ${packet.senderDeviceId}');
+    _log('peer established: endpoint $endpointId ↔ ${packet.senderDeviceId}');
   }
 
   Future<void> _flushPendingMessages(String conversationId) async {
@@ -1103,6 +1127,10 @@ class NearbyService extends ChangeNotifier {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    for (final timer in _helloTimeouts.values) {
+      timer.cancel();
+    }
+    _helloTimeouts.clear();
     await Future.wait(
       _subscriptions.map((subscription) => subscription.cancel()),
     );

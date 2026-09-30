@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:permission_handler/permission_handler.dart' as permission;
+import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/connectivity/runtime_connectivity.dart';
+import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/permissions/permission_service.dart';
+import 'package:relio_mobile/core/relio_dependencies.dart';
 
 class _FakeRuntimeSource implements RuntimeConnectivitySource {
   _FakeRuntimeSource(this.current);
@@ -216,4 +219,58 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'API 29 Location toggle starts and stops real Nearby automatically',
+    () async {
+      const locationOff = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        bluetoothEnabled: true,
+        nearbyPermissionsGranted: true,
+        locationEnabled: false,
+        androidSdk: 29,
+      );
+      final source = _FakeRuntimeSource(locationOff);
+      final transport = MockNearbyTransport();
+      final connectivity = ConnectivityStatusService(
+        source: source,
+        probe: _FakeProbe(0),
+      );
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: connectivity,
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(transport.isAdvertising, isFalse);
+      expect(transport.isDiscovering, isFalse);
+
+      source.emit(
+        const RuntimeConnectivitySnapshot(
+          hasInternetRoute: false,
+          bluetoothEnabled: true,
+          nearbyPermissionsGranted: true,
+          locationEnabled: true,
+          androidSdk: 29,
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+
+      source.emit(locationOff);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(transport.isAdvertising, isFalse);
+      expect(transport.isDiscovering, isFalse);
+    },
+  );
 }

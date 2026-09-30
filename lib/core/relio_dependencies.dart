@@ -31,7 +31,10 @@ class RelioDependencies {
     CloudDataSource? cloudDataSource,
     AppUpdateService? appUpdateService,
     ConnectivityStatusService? connectivityStatusService,
+    PermissionService? permissionService,
+    bool? androidPlatformOverride,
   }) : database = database ?? AppDatabase(),
+       _isAndroid = androidPlatformOverride ?? Platform.isAndroid,
        useMockTransport = useMockTransport ?? _defaultMockTransport,
        transport =
            transport ??
@@ -56,10 +59,12 @@ class RelioDependencies {
       ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
     );
     identity = RelioDeviceIdentityRepository(this.database);
-    permissionService = PermissionService(
-      androidSdkReader: () async =>
-          (await connectivityStatus.readRuntimeSnapshot()).androidSdk,
-    );
+    this.permissionService =
+        permissionService ??
+        PermissionService(
+          androidSdkReader: () async =>
+              (await connectivityStatus.readRuntimeSnapshot()).androidSdk,
+        );
     relayRepository = DriftRelayRepository(this.database);
     relayEngine = RelayEngine(
       transport: this.transport,
@@ -94,6 +99,7 @@ class RelioDependencies {
   }
 
   final AppDatabase database;
+  final bool _isAndroid;
   final NearbyTransport transport;
   final bool useMockTransport;
   late final ConnectivityStatusService connectivityStatus;
@@ -110,25 +116,61 @@ class RelioDependencies {
   late final AuthService authService;
   late final AppUpdateService appUpdateService;
   Future<void>? _initialization;
+  StreamSubscription<InternetStatus>? _readinessSubscription;
+  Future<bool>? _nearbySyncOperation;
+  bool _nearbySyncAgain = false;
 
   Future<void> initialize() => _initialization ??= _initialize();
 
-  Future<bool> startNearbySessionIfPermitted() async {
+  Future<bool> startNearbySessionIfPermitted() {
+    if (!nearbyService.initialized) return Future.value(false);
+    final active = _nearbySyncOperation;
+    if (active != null) {
+      _nearbySyncAgain = true;
+      return active;
+    }
+    final operation = _syncNearbySession();
+    _nearbySyncOperation = operation;
+    return operation.whenComplete(() {
+      if (identical(_nearbySyncOperation, operation)) {
+        _nearbySyncOperation = null;
+      }
+      if (_nearbySyncAgain) {
+        _nearbySyncAgain = false;
+        unawaited(startNearbySessionIfPermitted());
+      }
+    });
+  }
+
+  Future<bool> _syncNearbySession() async {
     final snapshot = await permissionService.readNearbyPermissions();
-    if (!snapshot.allGranted && !useMockTransport) return false;
+    var ready = snapshot.allGranted || useMockTransport;
     if (!useMockTransport) {
       final runtime = await connectivityStatus.readRuntimeSnapshot();
+      if (runtime.bluetoothEnabled != true ||
+          runtime.nearbyPermissionsGranted != true) {
+        ready = false;
+      }
       if (runtime.androidSdk != null &&
           runtime.androidSdk! <= 30 &&
           runtime.locationEnabled != true) {
-        return false;
+        ready = false;
       }
+    }
+    if (!ready) {
+      await nearbyService.stopSession();
+      return false;
     }
     await nearbyService.startSession();
     return nearbyService.isAdvertising && nearbyService.isDiscovering;
   }
 
   Future<void> _initialize() async {
+    if (_isAndroid && !useMockTransport) {
+      _readinessSubscription = connectivityStatus.changes.listen((_) {
+        unawaited(startNearbySessionIfPermitted());
+      });
+    }
     unawaited(connectivityStatus.initialize());
     await identity.getDeviceId();
     await identity.getDisplayName();
@@ -141,7 +183,7 @@ class RelioDependencies {
       // healthy when credentials are absent or the network is unavailable.
     }
     await nearbyService.initialize();
-    if (Platform.isAndroid && transport is! MockNearbyTransport) {
+    if (_isAndroid && !useMockTransport) {
       await startNearbySessionIfPermitted();
     }
     await relayEngine.initialize();
@@ -155,6 +197,7 @@ class RelioDependencies {
   }
 
   Future<void> dispose() async {
+    await _readinessSubscription?.cancel();
     await connectivityStatus.dispose();
     await relayEngine.dispose();
     await nearbyService.close();

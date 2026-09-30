@@ -40,13 +40,16 @@ class _NearbyScreenState extends State<NearbyScreen> {
     _dependencies = RelioDependencyScope.of(context);
     _nearby = _dependencies.nearbyService;
     _nearby.addListener(_onNearbyChanged);
+    _dependencies.connectivityStatus.addListener(_onNearbyChanged);
     _permissions = _dependencies.permissionService.readNearbyPermissions();
+    unawaited(_dependencies.startNearbySessionIfPermitted());
     unawaited(_loadSavedDevices());
   }
 
   @override
   void dispose() {
     _nearby.removeListener(_onNearbyChanged);
+    _dependencies.connectivityStatus.removeListener(_onNearbyChanged);
     super.dispose();
   }
 
@@ -102,6 +105,19 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final state = _nearby.peerStates[peer.endpointId];
     if (state == NearbyConnectionState.connected && peer.deviceId != null) {
       if (mounted) context.push('/chat/${peer.deviceId}');
+      return;
+    }
+    if (state == NearbyConnectionState.connected) {
+      final timedOut = _nearby.peerErrors[peer.endpointId] == 'hello_timeout';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            timedOut
+                ? 'เชื่อมต่อแล้ว แต่ไม่ได้รับการยืนยัน RELIO จากอุปกรณ์นี้'
+                : 'กำลังยืนยันตัวตน RELIO กับอุปกรณ์นี้',
+          ),
+        ),
+      );
       return;
     }
     if (state != NearbyConnectionState.connecting) {
@@ -180,14 +196,21 @@ class _NearbyScreenState extends State<NearbyScreen> {
       name: peer.name,
       status: status,
       signalQuality: 0,
-      isConnected: state == NearbyConnectionState.connected,
+      isConnected:
+          state == NearbyConnectionState.connected && peer.deviceId != null,
       isDemo: false,
-      presence: switch (state) {
-        NearbyConnectionState.connecting => PeerPresence.connecting,
-        NearbyConnectionState.connected => PeerPresence.connected,
-        NearbyConnectionState.disconnected || null => PeerPresence.discovered,
-        NearbyConnectionState.failed => PeerPresence.failed,
-      },
+      presence: _nearby.peerErrors.containsKey(peer.endpointId)
+          ? PeerPresence.failed
+          : switch (state) {
+              NearbyConnectionState.connecting => PeerPresence.connecting,
+              NearbyConnectionState.connected =>
+                peer.deviceId == null
+                    ? PeerPresence.connecting
+                    : PeerPresence.connected,
+              NearbyConnectionState.disconnected ||
+              null => PeerPresence.discovered,
+              NearbyConnectionState.failed => PeerPresence.failed,
+            },
     );
   }
 

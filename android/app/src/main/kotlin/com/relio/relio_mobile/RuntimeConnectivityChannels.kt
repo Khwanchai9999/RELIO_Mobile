@@ -61,6 +61,8 @@ class RuntimeConnectivityChannels(private val context: Context) : EventChannel.S
                 val filter = IntentFilter().apply {
                     addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
                     addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                    addAction(LocationManager.MODE_CHANGED_ACTION)
+                    addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
                 }
                 ContextCompat.registerReceiver(
                     context,

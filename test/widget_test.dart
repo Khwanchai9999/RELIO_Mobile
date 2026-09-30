@@ -125,7 +125,7 @@ void main() {
     await tester.pumpAndSettle();
     await tapText(tester, 'Nearby Diagnostics');
 
-    expect(find.text('Development-only screen'), findsOneWidget);
+    expect(find.text('MOCK transport — developer diagnostics'), findsOneWidget);
     expect(find.text('MockNearbyTransport'), findsOneWidget);
     expect(find.text('Start Discovery'), findsOneWidget);
   });
