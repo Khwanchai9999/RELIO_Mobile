@@ -50,6 +50,7 @@ class NearbyService extends ChangeNotifier {
   final List<String> eventLog = [];
   final Map<String, String> _packetMessageIds = {};
   final Set<String> _pendingConversationFlushes = {};
+  final Set<String> _incomingTextMessagesInProgress = {};
   final Map<String, RelioPacket> _mediaMetadataByPayload = {};
   final Map<String, NearbyFilePayloadEvent> _mediaFilesByPayload = {};
   final Map<String, String> _payloadTransferIds = {};
@@ -877,25 +878,42 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handleText(String endpointId, RelioPacket packet) async {
-    final conversationId = await _conversationIdForDevice(
-      packet.senderDeviceId,
-      packet.payload['conversationId']! as String,
-    );
-    await conversations.ensureConversation(
-      id: conversationId,
-      participantId: packet.senderDeviceId,
-      displayName: _peerName(endpointId, packet.senderUserId),
-      participantStatus: DeviceStatus.normal,
-    );
-    await messages.createIncomingText(
-      conversationId: conversationId,
-      senderId: packet.senderUserId,
-      senderDeviceId: packet.senderDeviceId,
-      messageId: packet.payload['messageId']! as String,
-      text: packet.payload['text']! as String,
-      createdAt: DateTime.parse(packet.payload['timestamp']! as String),
-    );
-    await _sendAck(endpointId, packet);
+    final messageId = packet.payload['messageId']! as String;
+    if (!_incomingTextMessagesInProgress.add(messageId)) {
+      _log(
+        'duplicate textMessage acknowledged while persistence is in progress',
+      );
+      await _sendAck(endpointId, packet);
+      return;
+    }
+    try {
+      if (await messages.getMessage(messageId) != null) {
+        _log('duplicate textMessage acknowledged');
+        await _sendAck(endpointId, packet);
+        return;
+      }
+      final conversationId = await _conversationIdForDevice(
+        packet.senderDeviceId,
+        packet.payload['conversationId']! as String,
+      );
+      await conversations.ensureConversation(
+        id: conversationId,
+        participantId: packet.senderDeviceId,
+        displayName: _peerName(endpointId, packet.senderUserId),
+        participantStatus: DeviceStatus.normal,
+      );
+      await messages.createIncomingText(
+        conversationId: conversationId,
+        senderId: packet.senderUserId,
+        senderDeviceId: packet.senderDeviceId,
+        messageId: messageId,
+        text: packet.payload['text']! as String,
+        createdAt: DateTime.parse(packet.payload['timestamp']! as String),
+      );
+      await _sendAck(endpointId, packet);
+    } finally {
+      _incomingTextMessagesInProgress.remove(messageId);
+    }
   }
 
   Future<void> _handleDeviceStatus(RelioPacket packet) async {
@@ -1070,8 +1088,9 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _fail(String message) {
-    lastError = message;
-    _log('ERROR: $message');
+    final safeMessage = message.split(':').first;
+    lastError = safeMessage;
+    _log('ERROR: $safeMessage');
     notifyListeners();
   }
 

@@ -132,11 +132,18 @@ void main() {
       );
       await settle();
       expect(
+        transport.sentPayloads
+            .map(RelioPacket.fromBytes)
+            .where((packet) => packet.type == RelioPacketType.ack),
+        hasLength(2),
+      );
+      expect(
         (await repositories.messages.listMessages(
           'conversation-a',
         )).where((item) => item.id == 'incoming-1'),
         hasLength(1),
       );
+      expect(service.lastError, isNull);
 
       final ack = RelioPacket.ack(
         senderDeviceId: 'device-peer-a',
