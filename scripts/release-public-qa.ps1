@@ -135,8 +135,17 @@ function Get-ApkMetadata {
 
 function Get-ReleaseApiObject {
     param([string]$Repository, [string]$Tag)
-    $output = & $gh.Source api "repos/$Repository/releases/tags/$Tag" 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # gh uses stderr for expected HTTP 404 responses; keep that status
+        # inspectable in Windows PowerShell 5.1 instead of terminating early.
+        $ErrorActionPreference = 'Continue'
+        $output = & $gh.Source api "repos/$Repository/releases/tags/$Tag" 2>&1
+        $apiExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($apiExitCode -ne 0) {
         if (($output -join "`n") -match 'Not Found|404') { return $null }
         throw "Could not inspect GitHub release $Tag."
     }
