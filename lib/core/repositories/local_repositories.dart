@@ -77,6 +77,8 @@ abstract interface class MessageRepository {
     required String localPath,
   });
   Future<void> updateDeliveryStatus(String messageId, DeliveryStatus status);
+  Future<List<String>> markConversationRead(String conversationId);
+  Future<void> markMessageRead(String messageId);
   Future<void> updateCloudSyncStatus(String messageId, String status);
   Future<void> markFailed(String messageId, String error);
 }
@@ -174,6 +176,7 @@ abstract interface class SyncQueueRepository {
 abstract interface class NearbyDeviceRepository {
   Stream<List<RelioNearbyDevice>> watchDevices();
   Future<List<RelioNearbyDevice>> listDevices();
+  Future<RelioNearbyDevice?> getDevice(String deviceId);
   Future<void> upsert({
     required String deviceId,
     required String displayName,
@@ -182,6 +185,9 @@ abstract interface class NearbyDeviceRepository {
     int? approxDistance,
   });
   Future<void> updateStatus(String deviceId, DeviceStatus status);
+  Future<void> setTrusted(String deviceId, bool trusted);
+  Future<void> setBlocked(String deviceId, bool blocked);
+  Future<void> rename(String deviceId, String displayName);
 }
 
 class DriftConversationRepository implements ConversationRepository {
@@ -190,6 +196,7 @@ class DriftConversationRepository implements ConversationRepository {
   final _conversationController =
       StreamController<List<RelioConversation>>.broadcast();
   StreamSubscription<List<RelioConversation>>? _conversationSubscription;
+  List<RelioConversation>? _latestConversations;
 
   @override
   Stream<List<RelioConversation>> watchConversations() {
@@ -206,8 +213,18 @@ class DriftConversationRepository implements ConversationRepository {
             ]))
             .watch()
             .map(_mapJoinedRows)
-            .listen(_conversationController.add);
-    return _conversationController.stream;
+            .listen((conversations) {
+              _latestConversations = conversations;
+              _conversationController.add(conversations);
+            });
+    return Stream<List<RelioConversation>>.multi((controller) {
+      final latest = _latestConversations;
+      if (latest != null) controller.add(latest);
+      final subscription = _conversationController.stream.listen(
+        controller.add,
+      );
+      controller.onCancel = subscription.cancel;
+    });
   }
 
   @override
@@ -268,6 +285,7 @@ class DriftConversationRepository implements ConversationRepository {
       lastMessageAt: null,
       createdAt: now,
       updatedAt: now,
+      unreadCount: 0,
     );
   }
 
@@ -335,6 +353,7 @@ class DriftConversationRepository implements ConversationRepository {
         lastMessageAt: row.lastMessageAt,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
+        unreadCount: row.unreadCount,
       );
 }
 
@@ -451,23 +470,38 @@ class DriftMessageRepository implements MessageRepository {
     )..where((row) => row.id.equals(messageId))).getSingleOrNull();
     if (exists != null) return _map(exists);
     final now = DateTime.now();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: messageId,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: MessageType.text.name,
-            content: text,
-            createdAt: createdAt,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.delivered.name,
-            isOutgoing: false,
+    await db.transaction(() async {
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: messageId,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: MessageType.text.name,
+              content: text,
+              createdAt: createdAt,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.delivered.name,
+              isOutgoing: false,
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, createdAt);
+      await (db.update(
+        db.conversations,
+      )..where((row) => row.id.equals(conversationId))).write(
+        ConversationsCompanion(
+          unreadCount: Value(
+            (await (db.select(db.conversations)
+                          ..where((row) => row.id.equals(conversationId)))
+                        .getSingle())
+                    .unreadCount +
+                1,
           ),
-        );
-    await conversations.updateLastActivity(conversationId, createdAt);
+        ),
+      );
+    });
     return RelioMessage(
       id: messageId,
       conversationId: conversationId,
@@ -556,6 +590,7 @@ class DriftMessageRepository implements MessageRepository {
           ),
         );
     await conversations.updateLastActivity(conversationId, location.capturedAt);
+    await _incrementUnread(conversationId);
     return (await getMessage(messageId))!;
   }
 
@@ -648,6 +683,7 @@ class DriftMessageRepository implements MessageRepository {
           ),
         );
     await conversations.updateLastActivity(conversationId, now);
+    await _incrementUnread(conversationId);
     return (await getMessage(messageId))!;
   }
 
@@ -666,6 +702,16 @@ class DriftMessageRepository implements MessageRepository {
     );
   }
 
+  Future<void> _incrementUnread(String conversationId) async {
+    final row = await (db.select(
+      db.conversations,
+    )..where((item) => item.id.equals(conversationId))).getSingleOrNull();
+    if (row == null) return;
+    await (db.update(db.conversations)
+          ..where((item) => item.id.equals(conversationId)))
+        .write(ConversationsCompanion(unreadCount: Value(row.unreadCount + 1)));
+  }
+
   @override
   Future<void> updateCloudSyncStatus(String messageId, String status) async {
     await (db.update(
@@ -676,6 +722,45 @@ class DriftMessageRepository implements MessageRepository {
         updatedAt: Value(DateTime.now()),
       ),
     );
+  }
+
+  @override
+  Future<List<String>> markConversationRead(String conversationId) async {
+    final unread =
+        await (db.select(db.messages)..where(
+              (row) =>
+                  row.conversationId.equals(conversationId) &
+                  row.isOutgoing.equals(false) &
+                  row.readAt.isNull(),
+            ))
+            .get();
+    if (unread.isEmpty) return const [];
+    final now = DateTime.now();
+    await db.transaction(() async {
+      await (db.update(db.messages)..where(
+            (row) =>
+                row.conversationId.equals(conversationId) &
+                row.isOutgoing.equals(false) &
+                row.readAt.isNull(),
+          ))
+          .write(MessagesCompanion(readAt: Value(now), updatedAt: Value(now)));
+      await (db.update(db.conversations)
+            ..where((row) => row.id.equals(conversationId)))
+          .write(const ConversationsCompanion(unreadCount: Value(0)));
+    });
+    return unread.map((message) => message.id).toList(growable: false);
+  }
+
+  @override
+  Future<void> markMessageRead(String messageId) async {
+    final now = DateTime.now();
+    await (db.update(db.messages)..where(
+          (row) =>
+              row.id.equals(messageId) &
+              row.isOutgoing.equals(true) &
+              row.readAt.isNull(),
+        ))
+        .write(MessagesCompanion(readAt: Value(now), updatedAt: Value(now)));
   }
 
   @override
@@ -699,6 +784,7 @@ class DriftMessageRepository implements MessageRepository {
     latitude: row.latitude,
     longitude: row.longitude,
     nearbyMessageId: row.nearbyMessageId,
+    readAt: row.readAt,
   );
 }
 
@@ -1417,6 +1503,14 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
           .toList(growable: false);
 
   @override
+  Future<RelioNearbyDevice?> getDevice(String deviceId) async {
+    final row = await (db.select(
+      db.nearbyDevices,
+    )..where((item) => item.deviceId.equals(deviceId))).getSingleOrNull();
+    return row == null ? null : _map(row);
+  }
+
+  @override
   Future<void> upsert({
     required String deviceId,
     required String displayName,
@@ -1424,18 +1518,21 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     int? signalQuality,
     int? approxDistance,
   }) async {
-    await db
-        .into(db.nearbyDevices)
-        .insertOnConflictUpdate(
-          NearbyDevicesCompanion.insert(
-            deviceId: deviceId,
-            displayName: displayName,
-            status: status.name,
-            lastSeenAt: DateTime.now(),
-            signalQuality: Value(signalQuality),
-            approxDistance: Value(approxDistance),
-          ),
-        );
+    final existing = await (db.select(
+      db.nearbyDevices,
+    )..where((row) => row.deviceId.equals(deviceId))).getSingleOrNull();
+    final companion = NearbyDevicesCompanion.insert(
+      deviceId: deviceId,
+      displayName: displayName,
+      status: status.name,
+      lastSeenAt: DateTime.now(),
+      signalQuality: Value(signalQuality),
+      approxDistance: Value(approxDistance),
+      isTrusted: Value(existing?.isTrusted ?? false),
+      isBlocked: Value(existing?.isBlocked ?? false),
+      autoReconnectEnabled: Value(existing?.autoReconnectEnabled ?? false),
+    );
+    await db.into(db.nearbyDevices).insertOnConflictUpdate(companion);
   }
 
   @override
@@ -1450,6 +1547,36 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     );
   }
 
+  @override
+  Future<void> setTrusted(String deviceId, bool trusted) async {
+    await (db.update(
+      db.nearbyDevices,
+    )..where((row) => row.deviceId.equals(deviceId))).write(
+      NearbyDevicesCompanion(
+        isTrusted: Value(trusted),
+        autoReconnectEnabled: Value(trusted),
+      ),
+    );
+  }
+
+  @override
+  Future<void> setBlocked(String deviceId, bool blocked) async {
+    await (db.update(db.nearbyDevices)
+          ..where((row) => row.deviceId.equals(deviceId)))
+        .write(NearbyDevicesCompanion(isBlocked: Value(blocked)));
+  }
+
+  @override
+  Future<void> rename(String deviceId, String displayName) async {
+    final name = displayName.trim();
+    if (name.isEmpty || name.length > 60) {
+      throw ArgumentError.value(displayName, 'displayName');
+    }
+    await (db.update(db.nearbyDevices)
+          ..where((row) => row.deviceId.equals(deviceId)))
+        .write(NearbyDevicesCompanion(displayName: Value(name)));
+  }
+
   RelioNearbyDevice _map(NearbyDevice row) => RelioNearbyDevice(
     deviceId: row.deviceId,
     displayName: row.displayName,
@@ -1457,6 +1584,9 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     lastSeenAt: row.lastSeenAt,
     signalQuality: row.signalQuality,
     approxDistance: row.approxDistance,
+    isTrusted: row.isTrusted,
+    isBlocked: row.isBlocked,
+    autoReconnectEnabled: row.autoReconnectEnabled,
   );
 }
 

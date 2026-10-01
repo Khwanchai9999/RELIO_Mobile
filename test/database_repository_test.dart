@@ -74,6 +74,46 @@ void main() {
     },
   );
 
+  test(
+    'incoming messages retain unread state until the conversation is read',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'peer-read',
+        participantId: 'peer-read',
+        displayName: 'Peer Read',
+        participantStatus: DeviceStatus.normal,
+      );
+      await repositories.messages.createIncomingText(
+        conversationId: 'peer-read',
+        senderId: 'peer-user',
+        senderDeviceId: 'peer-device',
+        messageId: 'incoming-1',
+        text: 'hello',
+        createdAt: DateTime.now(),
+      );
+
+      expect(
+        (await repositories.conversations.getConversation(
+          'peer-read',
+        ))?.unreadCount,
+        1,
+      );
+      expect(await repositories.messages.markConversationRead('peer-read'), [
+        'incoming-1',
+      ]);
+      expect(
+        (await repositories.conversations.getConversation(
+          'peer-read',
+        ))?.unreadCount,
+        0,
+      );
+      expect(
+        (await repositories.messages.getMessage('incoming-1'))?.readAt,
+        isNotNull,
+      );
+    },
+  );
+
   test('conversation ordering follows local last activity', () async {
     await repositories.conversations.ensureConversation(
       id: 'older',

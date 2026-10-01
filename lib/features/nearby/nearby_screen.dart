@@ -125,6 +125,23 @@ class _NearbyScreenState extends State<NearbyScreen> {
     }
   }
 
+  Future<void> _updateSavedPeer(RelioNearbyDevice device, String action) async {
+    final repository = _dependencies.repositories.nearbyDevices;
+    switch (action) {
+      case 'trust':
+        await repository.setTrusted(device.deviceId, true);
+      case 'untrust':
+        await repository.setTrusted(device.deviceId, false);
+      case 'block':
+        await repository.setBlocked(device.deviceId, true);
+        final endpointId = _nearby.deviceToEndpointId[device.deviceId];
+        if (endpointId != null) await _nearby.disconnect(endpointId);
+      case 'unblock':
+        await repository.setBlocked(device.deviceId, false);
+    }
+    await _loadSavedDevices();
+  }
+
   List<NearbyPeer> get _livePeers {
     final seen = <String>{};
     final peers = _nearby.discoveredPeers.where((peer) {
@@ -207,6 +224,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 peer.deviceId == null
                     ? PeerPresence.connecting
                     : PeerPresence.connected,
+              NearbyConnectionState.incomingRequest => PeerPresence.connecting,
               NearbyConnectionState.disconnected ||
               null => PeerPresence.discovered,
               NearbyConnectionState.failed => PeerPresence.failed,
@@ -357,9 +375,51 @@ class _NearbyScreenState extends State<NearbyScreen> {
               );
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: RelioDeviceCard(
-                  device: device,
-                  onTap: peer == null ? null : () => _openRealPeer(peer),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: RelioDeviceCard(
+                        device: device,
+                        onTap: peer == null ? null : () => _openRealPeer(peer),
+                      ),
+                    ),
+                    if (!device.id.startsWith('pending:'))
+                      PopupMenuButton<String>(
+                        tooltip: 'ตั้งค่าอุปกรณ์ที่บันทึกไว้',
+                        onSelected: (action) => unawaited(
+                          _updateSavedPeer(
+                            _savedDevices.firstWhere(
+                              (saved) => saved.deviceId == device.id,
+                            ),
+                            action,
+                          ),
+                        ),
+                        itemBuilder: (context) {
+                          final saved = _savedDevices
+                              .where((item) => item.deviceId == device.id)
+                              .firstOrNull;
+                          if (saved == null) return const [];
+                          return [
+                            PopupMenuItem(
+                              value: saved.isTrusted ? 'untrust' : 'trust',
+                              child: Text(
+                                saved.isTrusted
+                                    ? 'เลิกเชื่อถืออุปกรณ์'
+                                    : 'เชื่อถืออุปกรณ์นี้',
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: saved.isBlocked ? 'unblock' : 'block',
+                              child: Text(
+                                saved.isBlocked
+                                    ? 'ยกเลิกการบล็อก'
+                                    : 'บล็อกอุปกรณ์นี้',
+                              ),
+                            ),
+                          ];
+                        },
+                      ),
+                  ],
                 ),
               );
             }),

@@ -1,4 +1,4 @@
-# RELIO v0.8 Manual Device Tests
+# RELIO Android Manual Device Tests
 
 ## DEFERRED MANUAL VERIFICATION — NOT PERFORMED
 
@@ -222,10 +222,11 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 23 (`0.9.0+23`) is the current public QA release
-and contains the Nearby fix. Do not install or update a phone unless the user explicitly
-authorizes the physical test and the exact release artifact, device serial,
-package, version, and signing identity are verified.
+current install recipe. Build 23 (`0.9.0+23`) is the latest public QA release.
+Build 24 (`0.9.0+24`) is an unpublished candidate; do not install or update a
+phone unless the user explicitly authorizes the physical test and the exact
+release artifact, device serial, package, version, and signing identity are
+verified.
 Never uninstall the app or clear its data.
 
 The acceptance steps below remain applicable only after that authorization.
@@ -257,7 +258,9 @@ The acceptance steps below remain applicable only after that authorization.
 ## N. Android Nearby compatibility matrix — DEFERRED
 
 Build 21 introduced SDK-driven permission selection and runtime readiness;
-Build 23 extends the permission tiers and recovery diagnostics. Test real phones before describing OEM compatibility as
+Build 23 extends the permission tiers and recovery diagnostics. Build 24 adds
+connection approval and persistent trust controls, but does not implement
+automatic reconnect. Test real phones before describing OEM compatibility as
 physically verified. Do not clear app data or uninstall during OTA tests.
 
 | Android API | Expected Nearby permissions | Location toggle | Result to verify |
@@ -279,6 +282,32 @@ the app foregrounded; background discovery is not promised.
 prints their runtime facts, and captures filtered logs without clearing existing
 logcat. One connected device is reported and left untouched until another
 device is connected.
+
+## O. Build 24 communication acceptance — DEFERRED
+
+Build 24 is currently a local-only candidate. Do not install it unless a later
+release is explicitly authorized and its exact signed artifact is verified.
+Automatic reconnect is not part of this candidate. The following acceptance is
+for a future candidate after secure persistent peer-key binding and reconnect
+coverage have been implemented:
+
+1. On two phones, connect once and compare the actual Nearby authentication
+   token on both screens before accepting. Confirm an unknown peer can be
+   rejected without creating trust or chat history.
+2. Accept the peer; verify the saved peer, conversation, messages, and unread
+   state persist after navigating away and restarting the app.
+3. Receive a message outside its open chat. Confirm the badge/notification,
+   tap-through destination, preview privacy setting, and read receipt behavior.
+4. Disconnect and reconnect. Confirm no chat/history loss and no automatic
+   reconnect until a later build explicitly implements and verifies it.
+5. Verify untrust and block are distinct; untrust preserves the chat and block
+   prevents future RELIO message handling.
+6. Test Internet-disabled Nearby messaging and existing SOS/Rescue/media/relay
+   behavior. Do not infer Firebase App Distribution or FCM readiness from a
+   successful local APK build.
+
+These steps remain **DEFERRED — NOT YET PERFORMED**. No phone was modified in
+this software pass.
 7. Toggle Bluetooth/Wi-Fi and deny then grant Nearby permissions. Confirm the
    UI reflects the actual state and gives a clear recovery action without
    claiming background discovery or Internet connectivity.

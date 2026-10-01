@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
+import '../notifications/local_notification_service.dart';
 import '../repositories/local_repositories.dart';
 import '../relay/relay_engine.dart';
 import 'nearby_transport.dart';
@@ -41,6 +42,7 @@ class NearbyService extends ChangeNotifier {
     this.settings,
     this.attachments,
     this.mediaStorage,
+    this.localNotifications,
     this.relayEngine,
     this.handshakeTimeout = const Duration(seconds: 8),
   });
@@ -55,6 +57,7 @@ class NearbyService extends ChangeNotifier {
   final RelioSettingsRepository? settings;
   final AttachmentRepository? attachments;
   final MediaStorageService? mediaStorage;
+  final LocalNotificationSink? localNotifications;
   final RelayEngine? relayEngine;
   final Duration handshakeTimeout;
   NearbyReadiness? readiness;
@@ -118,6 +121,9 @@ class NearbyService extends ChangeNotifier {
   final Map<String, String> endpointToDeviceId = {};
   final Map<String, String> deviceToEndpointId = {};
   final Map<String, NearbyConnectionState> peerStates = {};
+  final Map<String, NearbyConnectionEvent> pendingConnectionRequests = {};
+  final Set<String> _approvedConnectionEndpoints = {};
+  final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
   final Map<String, Timer> _helloTimeouts = {};
   final Map<String, DeviceStatus> peerStatuses = {};
@@ -134,6 +140,11 @@ class NearbyService extends ChangeNotifier {
   int acknowledgementCount = 0;
   int protocolErrorCount = 0;
   int transportErrorCount = 0;
+  String? activeConversationId;
+
+  void setActiveConversation(String? conversationId) {
+    activeConversationId = conversationId;
+  }
 
   NearbyApplicationState get applicationState {
     if (!initialized) return NearbyApplicationState.initializing;
@@ -398,6 +409,7 @@ class NearbyService extends ChangeNotifier {
       return;
     }
     peerStates[peerId] = NearbyConnectionState.connecting;
+    _userInitiatedEndpoints.add(peerId);
     notifyListeners();
     try {
       await transport.requestConnection(peerId);
@@ -406,6 +418,32 @@ class NearbyService extends ChangeNotifier {
       peerStates[peerId] = NearbyConnectionState.failed;
       peerErrors[peerId] = _safeError(error);
       _fail('เชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
+    }
+  }
+
+  Future<void> acceptConnectionRequest(String endpointId) async {
+    if (!pendingConnectionRequests.containsKey(endpointId)) return;
+    _approvedConnectionEndpoints.add(endpointId);
+    pendingConnectionRequests.remove(endpointId);
+    peerStates[endpointId] = NearbyConnectionState.connecting;
+    notifyListeners();
+    try {
+      await transport.acceptConnection(endpointId);
+    } on Object catch (error) {
+      _approvedConnectionEndpoints.remove(endpointId);
+      peerStates[endpointId] = NearbyConnectionState.failed;
+      _fail('ยอมรับคำขอไม่สำเร็จ: $error', code: _errorCode(error));
+    }
+  }
+
+  Future<void> rejectConnectionRequest(String endpointId) async {
+    pendingConnectionRequests.remove(endpointId);
+    peerStates[endpointId] = NearbyConnectionState.disconnected;
+    notifyListeners();
+    try {
+      await transport.rejectConnection(endpointId);
+    } on Object catch (error) {
+      _fail('ปฏิเสธคำขอไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
@@ -774,8 +812,16 @@ class NearbyService extends ChangeNotifier {
 
   void _onConnection(NearbyConnectionEvent event) {
     final endpointId = event.peer.endpointId;
+    if (event.state == NearbyConnectionState.incomingRequest) {
+      pendingConnectionRequests[endpointId] = event;
+      peerStates[endpointId] = event.state;
+      _log('incoming connection request name=${event.peer.name}');
+      notifyListeners();
+      return;
+    }
     peerStates[endpointId] = event.state;
     if (event.state == NearbyConnectionState.connected) {
+      pendingConnectionRequests.remove(endpointId);
       peerErrors.remove(endpointId);
       _helloTimeouts.remove(endpointId)?.cancel();
       _helloTimeouts[endpointId] = Timer(handshakeTimeout, () {
@@ -801,6 +847,9 @@ class NearbyService extends ChangeNotifier {
       }
       _track(_handshakeAndShareActiveSos(endpointId));
     } else if (event.state == NearbyConnectionState.disconnected) {
+      pendingConnectionRequests.remove(endpointId);
+      _approvedConnectionEndpoints.remove(endpointId);
+      _userInitiatedEndpoints.remove(endpointId);
       _helloTimeouts.remove(endpointId)?.cancel();
       peerErrors.remove(endpointId);
       final deviceId = endpointToDeviceId.remove(endpointId);
@@ -909,6 +958,8 @@ class NearbyService extends ChangeNotifier {
           await _handleMediaAck(packet);
         case RelioPacketType.locationMessage:
           await _handleLocation(event.peerId, packet);
+        case RelioPacketType.readReceipt:
+          await _handleReadReceipt(packet);
         case RelioPacketType.relayEnvelope:
           await relayEngine?.handleIncomingPacket(event.peerId, packet);
         case RelioPacketType.relayAck:
@@ -1051,6 +1102,12 @@ class NearbyService extends ChangeNotifier {
         source: 'nearby',
       ),
     );
+    await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+    await _notifyIncoming(
+      id: packet.payload['messageId']! as String,
+      title: 'ได้รับตำแหน่งใหม่',
+      route: '/chat/$conversationId',
+    );
     await _sendAck(endpointId, packet);
   }
 
@@ -1076,8 +1133,55 @@ class NearbyService extends ChangeNotifier {
     _log('ACK media sent status=$status');
   }
 
+  Future<void> _markIncomingReadIfVisible(
+    String conversationId,
+    String peerDeviceId,
+  ) async {
+    if (activeConversationId != conversationId) return;
+    final messageIds = await messages.markConversationRead(conversationId);
+    for (final messageId in messageIds) {
+      await sendReadReceipt(messageId: messageId, peerDeviceId: peerDeviceId);
+    }
+  }
+
+  Future<void> _notifyIncoming({
+    required String id,
+    required String title,
+    required String route,
+    bool urgent = false,
+  }) async {
+    if (route == '/chat/$activeConversationId') return;
+    final sink = localNotifications;
+    final setting = settings;
+    if (sink == null || setting == null) return;
+    if (!await setting.getBool('notifications_enabled', defaultValue: true)) {
+      return;
+    }
+    await sink.show(
+      id: id,
+      title: urgent ? 'แจ้งเตือน SOS' : title,
+      body: urgent ? 'มีเหตุฉุกเฉินใหม่ กรุณาตรวจสอบ' : 'คุณมีข้อความใหม่',
+      route: route,
+      urgent: urgent,
+    );
+  }
+
   Future<void> _handleHello(String endpointId, RelioPacket packet) async {
     _log('hello receive: endpoint $endpointId');
+    final savedPeer = await nearbyDevices.getDevice(packet.senderDeviceId);
+    if (savedPeer?.isBlocked == true) {
+      _log('blocked peer rejected after identity handshake');
+      await disconnect(endpointId);
+      return;
+    }
+    if (savedPeer?.isTrusted != true &&
+        !_approvedConnectionEndpoints.contains(endpointId) &&
+        !_userInitiatedEndpoints.contains(endpointId)) {
+      protocolErrorCount += 1;
+      _log('unapproved peer identity rejected');
+      await disconnect(endpointId);
+      return;
+    }
     final status = _statusFrom(packet.payload['status'] as String);
     peerStatuses[packet.senderDeviceId] = status;
     final displayName = packet.payload['displayName']! as String;
@@ -1086,6 +1190,7 @@ class NearbyService extends ChangeNotifier {
       displayName: displayName,
       status: status,
     );
+    await nearbyDevices.setTrusted(packet.senderDeviceId, true);
     final conversationId = await _conversationIdForDevice(
       packet.senderDeviceId,
       packet.senderDeviceId,
@@ -1161,6 +1266,12 @@ class NearbyService extends ChangeNotifier {
         text: packet.payload['text']! as String,
         createdAt: DateTime.parse(packet.payload['timestamp']! as String),
       );
+      await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+      await _notifyIncoming(
+        id: messageId,
+        title: _peerName(endpointId, packet.senderUserId),
+        route: '/chat/$conversationId',
+      );
       await _sendAck(endpointId, packet);
     } finally {
       _incomingTextMessagesInProgress.remove(messageId);
@@ -1197,6 +1308,31 @@ class NearbyService extends ChangeNotifier {
     _log('รับ ACK ของข้อความ $messageId');
   }
 
+  Future<void> sendReadReceipt({
+    required String messageId,
+    required String peerDeviceId,
+  }) async {
+    final endpointId = deviceToEndpointId[peerDeviceId];
+    if (endpointId == null ||
+        peerStates[endpointId] != NearbyConnectionState.connected) {
+      return;
+    }
+    final packet = RelioPacket.readReceipt(
+      senderDeviceId: await identity.getDeviceId(),
+      senderUserId: await _senderUserId(),
+      messageId: messageId,
+      readAt: DateTime.now(),
+    );
+    await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+    lastSentPacket = _diagnosticPacket(packet);
+    _log('ส่ง readReceipt แล้ว');
+  }
+
+  Future<void> _handleReadReceipt(RelioPacket packet) async {
+    await messages.markMessageRead(packet.payload['messageId']! as String);
+    _log('รับ readReceipt แล้ว');
+  }
+
   Future<void> _handleSos(String endpointId, RelioPacket packet) async {
     if (sos == null) {
       _fail('รับ SOS ไม่ได้: SOS repository ไม่พร้อมใช้งาน');
@@ -1219,6 +1355,14 @@ class NearbyService extends ChangeNotifier {
     );
     final displayName = payload['displayName']! as String;
     final status = event.isActive ? DeviceStatus.sos : DeviceStatus.normal;
+    if (event.isActive) {
+      await _notifyIncoming(
+        id: event.id,
+        title: displayName,
+        route: '/sos',
+        urgent: true,
+      );
+    }
     peerStatuses[event.ownerDeviceId] = status;
     await nearbyDevices.upsert(
       deviceId: event.ownerDeviceId,

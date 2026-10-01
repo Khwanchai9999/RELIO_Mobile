@@ -68,18 +68,28 @@ class NearbyTransferEvent {
   final String? error;
 }
 
-enum NearbyConnectionState { connecting, connected, disconnected, failed }
+enum NearbyConnectionState {
+  incomingRequest,
+  connecting,
+  connected,
+  disconnected,
+  failed,
+}
 
 class NearbyConnectionEvent {
   const NearbyConnectionEvent({
     required this.peer,
     required this.state,
     this.error,
+    this.authenticationToken,
+    this.isIncomingRequest = false,
   });
 
   final NearbyPeer peer;
   final NearbyConnectionState state;
   final String? error;
+  final String? authenticationToken;
+  final bool isIncomingRequest;
 }
 
 const relioNearbyServiceId = 'com.relio.relio_mobile';
@@ -141,6 +151,8 @@ abstract interface class NearbyTransport {
   Future<void> startDiscovery();
   Future<void> stopDiscovery();
   Future<void> resetSessionOperations();
+  Future<void> acceptConnection(String peerId);
+  Future<void> rejectConnection(String peerId);
   Future<void> requestConnection(String peerId);
   Future<void> disconnect(String peerId);
   Future<void> sendBytes(Uint8List bytes, {String? peerId});
@@ -173,6 +185,8 @@ class MockNearbyTransport implements NearbyTransport {
   int advertisingStartCount = 0;
   int discoveryStartCount = 0;
   int resetSessionOperationsCount = 0;
+  final Set<String> acceptedConnections = {};
+  final Set<String> rejectedConnections = {};
   bool isAdvertising = false;
   bool isDiscovering = false;
   bool isDisposed = false;
@@ -232,6 +246,16 @@ class MockNearbyTransport implements NearbyTransport {
     resetSessionOperationsCount++;
     isAdvertising = false;
     isDiscovering = false;
+  }
+
+  @override
+  Future<void> acceptConnection(String peerId) async {
+    acceptedConnections.add(peerId);
+  }
+
+  @override
+  Future<void> rejectConnection(String peerId) async {
+    rejectedConnections.add(peerId);
   }
 
   @override

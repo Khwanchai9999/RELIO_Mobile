@@ -644,6 +644,14 @@ class RelioMessageBubble extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (message.outgoing && message.readAt != null)
+                  Text(
+                    'อ่านแล้ว',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: RelioColors.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
               ],
             ),
           ],

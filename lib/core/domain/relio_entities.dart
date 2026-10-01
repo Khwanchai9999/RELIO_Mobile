@@ -88,6 +88,7 @@ class RelioConversation {
     required this.lastMessageAt,
     required this.createdAt,
     required this.updatedAt,
+    this.unreadCount = 0,
   });
 
   final String id;
@@ -98,6 +99,7 @@ class RelioConversation {
   final DateTime? lastMessageAt;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final int unreadCount;
 }
 
 class RelioNearbyDevice {
@@ -110,6 +112,9 @@ class RelioNearbyDevice {
     this.approxDistance,
     this.endpointId,
     this.connected = false,
+    this.isTrusted = false,
+    this.isBlocked = false,
+    this.autoReconnectEnabled = false,
   });
 
   final String deviceId;
@@ -120,6 +125,9 @@ class RelioNearbyDevice {
   final int? approxDistance;
   final String? endpointId;
   final bool connected;
+  final bool isTrusted;
+  final bool isBlocked;
+  final bool autoReconnectEnabled;
 }
 
 class RelioSosEvent {

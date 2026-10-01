@@ -151,6 +151,7 @@ class ProfileScreen extends StatelessWidget {
           if (identity != null)
             OutlinedButton.icon(
               onPressed: () async {
+                await dependencies.removePushRegistration();
                 await dependencies.authService.signOut();
                 if (context.mounted) context.go('/welcome');
               },

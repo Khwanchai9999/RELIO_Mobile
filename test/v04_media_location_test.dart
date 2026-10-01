@@ -46,6 +46,20 @@ void main() {
     );
   });
 
+  test('protocol v1 encodes and validates read receipts', () {
+    final receipt = RelioPacket.readReceipt(
+      senderDeviceId: 'device-b',
+      senderUserId: 'user-b',
+      messageId: 'message-1',
+      readAt: DateTime.utc(2026, 10, 1),
+    );
+
+    final decoded = RelioPacket.fromBytes(receipt.toBytes());
+    expect(decoded.type, RelioPacketType.readReceipt);
+    expect(decoded.payload['messageId'], 'message-1');
+    expect(decoded.payload['readAt'], '2026-10-01T00:00:00.000Z');
+  });
+
   test('malformed media metadata is rejected without a crash', () {
     expect(
       () => RelioPacket.fromJson({
@@ -62,7 +76,7 @@ void main() {
   });
 
   test(
-    'schema v4 preserves messages while attachments persist transfer state',
+    'current schema preserves messages while attachments persist transfer state',
     () async {
       final db = AppDatabase.memory();
       addTearDown(db.close);
@@ -95,7 +109,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 4);
+      expect(db.schemaVersion, 5);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',

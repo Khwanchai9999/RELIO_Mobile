@@ -109,6 +109,28 @@ void main() {
   });
 
   test(
+    'FakeCloud push tokens remain isolated to their authenticated owner',
+    () async {
+      final cloud = FakeCloudDataSource();
+      addTearDown(cloud.dispose);
+      await cloud.register(email: 'push-a@example.com', password: 'password');
+      final ownerA = cloud.currentIdentity!.userId;
+      await cloud.upsertPushToken(deviceId: 'device-1', token: 'token-a');
+      await cloud.signOut();
+      await cloud.register(email: 'push-b@example.com', password: 'password');
+
+      await cloud.deletePushToken(deviceId: 'device-1');
+      expect(cloud.pushTokens['$ownerA:device-1'], 'token-a');
+      expect(
+        cloud.pushTokens.containsKey(
+          '${cloud.currentIdentity!.userId}:device-1',
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'FakeCloud rejects attachment paths outside the current account',
     () async {
       final cloud = FakeCloudDataSource();

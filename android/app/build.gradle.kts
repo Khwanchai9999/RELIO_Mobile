@@ -85,6 +85,9 @@ googleServices {
 dependencies {
     // ใช้ตรวจสถานะ Google Play Services โดยไม่เพิ่ม Firebase service
     implementation("com.google.android.gms:play-services-base:18.3.0")
+    // Firebase ใช้เฉพาะ FCM push; App Distribution SDK แบบเต็มยังเป็น QA-only
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-messaging")
     // API-only is safe in every variant. It is a no-op when the full SDK is
     // absent, which keeps DEV and PROD free of self-update implementation.
     implementation("com.google.firebase:firebase-appdistribution-api:16.0.0-beta20")

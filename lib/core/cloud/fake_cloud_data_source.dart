@@ -36,6 +36,7 @@ class FakeCloudDataSource implements CloudDataSource {
   CloudState _state = CloudState.signedOut;
   AuthState _authState = AuthState.guest;
   CloudIdentity? _identity;
+  final Map<String, String> pushTokens = {};
   final _cloudStates = StreamController<CloudState>.broadcast();
   final _authStates = StreamController<AuthState>.broadcast();
   final _users = <String, ({String password, CloudIdentity identity})>{};
@@ -172,6 +173,28 @@ class FakeCloudDataSource implements CloudDataSource {
   @override
   Future<void> upsertProfile({required String displayName}) async =>
       _requireAuth();
+
+  @override
+  Future<void> upsertPushToken({
+    required String deviceId,
+    required String token,
+  }) async {
+    _requireAuth();
+    if (deviceId.isEmpty || token.isEmpty) {
+      throw const CloudException(
+        'Push registration is invalid.',
+        code: 'invalidInput',
+      );
+    }
+    pushTokens['${_identity!.userId}:$deviceId'] = token;
+  }
+
+  @override
+  Future<void> deletePushToken({required String deviceId}) async {
+    _requireAuth();
+    pushTokens.remove('${_identity!.userId}:$deviceId');
+  }
+
   @override
   Future<void> upsertMessage(CloudMessageDto message) async {
     _requireAuth();

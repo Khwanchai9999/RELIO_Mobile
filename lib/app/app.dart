@@ -174,26 +174,165 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
           routerConfig: _router,
           builder: (context, child) {
             final brightness = Theme.of(context).brightness;
-            return AnnotatedRegion<SystemUiOverlayStyle>(
-              value: SystemUiOverlayStyle(
-                statusBarColor: Colors.transparent,
-                statusBarIconBrightness: brightness == Brightness.dark
-                    ? Brightness.light
-                    : Brightness.dark,
-                systemNavigationBarColor: Theme.of(
-                  context,
-                ).scaffoldBackgroundColor,
-                systemNavigationBarIconBrightness: brightness == Brightness.dark
-                    ? Brightness.light
-                    : Brightness.dark,
+            return IncomingConnectionPromptHost(
+              dependencies: _dependencies,
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle(
+                  statusBarColor: Colors.transparent,
+                  statusBarIconBrightness: brightness == Brightness.dark
+                      ? Brightness.light
+                      : Brightness.dark,
+                  systemNavigationBarColor: Theme.of(
+                    context,
+                  ).scaffoldBackgroundColor,
+                  systemNavigationBarIconBrightness:
+                      brightness == Brightness.dark
+                      ? Brightness.light
+                      : Brightness.dark,
+                ),
+                child: child ?? const SizedBox.shrink(),
               ),
-              child: child ?? const SizedBox.shrink(),
             );
           },
         ),
       ),
     );
   }
+}
+
+class IncomingConnectionPromptHost extends StatefulWidget {
+  const IncomingConnectionPromptHost({
+    required this.dependencies,
+    required this.child,
+    super.key,
+  });
+
+  final RelioDependencies dependencies;
+  final Widget child;
+
+  @override
+  State<IncomingConnectionPromptHost> createState() =>
+      _IncomingConnectionPromptHostState();
+}
+
+class _IncomingConnectionPromptHostState
+    extends State<IncomingConnectionPromptHost> {
+  bool _dialogOpen = false;
+  StreamSubscription<String>? _notificationRouteSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.dependencies.nearbyService.addListener(_showNextRequest);
+    _notificationRouteSubscription = widget
+        .dependencies
+        .localNotificationService
+        .tappedRoutes
+        .listen(_openNotificationRoute);
+    unawaited(
+      widget.dependencies.localNotificationService.consumeInitialRoute().then((
+        route,
+      ) {
+        if (route != null) _openNotificationRoute(route);
+      }),
+    );
+  }
+
+  @override
+  void didUpdateWidget(IncomingConnectionPromptHost oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dependencies != widget.dependencies) {
+      oldWidget.dependencies.nearbyService.removeListener(_showNextRequest);
+      widget.dependencies.nearbyService.addListener(_showNextRequest);
+      unawaited(_notificationRouteSubscription?.cancel());
+      _notificationRouteSubscription = widget
+          .dependencies
+          .localNotificationService
+          .tappedRoutes
+          .listen(_openNotificationRoute);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.dependencies.nearbyService.removeListener(_showNextRequest);
+    unawaited(_notificationRouteSubscription?.cancel());
+    super.dispose();
+  }
+
+  void _openNotificationRoute(String route) {
+    final isSos = route == '/sos';
+    final isChat = RegExp(r'^/chat/[A-Za-z0-9._:-]{1,128}$').hasMatch(route);
+    if (!mounted || (!isSos && !isChat)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(GoRouter.of(context).push(route));
+    });
+  }
+
+  void _showNextRequest() {
+    if (!mounted || _dialogOpen) return;
+    final service = widget.dependencies.nearbyService;
+    if (service.pendingConnectionRequests.isEmpty) return;
+    final entry = service.pendingConnectionRequests.entries.first;
+    final request = entry.value;
+    _dialogOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final accepted = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            request.isIncomingRequest ? 'คำขอเชื่อมต่อ' : 'ยืนยันการเชื่อมต่อ',
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                request.isIncomingRequest
+                    ? '${request.peer.name} ต้องการเชื่อมต่อกับคุณ'
+                    : 'กำลังเชื่อมต่อกับ ${request.peer.name}',
+              ),
+              if (request.authenticationToken case final token?) ...[
+                const SizedBox(height: 16),
+                const Text('รหัสยืนยัน Nearby'),
+                SelectableText(
+                  token,
+                  style: Theme.of(dialogContext).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'ตรวจสอบว่ารหัสตรงกันบนโทรศัพท์ทั้งสองเครื่องก่อนยืนยัน',
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(request.isIncomingRequest ? 'ปฏิเสธ' : 'ยกเลิก'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(request.isIncomingRequest ? 'ยอมรับ' : 'ยืนยันรหัส'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (accepted == true) {
+        await service.acceptConnectionRequest(entry.key);
+      } else {
+        await service.rejectConnectionRequest(entry.key);
+      }
+      _dialogOpen = false;
+      _showNextRequest();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class RelioShell extends StatelessWidget {
@@ -234,8 +373,8 @@ class RelioShell extends StatelessWidget {
             label: 'ใกล้เคียง',
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline),
-            selectedIcon: Icon(Icons.chat_bubble),
+            icon: _UnreadChatBadge(selected: false),
+            selectedIcon: _UnreadChatBadge(selected: true),
             label: 'แชท',
           ),
           NavigationDestination(
@@ -250,6 +389,33 @@ class RelioShell extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _UnreadChatBadge extends StatelessWidget {
+  const _UnreadChatBadge({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = RelioDependencyScope.of(
+      context,
+    ).repositories.conversations.watchConversations();
+    return StreamBuilder(
+      stream: stream,
+      builder: (context, snapshot) {
+        final unread = (snapshot.data ?? const []).fold<int>(
+          0,
+          (total, conversation) => total + conversation.unreadCount,
+        );
+        return Badge(
+          isLabelVisible: unread > 0,
+          label: Text(unread > 99 ? '99+' : '$unread'),
+          child: Icon(selected ? Icons.chat_bubble : Icons.chat_bubble_outline),
+        );
+      },
     );
   }
 }

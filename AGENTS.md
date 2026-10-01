@@ -144,11 +144,10 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the current public QA
-release and contains the Nearby permission/recovery fix. Do not install it on
-phones or claim physical Nearby verification without explicit physical-test
-authorization. Future public releases require all automated, signing, and OTA
-verification gates to pass.
+`scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the latest public QA
+release. Build 24 (`0.9.0+24`) is a local software candidate only until its
+automated, signing, and OTA gates pass. Do not install it on phones or claim
+physical Nearby verification without explicit physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -170,10 +169,10 @@ the normal AOT build cannot write its snapshot.
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
 and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.9. Keep
 them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
-without performing them. Unit tests, emulator checks, and successful signed
-builds do not prove physical Nearby compatibility across OEMs. Build 21's
-public release still requires two-phone acceptance before declaring the
-compatibility milestone physically verified.
+without performing them. Build 24 persists trust and requires an explicit
+connection decision, but automatic reconnect is not enabled: stable cryptographic
+peer authorization is not implemented. Unit tests, emulator checks, and signed
+builds do not prove physical Nearby compatibility across OEMs.
 
 ## Change boundaries
 
@@ -181,6 +180,10 @@ compatibility milestone physically verified.
   Supabase uploads in v0.9.0. The foreground/lifecycle SyncEngine is optional
   and ownership-gated. Public QA update behavior and the full Firebase App
   Distribution SDK must never ship inside the PROD Google Play build.
+- FCM token registration is QA-only and consent/account-gated. Do not enable
+  remote push or Admin operations until the reviewed migration and Edge
+  Function are deployed to a separately verified disposable QA Supabase
+  project with server credentials held only in its secret store.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and
   future cloud queue.
 - UI must not call Drift-generated tables or the Nearby plugin directly.

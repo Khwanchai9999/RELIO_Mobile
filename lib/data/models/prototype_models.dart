@@ -118,6 +118,7 @@ class RelioMessage {
     this.longitude,
     this.nearbyMessageId,
     this.cloudSyncStatus = 'notQueued',
+    this.readAt,
   });
 
   final String id;
@@ -135,4 +136,5 @@ class RelioMessage {
   final double? longitude;
   final String? nearbyMessageId;
   final String cloudSyncStatus;
+  final DateTime? readAt;
 }

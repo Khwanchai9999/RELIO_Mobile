@@ -175,10 +175,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadLocalSettings() async {
-    final value = await RelioDependencyScope.of(
-      context,
-    ).repositories.settings.getBool('rescue_mode', defaultValue: false);
-    if (mounted) setState(() => rescue = value);
+    final dependencies = RelioDependencyScope.of(context);
+    final values = await Future.wait([
+      dependencies.repositories.settings.getBool(
+        'rescue_mode',
+        defaultValue: false,
+      ),
+      dependencies.repositories.settings.getBool(
+        'notifications_enabled',
+        defaultValue: true,
+      ),
+    ]);
+    if (mounted) {
+      setState(() {
+        rescue = values[0];
+        notifications = values[1];
+      });
+    }
+  }
+
+  Future<void> _setNotifications(bool enabled) async {
+    final dependencies = RelioDependencyScope.of(context);
+    var nextValue = enabled;
+    if (enabled &&
+        !await dependencies.localNotificationService.requestPermission()) {
+      nextValue = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ยังไม่ได้รับอนุญาตให้แสดงการแจ้งเตือน'),
+          ),
+        );
+      }
+    }
+    if (nextValue) {
+      unawaited(dependencies.syncPushRegistration());
+    } else {
+      await dependencies.removePushRegistration();
+    }
+    await dependencies.repositories.settings.setBool(
+      'notifications_enabled',
+      nextValue,
+    );
+    if (mounted) setState(() => notifications = nextValue);
   }
 
   @override
@@ -240,7 +279,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: notifications ? 'เปิดใช้งาน' : 'ปิดใช้งาน',
             trailing: Switch(
               value: notifications,
-              onChanged: (value) => setState(() => notifications = value),
+              onChanged: (value) => unawaited(_setNotifications(value)),
             ),
           ),
           const SizedBox(height: 18),

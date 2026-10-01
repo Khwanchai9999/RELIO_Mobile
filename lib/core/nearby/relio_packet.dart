@@ -14,6 +14,7 @@ enum RelioPacketType {
   mediaMetadata,
   mediaAck,
   locationMessage,
+  readReceipt,
   relayEnvelope,
   relayAck,
 }
@@ -259,6 +260,24 @@ class RelioPacket {
     },
   );
 
+  factory RelioPacket.readReceipt({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String messageId,
+    required DateTime readAt,
+  }) => RelioPacket(
+    protocolVersion: 1,
+    packetId: const Uuid().v4(),
+    type: RelioPacketType.readReceipt,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: DateTime.now().toUtc(),
+    payload: {
+      'messageId': messageId,
+      'readAt': readAt.toUtc().toIso8601String(),
+    },
+  );
+
   factory RelioPacket.relayEnvelope({
     required String senderDeviceId,
     required String senderUserId,
@@ -416,6 +435,9 @@ class RelioPacket {
         _requiredNumber('longitude');
         _optionalNumber('accuracyMeters');
         _payloadString('capturedAt');
+      case RelioPacketType.readReceipt:
+        _payloadString('messageId');
+        _payloadString('readAt');
       case RelioPacketType.relayEnvelope:
         _payloadString('protocol');
         if (payload['protocol'] != 'relay-v1') {

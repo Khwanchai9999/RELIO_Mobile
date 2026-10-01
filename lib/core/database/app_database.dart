@@ -9,6 +9,7 @@ class Conversations extends Table {
   TextColumn get participantId => text()();
   TextColumn get displayName => text()();
   TextColumn get participantStatus => text()();
+  IntColumn get unreadCount => integer().withDefault(const Constant(0))();
   DateTimeColumn get lastMessageAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
@@ -36,6 +37,7 @@ class Messages extends Table {
   RealColumn get locationAccuracy => real().nullable()();
   DateTimeColumn get locationCapturedAt => dateTime().nullable()();
   TextColumn get nearbyMessageId => text().nullable()();
+  DateTimeColumn get readAt => dateTime().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -48,6 +50,10 @@ class NearbyDevices extends Table {
   DateTimeColumn get lastSeenAt => dateTime()();
   IntColumn get signalQuality => integer().nullable()();
   IntColumn get approxDistance => integer().nullable()();
+  BoolColumn get isTrusted => boolean().withDefault(const Constant(false))();
+  BoolColumn get isBlocked => boolean().withDefault(const Constant(false))();
+  BoolColumn get autoReconnectEnabled =>
+      boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column<Object>> get primaryKey => {deviceId};
@@ -177,7 +183,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -207,6 +213,16 @@ class AppDatabase extends _$AppDatabase {
       if (from < 4) {
         await migrator.createTable(relayPackets);
         await migrator.createTable(relayForwardHistory);
+      }
+      if (from < 5) {
+        await migrator.addColumn(conversations, conversations.unreadCount);
+        await migrator.addColumn(messages, messages.readAt);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.isTrusted);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.isBlocked);
+        await migrator.addColumn(
+          nearbyDevices,
+          nearbyDevices.autoReconnectEnabled,
+        );
       }
     },
     beforeOpen: (OpeningDetails details) async {

@@ -22,6 +22,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   final _connections = StreamController<NearbyConnectionEvent>.broadcast();
   final Set<String> _connectedPeers = {};
   final Set<String> _connectionRequests = {};
+  final Set<String> _pendingConnectionRequests = {};
   final Map<String, String> _peerNames = {};
   bool _advertising = false;
   bool _discovering = false;
@@ -57,7 +58,7 @@ class AndroidNearbyTransport implements NearbyTransport {
         displayName,
         Strategy.P2P_CLUSTER,
         serviceId: serviceId,
-        onConnectionInitiated: _acceptConnection,
+        onConnectionInitiated: _connectionInitiated,
         onConnectionResult: _connectionResult,
         onDisconnected: _disconnected,
       );
@@ -152,6 +153,29 @@ class AndroidNearbyTransport implements NearbyTransport {
   }
 
   @override
+  Future<void> acceptConnection(String peerId) async {
+    if (!_pendingConnectionRequests.remove(peerId)) return;
+    await _nearby.acceptConnection(
+      peerId,
+      onPayLoadRecieved: _payloadReceived,
+      onPayloadTransferUpdate: _payloadTransferUpdated,
+    );
+  }
+
+  @override
+  Future<void> rejectConnection(String peerId) async {
+    _pendingConnectionRequests.remove(peerId);
+    _connectionRequests.remove(peerId);
+    await _nearby.rejectConnection(peerId);
+    _connections.add(
+      NearbyConnectionEvent(
+        peer: NearbyPeer(id: peerId, name: _peerNames[peerId] ?? 'RELIO'),
+        state: NearbyConnectionState.disconnected,
+      ),
+    );
+  }
+
+  @override
   Future<void> requestConnection(String peerId) async {
     if (_disposed || _connectedPeers.contains(peerId)) return;
     if (!_connectionRequests.add(peerId)) return;
@@ -165,7 +189,7 @@ class AndroidNearbyTransport implements NearbyTransport {
       final requested = await _nearby.requestConnection(
         'RELIO',
         peerId,
-        onConnectionInitiated: _acceptConnection,
+        onConnectionInitiated: _connectionInitiated,
         onConnectionResult: _connectionResult,
         onDisconnected: _disconnected,
       );
@@ -222,34 +246,45 @@ class AndroidNearbyTransport implements NearbyTransport {
     return payloadIds.first;
   }
 
-  Future<void> _acceptConnection(String endpointId, ConnectionInfo info) async {
+  Future<void> _connectionInitiated(
+    String endpointId,
+    ConnectionInfo info,
+  ) async {
     _peerNames[endpointId] = info.endpointName;
-    await _nearby.acceptConnection(
-      endpointId,
-      onPayLoadRecieved: (id, payload) {
-        if (payload.type == PayloadType.BYTES && payload.bytes != null) {
-          _payloads.add(NearbyPayloadEvent(peerId: id, bytes: payload.bytes!));
-        } else if (payload.type == PayloadType.FILE) {
-          unawaited(_emitIncomingFile(id, payload));
-        }
-      },
-      onPayloadTransferUpdate: (id, update) {
-        _transfers.add(
-          NearbyTransferEvent(
-            peerId: id,
-            payloadId: update.id.toString(),
-            status: switch (update.status) {
-              PayloadStatus.IN_PROGRESS => NearbyTransferStatus.inProgress,
-              PayloadStatus.SUCCESS => NearbyTransferStatus.success,
-              PayloadStatus.FAILURE => NearbyTransferStatus.failure,
-              PayloadStatus.CANCELED => NearbyTransferStatus.cancelled,
-              PayloadStatus.NONE => NearbyTransferStatus.started,
-            },
-            bytesTransferred: update.bytesTransferred,
-            totalBytes: update.totalBytes,
-          ),
-        );
-      },
+    if (!_pendingConnectionRequests.add(endpointId)) return;
+    _connections.add(
+      NearbyConnectionEvent(
+        peer: NearbyPeer(id: endpointId, name: info.endpointName),
+        state: NearbyConnectionState.incomingRequest,
+        authenticationToken: info.authenticationToken,
+        isIncomingRequest: info.isIncomingConnection,
+      ),
+    );
+  }
+
+  void _payloadReceived(String id, Payload payload) {
+    if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+      _payloads.add(NearbyPayloadEvent(peerId: id, bytes: payload.bytes!));
+    } else if (payload.type == PayloadType.FILE) {
+      unawaited(_emitIncomingFile(id, payload));
+    }
+  }
+
+  void _payloadTransferUpdated(String id, PayloadTransferUpdate update) {
+    _transfers.add(
+      NearbyTransferEvent(
+        peerId: id,
+        payloadId: update.id.toString(),
+        status: switch (update.status) {
+          PayloadStatus.IN_PROGRESS => NearbyTransferStatus.inProgress,
+          PayloadStatus.SUCCESS => NearbyTransferStatus.success,
+          PayloadStatus.FAILURE => NearbyTransferStatus.failure,
+          PayloadStatus.CANCELED => NearbyTransferStatus.cancelled,
+          PayloadStatus.NONE => NearbyTransferStatus.started,
+        },
+        bytesTransferred: update.bytesTransferred,
+        totalBytes: update.totalBytes,
+      ),
     );
   }
 

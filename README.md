@@ -56,9 +56,15 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 4 with conversations, messages, attachments,
+- Drift database schema version 5 with conversations, persistent unread/read
+  state, trusted/blocked peer metadata, messages, attachments,
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables
+- Incoming Nearby connection requests with explicit accept/reject and saved
+  trust/block controls; automatic reconnect is not yet enabled
+- Android local message/SOS notification channels and tap-through navigation;
+  FCM token registration is consent-gated and QA-only, while its server
+  integration awaits disposable QA Supabase setup
 - Repository-owned persistence for conversations, messages, SOS, queue items,
   nearby peer metadata, and the stable local device identity
 - Local outgoing message lifecycle: pending → nearbySent → delivered; Cloud
@@ -99,9 +105,11 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 21 updates Nearby compatibility and still
-requires physical testing across Android versions before claiming device-level
-compatibility; see `docs/MANUAL_DEVICE_TESTS.md`.
+overrides use Mock transport. Build 23 remains the latest public release;
+Build 24 (`0.9.0+24`) is a local candidate and requires complete validation and
+publication gates before release. Physical testing across Android versions is
+still required before claiming device-level compatibility; see
+`docs/MANUAL_DEVICE_TESTS.md`.
 
 ## Active workspace
 
@@ -200,9 +208,9 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 23 is the current public QA release; no phone has been modified
-for its physical Nearby retest. Physical acceptance remains pending the
-authorized two-device retest.
+releases. Build 23 is the current public QA release. Build 24 is not published
+or installed; physical acceptance remains pending an authorized two-device
+retest.
 
 ## Architecture
 
@@ -263,7 +271,10 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 - **v0.8:** bounded Nearby relay/store-and-forward foundation
 - **v0.9.0+22:** Android branding and guest SOS account-isolation public QA
   release; physical device acceptance remains pending.
-- **v0.9:** routing/receipt and ecosystem evaluation (not implemented)
+- **v0.9.0+24 candidate:** persistent trust/chat read state and Android
+  notifications; automatic reconnect and remote Supabase/FCM integration are
+  not enabled or verified. See
+  [docs/COMMUNICATION_PLATFORM_V09.md](docs/COMMUNICATION_PLATFORM_V09.md).
 - **v1.0:** production security review, observability, accessibility audit,
   signed Android release, and end-to-end field testing
 

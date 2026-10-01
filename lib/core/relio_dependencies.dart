@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 
 import 'database/app_database.dart';
+import '../app/environment.dart';
 import 'connectivity/runtime_connectivity.dart';
 import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
@@ -12,6 +13,7 @@ import 'cloud/cloud_data_source.dart';
 import 'cloud/supabase_cloud_data_source.dart';
 import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
+import 'notifications/local_notification_service.dart';
 import 'nearby/android_nearby_transport.dart';
 import 'nearby/nearby_readiness.dart';
 import 'nearby/nearby_service.dart';
@@ -54,6 +56,9 @@ class RelioDependencies {
                 const LocationResult.failure(LocationFailure.unavailable),
               ));
     mediaStorageService = mediaStorage ?? MediaStorageService();
+    localNotificationService = _isAndroid
+        ? AndroidLocalNotificationService()
+        : const NoopLocalNotificationService();
     this.cloudDataSource = cloudDataSource ?? SupabaseCloudDataSource();
     authService = CloudAuthService(this.cloudDataSource);
     repositories = RelioRepositories(
@@ -90,6 +95,7 @@ class RelioDependencies {
       settings: repositories.settings,
       attachments: repositories.attachments,
       mediaStorage: mediaStorageService,
+      localNotifications: localNotificationService,
       relayEngine: relayEngine,
     );
     syncEngine = SyncEngine(
@@ -111,6 +117,7 @@ class RelioDependencies {
   late final PermissionService permissionService;
   late final LocationService locationService;
   late final MediaStorageService mediaStorageService;
+  late final LocalNotificationSink localNotificationService;
   late final NearbyService nearbyService;
   late final RelayRepository relayRepository;
   late final RelayEngine relayEngine;
@@ -132,6 +139,44 @@ class RelioDependencies {
   int get nearbyRetryAttempt => _nearbyRetryBackoff.attempt;
 
   Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<bool> syncPushRegistration() async {
+    if (!RelioBuildInfo.isTest ||
+        cloudDataSource.currentIdentity == null ||
+        !cloudDataSource.configuration.isConfigured ||
+        !await repositories.settings.getBool(
+          'notifications_enabled',
+          defaultValue: true,
+        ) ||
+        !await localNotificationService.notificationsAllowed) {
+      return false;
+    }
+    try {
+      final token = await localNotificationService.getFcmToken();
+      if (token == null || token.isEmpty) return false;
+      await cloudDataSource.upsertPushToken(
+        deviceId: await identity.getDeviceId(),
+        token: token,
+      );
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<bool> removePushRegistration() async {
+    if (!RelioBuildInfo.isTest || cloudDataSource.currentIdentity == null) {
+      return false;
+    }
+    try {
+      await cloudDataSource.deletePushToken(
+        deviceId: await identity.getDeviceId(),
+      );
+      return true;
+    } on Object {
+      return false;
+    }
+  }
 
   Future<bool> startNearbySessionIfPermitted({bool force = false}) {
     if (_disposed || !nearbyService.initialized) return Future.value(false);
@@ -250,6 +295,7 @@ class RelioDependencies {
     try {
       await cloudDataSource.initialize();
       await authService.restoreSession();
+      unawaited(syncPushRegistration());
     } on Object {
       // Cloud is an optional v0.5 destination. Local startup must remain
       // healthy when credentials are absent or the network is unavailable.

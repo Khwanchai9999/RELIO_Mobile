@@ -21,6 +21,11 @@ abstract interface class CloudDataSource {
   Future<void> signOut();
   Future<CloudIdentity?> restoreSession();
   Future<void> upsertProfile({required String displayName});
+  Future<void> upsertPushToken({
+    required String deviceId,
+    required String token,
+  });
+  Future<void> deletePushToken({required String deviceId});
   Future<void> upsertMessage(CloudMessageDto message);
   Future<CloudMessageDto?> fetchMessage(String id);
   Future<List<CloudMessageDto>> fetchMessages(String conversationId);

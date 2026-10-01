@@ -237,6 +237,47 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   @override
+  Future<void> upsertPushToken({
+    required String deviceId,
+    required String token,
+  }) async {
+    _requireAuth();
+    if (deviceId.trim().isEmpty ||
+        token.trim().isEmpty ||
+        token.length > 4096) {
+      throw const CloudException(
+        'Push registration is invalid.',
+        code: 'invalidInput',
+      );
+    }
+    try {
+      await (await _ready()).from('device_push_tokens').upsert({
+        'owner_user_id': _identity!.userId,
+        'device_id': deviceId,
+        'token': token,
+        'platform': 'android',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'owner_user_id,device_id');
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<void> deletePushToken({required String deviceId}) async {
+    _requireAuth();
+    try {
+      await (await _ready())
+          .from('device_push_tokens')
+          .delete()
+          .eq('owner_user_id', _identity!.userId)
+          .eq('device_id', deviceId);
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
   Future<void> upsertMessage(CloudMessageDto message) async {
     _requireAuth();
     if (message.senderId != _identity!.userId) {

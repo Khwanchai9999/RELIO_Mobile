@@ -365,6 +365,7 @@ class RelayEngine {
       case RelioPacketType.hello ||
           RelioPacketType.deviceStatus ||
           RelioPacketType.ack ||
+          RelioPacketType.readReceipt ||
           RelioPacketType.mediaMetadata ||
           RelioPacketType.mediaAck ||
           RelioPacketType.relayEnvelope ||

@@ -52,6 +52,18 @@ class $ConversationsTable extends Conversations
         type: DriftSqlType.string,
         requiredDuringInsert: true,
       );
+  static const VerificationMeta _unreadCountMeta = const VerificationMeta(
+    'unreadCount',
+  );
+  @override
+  late final GeneratedColumn<int> unreadCount = GeneratedColumn<int>(
+    'unread_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _lastMessageAtMeta = const VerificationMeta(
     'lastMessageAt',
   );
@@ -92,6 +104,7 @@ class $ConversationsTable extends Conversations
     participantId,
     displayName,
     participantStatus,
+    unreadCount,
     lastMessageAt,
     createdAt,
     updatedAt,
@@ -146,6 +159,15 @@ class $ConversationsTable extends Conversations
     } else if (isInserting) {
       context.missing(_participantStatusMeta);
     }
+    if (data.containsKey('unread_count')) {
+      context.handle(
+        _unreadCountMeta,
+        unreadCount.isAcceptableOrUnknown(
+          data['unread_count']!,
+          _unreadCountMeta,
+        ),
+      );
+    }
     if (data.containsKey('last_message_at')) {
       context.handle(
         _lastMessageAtMeta,
@@ -196,6 +218,10 @@ class $ConversationsTable extends Conversations
         DriftSqlType.string,
         data['${effectivePrefix}participant_status'],
       )!,
+      unreadCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}unread_count'],
+      )!,
       lastMessageAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}last_message_at'],
@@ -222,6 +248,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String participantId;
   final String displayName;
   final String participantStatus;
+  final int unreadCount;
   final DateTime? lastMessageAt;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -230,6 +257,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     required this.participantId,
     required this.displayName,
     required this.participantStatus,
+    required this.unreadCount,
     this.lastMessageAt,
     required this.createdAt,
     required this.updatedAt,
@@ -241,6 +269,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     map['participant_id'] = Variable<String>(participantId);
     map['display_name'] = Variable<String>(displayName);
     map['participant_status'] = Variable<String>(participantStatus);
+    map['unread_count'] = Variable<int>(unreadCount);
     if (!nullToAbsent || lastMessageAt != null) {
       map['last_message_at'] = Variable<DateTime>(lastMessageAt);
     }
@@ -255,6 +284,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       participantId: Value(participantId),
       displayName: Value(displayName),
       participantStatus: Value(participantStatus),
+      unreadCount: Value(unreadCount),
       lastMessageAt: lastMessageAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastMessageAt),
@@ -273,6 +303,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       participantId: serializer.fromJson<String>(json['participantId']),
       displayName: serializer.fromJson<String>(json['displayName']),
       participantStatus: serializer.fromJson<String>(json['participantStatus']),
+      unreadCount: serializer.fromJson<int>(json['unreadCount']),
       lastMessageAt: serializer.fromJson<DateTime?>(json['lastMessageAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -286,6 +317,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       'participantId': serializer.toJson<String>(participantId),
       'displayName': serializer.toJson<String>(displayName),
       'participantStatus': serializer.toJson<String>(participantStatus),
+      'unreadCount': serializer.toJson<int>(unreadCount),
       'lastMessageAt': serializer.toJson<DateTime?>(lastMessageAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -297,6 +329,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     String? participantId,
     String? displayName,
     String? participantStatus,
+    int? unreadCount,
     Value<DateTime?> lastMessageAt = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -305,6 +338,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     participantId: participantId ?? this.participantId,
     displayName: displayName ?? this.displayName,
     participantStatus: participantStatus ?? this.participantStatus,
+    unreadCount: unreadCount ?? this.unreadCount,
     lastMessageAt: lastMessageAt.present
         ? lastMessageAt.value
         : this.lastMessageAt,
@@ -323,6 +357,9 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       participantStatus: data.participantStatus.present
           ? data.participantStatus.value
           : this.participantStatus,
+      unreadCount: data.unreadCount.present
+          ? data.unreadCount.value
+          : this.unreadCount,
       lastMessageAt: data.lastMessageAt.present
           ? data.lastMessageAt.value
           : this.lastMessageAt,
@@ -338,6 +375,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ..write('participantId: $participantId, ')
           ..write('displayName: $displayName, ')
           ..write('participantStatus: $participantStatus, ')
+          ..write('unreadCount: $unreadCount, ')
           ..write('lastMessageAt: $lastMessageAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -351,6 +389,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     participantId,
     displayName,
     participantStatus,
+    unreadCount,
     lastMessageAt,
     createdAt,
     updatedAt,
@@ -363,6 +402,7 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           other.participantId == this.participantId &&
           other.displayName == this.displayName &&
           other.participantStatus == this.participantStatus &&
+          other.unreadCount == this.unreadCount &&
           other.lastMessageAt == this.lastMessageAt &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -373,6 +413,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String> participantId;
   final Value<String> displayName;
   final Value<String> participantStatus;
+  final Value<int> unreadCount;
   final Value<DateTime?> lastMessageAt;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -382,6 +423,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.participantId = const Value.absent(),
     this.displayName = const Value.absent(),
     this.participantStatus = const Value.absent(),
+    this.unreadCount = const Value.absent(),
     this.lastMessageAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -392,6 +434,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     required String participantId,
     required String displayName,
     required String participantStatus,
+    this.unreadCount = const Value.absent(),
     this.lastMessageAt = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -407,6 +450,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<String>? participantId,
     Expression<String>? displayName,
     Expression<String>? participantStatus,
+    Expression<int>? unreadCount,
     Expression<DateTime>? lastMessageAt,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -417,6 +461,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       if (participantId != null) 'participant_id': participantId,
       if (displayName != null) 'display_name': displayName,
       if (participantStatus != null) 'participant_status': participantStatus,
+      if (unreadCount != null) 'unread_count': unreadCount,
       if (lastMessageAt != null) 'last_message_at': lastMessageAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -429,6 +474,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<String>? participantId,
     Value<String>? displayName,
     Value<String>? participantStatus,
+    Value<int>? unreadCount,
     Value<DateTime?>? lastMessageAt,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -439,6 +485,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       participantId: participantId ?? this.participantId,
       displayName: displayName ?? this.displayName,
       participantStatus: participantStatus ?? this.participantStatus,
+      unreadCount: unreadCount ?? this.unreadCount,
       lastMessageAt: lastMessageAt ?? this.lastMessageAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -460,6 +507,9 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     }
     if (participantStatus.present) {
       map['participant_status'] = Variable<String>(participantStatus.value);
+    }
+    if (unreadCount.present) {
+      map['unread_count'] = Variable<int>(unreadCount.value);
     }
     if (lastMessageAt.present) {
       map['last_message_at'] = Variable<DateTime>(lastMessageAt.value);
@@ -483,6 +533,7 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
           ..write('participantId: $participantId, ')
           ..write('displayName: $displayName, ')
           ..write('participantStatus: $participantStatus, ')
+          ..write('unreadCount: $unreadCount, ')
           ..write('lastMessageAt: $lastMessageAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -686,6 +737,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _readAtMeta = const VerificationMeta('readAt');
+  @override
+  late final GeneratedColumn<DateTime> readAt = GeneratedColumn<DateTime>(
+    'read_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -705,6 +765,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     locationAccuracy,
     locationCapturedAt,
     nearbyMessageId,
+    readAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -862,6 +923,12 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         ),
       );
     }
+    if (data.containsKey('read_at')) {
+      context.handle(
+        _readAtMeta,
+        readAt.isAcceptableOrUnknown(data['read_at']!, _readAtMeta),
+      );
+    }
     return context;
   }
 
@@ -939,6 +1006,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}nearby_message_id'],
       ),
+      readAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}read_at'],
+      ),
     );
   }
 
@@ -966,6 +1037,7 @@ class Message extends DataClass implements Insertable<Message> {
   final double? locationAccuracy;
   final DateTime? locationCapturedAt;
   final String? nearbyMessageId;
+  final DateTime? readAt;
   const Message({
     required this.id,
     required this.conversationId,
@@ -984,6 +1056,7 @@ class Message extends DataClass implements Insertable<Message> {
     this.locationAccuracy,
     this.locationCapturedAt,
     this.nearbyMessageId,
+    this.readAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1018,6 +1091,9 @@ class Message extends DataClass implements Insertable<Message> {
     }
     if (!nullToAbsent || nearbyMessageId != null) {
       map['nearby_message_id'] = Variable<String>(nearbyMessageId);
+    }
+    if (!nullToAbsent || readAt != null) {
+      map['read_at'] = Variable<DateTime>(readAt);
     }
     return map;
   }
@@ -1055,6 +1131,9 @@ class Message extends DataClass implements Insertable<Message> {
       nearbyMessageId: nearbyMessageId == null && nullToAbsent
           ? const Value.absent()
           : Value(nearbyMessageId),
+      readAt: readAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(readAt),
     );
   }
 
@@ -1083,6 +1162,7 @@ class Message extends DataClass implements Insertable<Message> {
         json['locationCapturedAt'],
       ),
       nearbyMessageId: serializer.fromJson<String?>(json['nearbyMessageId']),
+      readAt: serializer.fromJson<DateTime?>(json['readAt']),
     );
   }
   @override
@@ -1106,6 +1186,7 @@ class Message extends DataClass implements Insertable<Message> {
       'locationAccuracy': serializer.toJson<double?>(locationAccuracy),
       'locationCapturedAt': serializer.toJson<DateTime?>(locationCapturedAt),
       'nearbyMessageId': serializer.toJson<String?>(nearbyMessageId),
+      'readAt': serializer.toJson<DateTime?>(readAt),
     };
   }
 
@@ -1127,6 +1208,7 @@ class Message extends DataClass implements Insertable<Message> {
     Value<double?> locationAccuracy = const Value.absent(),
     Value<DateTime?> locationCapturedAt = const Value.absent(),
     Value<String?> nearbyMessageId = const Value.absent(),
+    Value<DateTime?> readAt = const Value.absent(),
   }) => Message(
     id: id ?? this.id,
     conversationId: conversationId ?? this.conversationId,
@@ -1155,6 +1237,7 @@ class Message extends DataClass implements Insertable<Message> {
     nearbyMessageId: nearbyMessageId.present
         ? nearbyMessageId.value
         : this.nearbyMessageId,
+    readAt: readAt.present ? readAt.value : this.readAt,
   );
   Message copyWithCompanion(MessagesCompanion data) {
     return Message(
@@ -1195,6 +1278,7 @@ class Message extends DataClass implements Insertable<Message> {
       nearbyMessageId: data.nearbyMessageId.present
           ? data.nearbyMessageId.value
           : this.nearbyMessageId,
+      readAt: data.readAt.present ? data.readAt.value : this.readAt,
     );
   }
 
@@ -1217,7 +1301,8 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('longitude: $longitude, ')
           ..write('locationAccuracy: $locationAccuracy, ')
           ..write('locationCapturedAt: $locationCapturedAt, ')
-          ..write('nearbyMessageId: $nearbyMessageId')
+          ..write('nearbyMessageId: $nearbyMessageId, ')
+          ..write('readAt: $readAt')
           ..write(')'))
         .toString();
   }
@@ -1241,6 +1326,7 @@ class Message extends DataClass implements Insertable<Message> {
     locationAccuracy,
     locationCapturedAt,
     nearbyMessageId,
+    readAt,
   );
   @override
   bool operator ==(Object other) =>
@@ -1262,7 +1348,8 @@ class Message extends DataClass implements Insertable<Message> {
           other.longitude == this.longitude &&
           other.locationAccuracy == this.locationAccuracy &&
           other.locationCapturedAt == this.locationCapturedAt &&
-          other.nearbyMessageId == this.nearbyMessageId);
+          other.nearbyMessageId == this.nearbyMessageId &&
+          other.readAt == this.readAt);
 }
 
 class MessagesCompanion extends UpdateCompanion<Message> {
@@ -1283,6 +1370,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<double?> locationAccuracy;
   final Value<DateTime?> locationCapturedAt;
   final Value<String?> nearbyMessageId;
+  final Value<DateTime?> readAt;
   final Value<int> rowid;
   const MessagesCompanion({
     this.id = const Value.absent(),
@@ -1302,6 +1390,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.locationAccuracy = const Value.absent(),
     this.locationCapturedAt = const Value.absent(),
     this.nearbyMessageId = const Value.absent(),
+    this.readAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   MessagesCompanion.insert({
@@ -1322,6 +1411,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.locationAccuracy = const Value.absent(),
     this.locationCapturedAt = const Value.absent(),
     this.nearbyMessageId = const Value.absent(),
+    this.readAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        conversationId = Value(conversationId),
@@ -1350,6 +1440,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<double>? locationAccuracy,
     Expression<DateTime>? locationCapturedAt,
     Expression<String>? nearbyMessageId,
+    Expression<DateTime>? readAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1371,6 +1462,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (locationCapturedAt != null)
         'location_captured_at': locationCapturedAt,
       if (nearbyMessageId != null) 'nearby_message_id': nearbyMessageId,
+      if (readAt != null) 'read_at': readAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1393,6 +1485,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<double?>? locationAccuracy,
     Value<DateTime?>? locationCapturedAt,
     Value<String?>? nearbyMessageId,
+    Value<DateTime?>? readAt,
     Value<int>? rowid,
   }) {
     return MessagesCompanion(
@@ -1413,6 +1506,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       locationAccuracy: locationAccuracy ?? this.locationAccuracy,
       locationCapturedAt: locationCapturedAt ?? this.locationCapturedAt,
       nearbyMessageId: nearbyMessageId ?? this.nearbyMessageId,
+      readAt: readAt ?? this.readAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1473,6 +1567,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (nearbyMessageId.present) {
       map['nearby_message_id'] = Variable<String>(nearbyMessageId.value);
     }
+    if (readAt.present) {
+      map['read_at'] = Variable<DateTime>(readAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1499,6 +1596,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('locationAccuracy: $locationAccuracy, ')
           ..write('locationCapturedAt: $locationCapturedAt, ')
           ..write('nearbyMessageId: $nearbyMessageId, ')
+          ..write('readAt: $readAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1575,6 +1673,50 @@ class $NearbyDevicesTable extends NearbyDevices
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _isTrustedMeta = const VerificationMeta(
+    'isTrusted',
+  );
+  @override
+  late final GeneratedColumn<bool> isTrusted = GeneratedColumn<bool>(
+    'is_trusted',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_trusted" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _isBlockedMeta = const VerificationMeta(
+    'isBlocked',
+  );
+  @override
+  late final GeneratedColumn<bool> isBlocked = GeneratedColumn<bool>(
+    'is_blocked',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_blocked" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _autoReconnectEnabledMeta =
+      const VerificationMeta('autoReconnectEnabled');
+  @override
+  late final GeneratedColumn<bool> autoReconnectEnabled = GeneratedColumn<bool>(
+    'auto_reconnect_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("auto_reconnect_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     deviceId,
@@ -1583,6 +1725,9 @@ class $NearbyDevicesTable extends NearbyDevices
     lastSeenAt,
     signalQuality,
     approxDistance,
+    isTrusted,
+    isBlocked,
+    autoReconnectEnabled,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1652,6 +1797,27 @@ class $NearbyDevicesTable extends NearbyDevices
         ),
       );
     }
+    if (data.containsKey('is_trusted')) {
+      context.handle(
+        _isTrustedMeta,
+        isTrusted.isAcceptableOrUnknown(data['is_trusted']!, _isTrustedMeta),
+      );
+    }
+    if (data.containsKey('is_blocked')) {
+      context.handle(
+        _isBlockedMeta,
+        isBlocked.isAcceptableOrUnknown(data['is_blocked']!, _isBlockedMeta),
+      );
+    }
+    if (data.containsKey('auto_reconnect_enabled')) {
+      context.handle(
+        _autoReconnectEnabledMeta,
+        autoReconnectEnabled.isAcceptableOrUnknown(
+          data['auto_reconnect_enabled']!,
+          _autoReconnectEnabledMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1685,6 +1851,18 @@ class $NearbyDevicesTable extends NearbyDevices
         DriftSqlType.int,
         data['${effectivePrefix}approx_distance'],
       ),
+      isTrusted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_trusted'],
+      )!,
+      isBlocked: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_blocked'],
+      )!,
+      autoReconnectEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}auto_reconnect_enabled'],
+      )!,
     );
   }
 
@@ -1701,6 +1879,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
   final DateTime lastSeenAt;
   final int? signalQuality;
   final int? approxDistance;
+  final bool isTrusted;
+  final bool isBlocked;
+  final bool autoReconnectEnabled;
   const NearbyDevice({
     required this.deviceId,
     required this.displayName,
@@ -1708,6 +1889,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     required this.lastSeenAt,
     this.signalQuality,
     this.approxDistance,
+    required this.isTrusted,
+    required this.isBlocked,
+    required this.autoReconnectEnabled,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1722,6 +1906,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     if (!nullToAbsent || approxDistance != null) {
       map['approx_distance'] = Variable<int>(approxDistance);
     }
+    map['is_trusted'] = Variable<bool>(isTrusted);
+    map['is_blocked'] = Variable<bool>(isBlocked);
+    map['auto_reconnect_enabled'] = Variable<bool>(autoReconnectEnabled);
     return map;
   }
 
@@ -1737,6 +1924,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       approxDistance: approxDistance == null && nullToAbsent
           ? const Value.absent()
           : Value(approxDistance),
+      isTrusted: Value(isTrusted),
+      isBlocked: Value(isBlocked),
+      autoReconnectEnabled: Value(autoReconnectEnabled),
     );
   }
 
@@ -1752,6 +1942,11 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       lastSeenAt: serializer.fromJson<DateTime>(json['lastSeenAt']),
       signalQuality: serializer.fromJson<int?>(json['signalQuality']),
       approxDistance: serializer.fromJson<int?>(json['approxDistance']),
+      isTrusted: serializer.fromJson<bool>(json['isTrusted']),
+      isBlocked: serializer.fromJson<bool>(json['isBlocked']),
+      autoReconnectEnabled: serializer.fromJson<bool>(
+        json['autoReconnectEnabled'],
+      ),
     );
   }
   @override
@@ -1764,6 +1959,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       'lastSeenAt': serializer.toJson<DateTime>(lastSeenAt),
       'signalQuality': serializer.toJson<int?>(signalQuality),
       'approxDistance': serializer.toJson<int?>(approxDistance),
+      'isTrusted': serializer.toJson<bool>(isTrusted),
+      'isBlocked': serializer.toJson<bool>(isBlocked),
+      'autoReconnectEnabled': serializer.toJson<bool>(autoReconnectEnabled),
     };
   }
 
@@ -1774,6 +1972,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     DateTime? lastSeenAt,
     Value<int?> signalQuality = const Value.absent(),
     Value<int?> approxDistance = const Value.absent(),
+    bool? isTrusted,
+    bool? isBlocked,
+    bool? autoReconnectEnabled,
   }) => NearbyDevice(
     deviceId: deviceId ?? this.deviceId,
     displayName: displayName ?? this.displayName,
@@ -1785,6 +1986,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     approxDistance: approxDistance.present
         ? approxDistance.value
         : this.approxDistance,
+    isTrusted: isTrusted ?? this.isTrusted,
+    isBlocked: isBlocked ?? this.isBlocked,
+    autoReconnectEnabled: autoReconnectEnabled ?? this.autoReconnectEnabled,
   );
   NearbyDevice copyWithCompanion(NearbyDevicesCompanion data) {
     return NearbyDevice(
@@ -1802,6 +2006,11 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       approxDistance: data.approxDistance.present
           ? data.approxDistance.value
           : this.approxDistance,
+      isTrusted: data.isTrusted.present ? data.isTrusted.value : this.isTrusted,
+      isBlocked: data.isBlocked.present ? data.isBlocked.value : this.isBlocked,
+      autoReconnectEnabled: data.autoReconnectEnabled.present
+          ? data.autoReconnectEnabled.value
+          : this.autoReconnectEnabled,
     );
   }
 
@@ -1813,7 +2022,10 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           ..write('status: $status, ')
           ..write('lastSeenAt: $lastSeenAt, ')
           ..write('signalQuality: $signalQuality, ')
-          ..write('approxDistance: $approxDistance')
+          ..write('approxDistance: $approxDistance, ')
+          ..write('isTrusted: $isTrusted, ')
+          ..write('isBlocked: $isBlocked, ')
+          ..write('autoReconnectEnabled: $autoReconnectEnabled')
           ..write(')'))
         .toString();
   }
@@ -1826,6 +2038,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     lastSeenAt,
     signalQuality,
     approxDistance,
+    isTrusted,
+    isBlocked,
+    autoReconnectEnabled,
   );
   @override
   bool operator ==(Object other) =>
@@ -1836,7 +2051,10 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           other.status == this.status &&
           other.lastSeenAt == this.lastSeenAt &&
           other.signalQuality == this.signalQuality &&
-          other.approxDistance == this.approxDistance);
+          other.approxDistance == this.approxDistance &&
+          other.isTrusted == this.isTrusted &&
+          other.isBlocked == this.isBlocked &&
+          other.autoReconnectEnabled == this.autoReconnectEnabled);
 }
 
 class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
@@ -1846,6 +2064,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
   final Value<DateTime> lastSeenAt;
   final Value<int?> signalQuality;
   final Value<int?> approxDistance;
+  final Value<bool> isTrusted;
+  final Value<bool> isBlocked;
+  final Value<bool> autoReconnectEnabled;
   final Value<int> rowid;
   const NearbyDevicesCompanion({
     this.deviceId = const Value.absent(),
@@ -1854,6 +2075,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     this.lastSeenAt = const Value.absent(),
     this.signalQuality = const Value.absent(),
     this.approxDistance = const Value.absent(),
+    this.isTrusted = const Value.absent(),
+    this.isBlocked = const Value.absent(),
+    this.autoReconnectEnabled = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NearbyDevicesCompanion.insert({
@@ -1863,6 +2087,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     required DateTime lastSeenAt,
     this.signalQuality = const Value.absent(),
     this.approxDistance = const Value.absent(),
+    this.isTrusted = const Value.absent(),
+    this.isBlocked = const Value.absent(),
+    this.autoReconnectEnabled = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : deviceId = Value(deviceId),
        displayName = Value(displayName),
@@ -1875,6 +2102,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Expression<DateTime>? lastSeenAt,
     Expression<int>? signalQuality,
     Expression<int>? approxDistance,
+    Expression<bool>? isTrusted,
+    Expression<bool>? isBlocked,
+    Expression<bool>? autoReconnectEnabled,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1884,6 +2114,10 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       if (lastSeenAt != null) 'last_seen_at': lastSeenAt,
       if (signalQuality != null) 'signal_quality': signalQuality,
       if (approxDistance != null) 'approx_distance': approxDistance,
+      if (isTrusted != null) 'is_trusted': isTrusted,
+      if (isBlocked != null) 'is_blocked': isBlocked,
+      if (autoReconnectEnabled != null)
+        'auto_reconnect_enabled': autoReconnectEnabled,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1895,6 +2129,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Value<DateTime>? lastSeenAt,
     Value<int?>? signalQuality,
     Value<int?>? approxDistance,
+    Value<bool>? isTrusted,
+    Value<bool>? isBlocked,
+    Value<bool>? autoReconnectEnabled,
     Value<int>? rowid,
   }) {
     return NearbyDevicesCompanion(
@@ -1904,6 +2141,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       signalQuality: signalQuality ?? this.signalQuality,
       approxDistance: approxDistance ?? this.approxDistance,
+      isTrusted: isTrusted ?? this.isTrusted,
+      isBlocked: isBlocked ?? this.isBlocked,
+      autoReconnectEnabled: autoReconnectEnabled ?? this.autoReconnectEnabled,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1929,6 +2169,17 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     if (approxDistance.present) {
       map['approx_distance'] = Variable<int>(approxDistance.value);
     }
+    if (isTrusted.present) {
+      map['is_trusted'] = Variable<bool>(isTrusted.value);
+    }
+    if (isBlocked.present) {
+      map['is_blocked'] = Variable<bool>(isBlocked.value);
+    }
+    if (autoReconnectEnabled.present) {
+      map['auto_reconnect_enabled'] = Variable<bool>(
+        autoReconnectEnabled.value,
+      );
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1944,6 +2195,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
           ..write('lastSeenAt: $lastSeenAt, ')
           ..write('signalQuality: $signalQuality, ')
           ..write('approxDistance: $approxDistance, ')
+          ..write('isTrusted: $isTrusted, ')
+          ..write('isBlocked: $isBlocked, ')
+          ..write('autoReconnectEnabled: $autoReconnectEnabled, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -6122,6 +6376,7 @@ typedef $$ConversationsTableCreateCompanionBuilder =
       required String participantId,
       required String displayName,
       required String participantStatus,
+      Value<int> unreadCount,
       Value<DateTime?> lastMessageAt,
       required DateTime createdAt,
       required DateTime updatedAt,
@@ -6133,6 +6388,7 @@ typedef $$ConversationsTableUpdateCompanionBuilder =
       Value<String> participantId,
       Value<String> displayName,
       Value<String> participantStatus,
+      Value<int> unreadCount,
       Value<DateTime?> lastMessageAt,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -6165,6 +6421,11 @@ class $$ConversationsTableFilterComposer
 
   ColumnFilters<String> get participantStatus => $composableBuilder(
     column: $table.participantStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get unreadCount => $composableBuilder(
+    column: $table.unreadCount,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -6213,6 +6474,11 @@ class $$ConversationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get unreadCount => $composableBuilder(
+    column: $table.unreadCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get lastMessageAt => $composableBuilder(
     column: $table.lastMessageAt,
     builder: (column) => ColumnOrderings(column),
@@ -6253,6 +6519,11 @@ class $$ConversationsTableAnnotationComposer
 
   GeneratedColumn<String> get participantStatus => $composableBuilder(
     column: $table.participantStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get unreadCount => $composableBuilder(
+    column: $table.unreadCount,
     builder: (column) => column,
   );
 
@@ -6303,6 +6574,7 @@ class $$ConversationsTableTableManager
                 Value<String> participantId = const Value.absent(),
                 Value<String> displayName = const Value.absent(),
                 Value<String> participantStatus = const Value.absent(),
+                Value<int> unreadCount = const Value.absent(),
                 Value<DateTime?> lastMessageAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -6312,6 +6584,7 @@ class $$ConversationsTableTableManager
                 participantId: participantId,
                 displayName: displayName,
                 participantStatus: participantStatus,
+                unreadCount: unreadCount,
                 lastMessageAt: lastMessageAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -6323,6 +6596,7 @@ class $$ConversationsTableTableManager
                 required String participantId,
                 required String displayName,
                 required String participantStatus,
+                Value<int> unreadCount = const Value.absent(),
                 Value<DateTime?> lastMessageAt = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
@@ -6332,6 +6606,7 @@ class $$ConversationsTableTableManager
                 participantId: participantId,
                 displayName: displayName,
                 participantStatus: participantStatus,
+                unreadCount: unreadCount,
                 lastMessageAt: lastMessageAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -6390,6 +6665,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<double?> locationAccuracy,
       Value<DateTime?> locationCapturedAt,
       Value<String?> nearbyMessageId,
+      Value<DateTime?> readAt,
       Value<int> rowid,
     });
 typedef $$MessagesTableUpdateCompanionBuilder =
@@ -6411,6 +6687,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<double?> locationAccuracy,
       Value<DateTime?> locationCapturedAt,
       Value<String?> nearbyMessageId,
+      Value<DateTime?> readAt,
       Value<int> rowid,
     });
 
@@ -6505,6 +6782,11 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<String> get nearbyMessageId => $composableBuilder(
     column: $table.nearbyMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get readAt => $composableBuilder(
+    column: $table.readAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6602,6 +6884,11 @@ class $$MessagesTableOrderingComposer
     column: $table.nearbyMessageId,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<DateTime> get readAt => $composableBuilder(
+    column: $table.readAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$MessagesTableAnnotationComposer
@@ -6683,6 +6970,9 @@ class $$MessagesTableAnnotationComposer
     column: $table.nearbyMessageId,
     builder: (column) => column,
   );
+
+  GeneratedColumn<DateTime> get readAt =>
+      $composableBuilder(column: $table.readAt, builder: (column) => column);
 }
 
 class $$MessagesTableTableManager
@@ -6730,6 +7020,7 @@ class $$MessagesTableTableManager
                 Value<double?> locationAccuracy = const Value.absent(),
                 Value<DateTime?> locationCapturedAt = const Value.absent(),
                 Value<String?> nearbyMessageId = const Value.absent(),
+                Value<DateTime?> readAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion(
                 id: id,
@@ -6749,6 +7040,7 @@ class $$MessagesTableTableManager
                 locationAccuracy: locationAccuracy,
                 locationCapturedAt: locationCapturedAt,
                 nearbyMessageId: nearbyMessageId,
+                readAt: readAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6770,6 +7062,7 @@ class $$MessagesTableTableManager
                 Value<double?> locationAccuracy = const Value.absent(),
                 Value<DateTime?> locationCapturedAt = const Value.absent(),
                 Value<String?> nearbyMessageId = const Value.absent(),
+                Value<DateTime?> readAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => MessagesCompanion.insert(
                 id: id,
@@ -6789,6 +7082,7 @@ class $$MessagesTableTableManager
                 locationAccuracy: locationAccuracy,
                 locationCapturedAt: locationCapturedAt,
                 nearbyMessageId: nearbyMessageId,
+                readAt: readAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -6830,6 +7124,9 @@ typedef $$NearbyDevicesTableCreateCompanionBuilder =
       required DateTime lastSeenAt,
       Value<int?> signalQuality,
       Value<int?> approxDistance,
+      Value<bool> isTrusted,
+      Value<bool> isBlocked,
+      Value<bool> autoReconnectEnabled,
       Value<int> rowid,
     });
 typedef $$NearbyDevicesTableUpdateCompanionBuilder =
@@ -6840,6 +7137,9 @@ typedef $$NearbyDevicesTableUpdateCompanionBuilder =
       Value<DateTime> lastSeenAt,
       Value<int?> signalQuality,
       Value<int?> approxDistance,
+      Value<bool> isTrusted,
+      Value<bool> isBlocked,
+      Value<bool> autoReconnectEnabled,
       Value<int> rowid,
     });
 
@@ -6879,6 +7179,21 @@ class $$NearbyDevicesTableFilterComposer
 
   ColumnFilters<int> get approxDistance => $composableBuilder(
     column: $table.approxDistance,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isTrusted => $composableBuilder(
+    column: $table.isTrusted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isBlocked => $composableBuilder(
+    column: $table.isBlocked,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get autoReconnectEnabled => $composableBuilder(
+    column: $table.autoReconnectEnabled,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6921,6 +7236,21 @@ class $$NearbyDevicesTableOrderingComposer
     column: $table.approxDistance,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get isTrusted => $composableBuilder(
+    column: $table.isTrusted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isBlocked => $composableBuilder(
+    column: $table.isBlocked,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get autoReconnectEnabled => $composableBuilder(
+    column: $table.autoReconnectEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$NearbyDevicesTableAnnotationComposer
@@ -6955,6 +7285,17 @@ class $$NearbyDevicesTableAnnotationComposer
 
   GeneratedColumn<int> get approxDistance => $composableBuilder(
     column: $table.approxDistance,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isTrusted =>
+      $composableBuilder(column: $table.isTrusted, builder: (column) => column);
+
+  GeneratedColumn<bool> get isBlocked =>
+      $composableBuilder(column: $table.isBlocked, builder: (column) => column);
+
+  GeneratedColumn<bool> get autoReconnectEnabled => $composableBuilder(
+    column: $table.autoReconnectEnabled,
     builder: (column) => column,
   );
 }
@@ -6996,6 +7337,9 @@ class $$NearbyDevicesTableTableManager
                 Value<DateTime> lastSeenAt = const Value.absent(),
                 Value<int?> signalQuality = const Value.absent(),
                 Value<int?> approxDistance = const Value.absent(),
+                Value<bool> isTrusted = const Value.absent(),
+                Value<bool> isBlocked = const Value.absent(),
+                Value<bool> autoReconnectEnabled = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion(
                 deviceId: deviceId,
@@ -7004,6 +7348,9 @@ class $$NearbyDevicesTableTableManager
                 lastSeenAt: lastSeenAt,
                 signalQuality: signalQuality,
                 approxDistance: approxDistance,
+                isTrusted: isTrusted,
+                isBlocked: isBlocked,
+                autoReconnectEnabled: autoReconnectEnabled,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -7014,6 +7361,9 @@ class $$NearbyDevicesTableTableManager
                 required DateTime lastSeenAt,
                 Value<int?> signalQuality = const Value.absent(),
                 Value<int?> approxDistance = const Value.absent(),
+                Value<bool> isTrusted = const Value.absent(),
+                Value<bool> isBlocked = const Value.absent(),
+                Value<bool> autoReconnectEnabled = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion.insert(
                 deviceId: deviceId,
@@ -7022,6 +7372,9 @@ class $$NearbyDevicesTableTableManager
                 lastSeenAt: lastSeenAt,
                 signalQuality: signalQuality,
                 approxDistance: approxDistance,
+                isTrusted: isTrusted,
+                isBlocked: isBlocked,
+                autoReconnectEnabled: autoReconnectEnabled,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

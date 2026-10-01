@@ -2,11 +2,19 @@ package com.relio.relio_mobile
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.firebase.appdistribution.FirebaseAppDistribution
+import com.google.firebase.messaging.FirebaseMessaging
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -16,20 +24,154 @@ import java.security.MessageDigest
 
 class MainActivity : FlutterActivity() {
     private val updateChannel = "relio/app_update"
+    private val notificationChannel = "relio/notifications"
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
+    private var notificationPermissionResult: MethodChannel.Result? = null
+    private var notificationsMethodChannel: MethodChannel? = null
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         runtimeConnectivityChannels?.onRequestPermissionsResult(requestCode)
+        if (requestCode == REQUEST_NOTIFICATIONS) {
+            val result = notificationPermissionResult
+            notificationPermissionResult = null
+            result?.success(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannel)
             .setMethodCallHandler(::handleUpdateCall)
+        createNotificationChannels()
+        notificationsMethodChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            notificationChannel,
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "requestPermission" -> requestNotificationPermission(result)
+                    "notificationsAllowed" -> result.success(NotificationManagerCompat.from(this).areNotificationsEnabled())
+                    "getFcmToken" -> getQaFcmToken(result)
+                    "showLocalNotification" -> showLocalNotification(call, result)
+                    "consumeNotificationRoute" -> {
+                        val route = intent?.getStringExtra(EXTRA_NOTIFICATION_ROUTE)
+                            ?: intent?.getStringExtra("route")
+                        intent?.removeExtra(EXTRA_NOTIFICATION_ROUTE)
+                        intent?.removeExtra("route")
+                        result.success(route)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
         runtimeConnectivityChannels = RuntimeConnectivityChannels(this).also {
             it.register(flutterEngine)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        (intent.getStringExtra(EXTRA_NOTIFICATION_ROUTE)
+            ?: intent.getStringExtra("route"))?.let { route ->
+            notificationsMethodChannel?.invokeMethod("notificationTapped", route)
+        }
+    }
+
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_MESSAGES, "RELIO messages", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                description = "แจ้งเตือนข้อความ Nearby โดยซ่อนเนื้อหาข้อความ"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_SAFETY, "RELIO safety alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "แจ้งเตือน SOS ที่ได้รับจากอุปกรณ์ใกล้เคียง"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            },
+        )
+    }
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT < 33) {
+            result.success(NotificationManagerCompat.from(this).areNotificationsEnabled())
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            result.success(true)
+            return
+        }
+        if (notificationPermissionResult != null) {
+            result.error("permission_in_progress", "Notification permission request is already active", null)
+            return
+        }
+        notificationPermissionResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_NOTIFICATIONS,
+        )
+    }
+
+    private fun getQaFcmToken(result: MethodChannel.Result) {
+        if (packageName != QA_APPLICATION_ID) {
+            result.success(null)
+            return
+        }
+        try {
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token -> result.success(token) }
+                .addOnFailureListener {
+                    result.error("fcm_token_unavailable", "Push registration is unavailable", null)
+                }
+        } catch (_: Throwable) {
+            result.error("fcm_unavailable", "Push registration is unavailable", null)
+        }
+    }
+
+    private fun showLocalNotification(call: MethodCall, result: MethodChannel.Result) {
+        val arguments = call.arguments as? Map<*, *>
+            ?: return result.error("invalid_arguments", "Notification data is unavailable", null)
+        val id = arguments["id"] as? String ?: return result.error("invalid_id", "Notification id is unavailable", null)
+        val title = arguments["title"] as? String ?: "RELIO"
+        val body = arguments["body"] as? String ?: "มีการแจ้งเตือนใหม่"
+        val route = arguments["route"] as? String ?: return result.error("invalid_route", "Notification route is unavailable", null)
+        val urgent = arguments["urgent"] as? Boolean ?: false
+        if (route != "/sos" && !route.matches(Regex("^/chat/[A-Za-z0-9._:-]{1,128}$"))) {
+            return result.error("invalid_route", "Notification route is not allowed", null)
+        }
+        if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+            result.success(false)
+            return
+        }
+        val openApp = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(EXTRA_NOTIFICATION_ROUTE, route)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            route.hashCode(),
+            openApp,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val channel = if (urgent) CHANNEL_SAFETY else CHANNEL_MESSAGES
+        val notification = NotificationCompat.Builder(this, channel)
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setCategory(if (urgent) NotificationCompat.CATEGORY_ALARM else NotificationCompat.CATEGORY_MESSAGE)
+            .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        NotificationManagerCompat.from(this).notify(id.hashCode() and 0x7fffffff, notification)
+        result.success(true)
     }
 
     private fun handleUpdateCall(call: MethodCall, result: MethodChannel.Result) {
@@ -148,5 +290,13 @@ class MainActivity : FlutterActivity() {
         if (signatures.isEmpty()) throw IllegalArgumentException("signer missing")
         val digest = MessageDigest.getInstance("SHA-256").digest(signatures.first().toByteArray())
         return digest.joinToString("") { byte -> "%02x".format(byte) }
+    }
+
+    companion object {
+        private const val REQUEST_NOTIFICATIONS = 9024
+        private const val CHANNEL_MESSAGES = "relio_messages"
+        private const val CHANNEL_SAFETY = "relio_safety"
+        private const val EXTRA_NOTIFICATION_ROUTE = "relio_notification_route"
+        private const val QA_APPLICATION_ID = "com.relio.relio_mobile.test"
     }
 }

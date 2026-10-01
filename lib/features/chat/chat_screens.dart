@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -79,7 +81,7 @@ class ChatListScreen extends StatelessWidget {
         ? ''
         : '${conversation.lastMessageAt!.hour.toString().padLeft(2, '0')}:${conversation.lastMessageAt!.minute.toString().padLeft(2, '0')}',
     status: conversation.participantStatus,
-    unread: 0,
+    unread: conversation.unreadCount,
     isDemo: RelioMockData.isDemoId(conversation.id),
   );
 }
@@ -99,6 +101,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   RelioDevice? _demoDevice;
   late Stream<List<RelioMessage>> _messagesStream;
   String? _persistedPeerName;
+  RelioDependencies? _dependencies;
 
   @override
   void initState() {
@@ -111,20 +114,37 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _messagesStream = RelioDependencyScope.of(
-      context,
-    ).repositories.messages.watchMessages(widget.chatId);
-    RelioDependencyScope.of(context).repositories.conversations
+    _dependencies = RelioDependencyScope.of(context);
+    _messagesStream = _dependencies!.repositories.messages.watchMessages(
+      widget.chatId,
+    );
+    _dependencies!.repositories.conversations
         .getConversation(widget.chatId)
         .then((conversation) {
           if (mounted && conversation != null) {
             setState(() => _persistedPeerName = conversation.displayName);
           }
         });
+    _dependencies!.nearbyService.setActiveConversation(widget.chatId);
+    unawaited(_markConversationRead());
+  }
+
+  Future<void> _markConversationRead() async {
+    final dependencies = _dependencies;
+    if (dependencies == null) return;
+    final messageIds = await dependencies.repositories.messages
+        .markConversationRead(widget.chatId);
+    for (final messageId in messageIds) {
+      await dependencies.nearbyService.sendReadReceipt(
+        messageId: messageId,
+        peerDeviceId: widget.chatId,
+      );
+    }
   }
 
   @override
   void dispose() {
+    _dependencies?.nearbyService.setActiveConversation(null);
     _composer.dispose();
     _scrollController.dispose();
     super.dispose();

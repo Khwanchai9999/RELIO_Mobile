@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -32,9 +34,12 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _busy = true);
     try {
-      await RelioDependencyScope.of(
-        context,
-      ).authService.signIn(email: _email.text.trim(), password: _password.text);
+      final dependencies = RelioDependencyScope.of(context);
+      await dependencies.authService.signIn(
+        email: _email.text.trim(),
+        password: _password.text,
+      );
+      unawaited(dependencies.syncPushRegistration());
       if (mounted) context.go('/permissions');
     } on CloudException catch (error) {
       if (mounted) _showError(error.message);
@@ -150,11 +155,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _busy = true);
     try {
-      await RelioDependencyScope.of(context).authService.register(
+      final dependencies = RelioDependencyScope.of(context);
+      await dependencies.authService.register(
         email: _email.text.trim(),
         password: _password.text,
         displayName: _name.text.trim(),
       );
+      unawaited(dependencies.syncPushRegistration());
       if (mounted) context.go('/permissions');
     } on CloudException catch (error) {
       if (mounted) {

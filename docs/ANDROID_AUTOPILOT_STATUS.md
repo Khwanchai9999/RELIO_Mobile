@@ -6,10 +6,11 @@
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
 - Latest public QA release: `0.9.0+23`
+- Local candidate: `0.9.0+24` / versionCode 24 (not published or installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
-- Current release tag: `qa-v0.9.0-b22`
-- Drift schema: v4
+- Current public release tag: `qa-v0.9.0-b23`
+- Drift schema: v5 in the local Build 24 candidate
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
 - PROD package: `com.relio.relio_mobile`
@@ -27,6 +28,25 @@
 - Public manifest: [latest.json](https://relio-17dc0.web.app/qa/latest.json)
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
+
+## Build 24 — local communication-platform candidate
+
+- Source target: `0.9.0+24`, QA package `com.relio.relio_mobile.test`.
+- Format, analyze, all 145 mobile tests, Windows PowerShell 5.1 syntax checks,
+  QA/PROD isolation, DEV/QA/PROD debug builds, and the signed QA `-NoUpload`
+  pipeline passed locally.
+- The signed QA artifact is local at `dist/relio-test-0.9.0+24.apk`; it has not
+  been uploaded, published, or installed on a phone.
+- Automatic reconnect is not implemented. Trust is persisted, but endpoint IDs
+  are ephemeral and there is no pinned cryptographic RELIO peer identity to
+  authorize silent transport acceptance.
+- The migration and push Edge Function are source-only. No verified disposable
+  QA Supabase project, Supabase CLI session, FCM service identity, or deployed
+  webhook is configured. Admin deployment is not linked to Vercel.
+- GitHub CLI currently reports the stored `Khwanchai9999` credential as invalid;
+  Firebase project listing also fails. No remote push or release was attempted.
+- Build 24 requires secure reconnect design/coverage and the separately verified
+  remote QA setup before the full integration acceptance criteria are met.
 
 ## Historical Build 17 — offline two-device demo hardening
 
