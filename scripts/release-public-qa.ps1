@@ -43,10 +43,31 @@ function Invoke-CheckedStep {
 
 function ConvertFrom-CliJson {
     param([object[]]$Lines)
-    $text = $Lines -join "`n"
-    $start = $text.IndexOf('{')
+    # แปลง progress record ของ PowerShell เป็นข้อความก่อนแยก JSON จริง
+    $text = ($Lines | ForEach-Object { $_.ToString() }) -join "`n"
+    $start = $text.IndexOf([char]123)
     if ($start -lt 0) { throw 'CLI did not return a JSON object.' }
-    return $text.Substring($start) | ConvertFrom-Json
+    $depth = 0
+    $inString = $false
+    $escaped = $false
+    $end = -1
+    for ($index = $start; $index -lt $text.Length; $index++) {
+        $character = $text[$index]
+        if ($inString) {
+            if ($escaped) { $escaped = $false }
+            elseif ($character -eq '\') { $escaped = $true }
+            elseif ($character -eq '"') { $inString = $false }
+            continue
+        }
+        if ($character -eq '"') { $inString = $true }
+        elseif ($character -eq [char]123) { $depth++ }
+        elseif ($character -eq [char]125) {
+            $depth--
+            if ($depth -eq 0) { $end = $index; break }
+        }
+    }
+    if ($end -lt $start) { throw 'CLI returned incomplete JSON.' }
+    return $text.Substring($start, $end - $start + 1) | ConvertFrom-Json
 }
 
 function Invoke-FirebaseCli {
