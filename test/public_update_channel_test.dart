@@ -230,6 +230,7 @@ void main() {
       temporaryDirectory: _FakeDirectory(),
       enabled: true,
       environment: RelioEnvironment.test,
+      currentBuild: '0.8.6+11',
     );
     expect(
       (await service.checkForUpdate(manual: true)).status,
@@ -272,6 +273,7 @@ void main() {
         temporaryDirectory: _FakeDirectory(),
         enabled: true,
         environment: RelioEnvironment.test,
+        currentBuild: '0.8.6+11',
       );
       await service.checkForUpdate(manual: true);
       expect(
@@ -306,6 +308,7 @@ void main() {
         temporaryDirectory: _FakeDirectory(),
         enabled: true,
         environment: RelioEnvironment.test,
+        currentBuild: '0.8.6+11',
       );
       await service.checkForUpdate(manual: true);
       expect(
@@ -323,6 +326,7 @@ void main() {
         temporaryDirectory: _FakeDirectory(),
         enabled: true,
         environment: RelioEnvironment.test,
+        currentBuild: '0.8.6+11',
       );
       await grantedService.checkForUpdate(manual: true);
       expect(

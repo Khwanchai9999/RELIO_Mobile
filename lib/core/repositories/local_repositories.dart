@@ -866,9 +866,10 @@ class DriftAttachmentRepository implements AttachmentRepository {
 }
 
 class DriftSosRepository implements SOSRepository {
-  DriftSosRepository(this.db, this.queue);
+  DriftSosRepository(this.db, this.queue, {this.ownerUserIdProvider});
   final AppDatabase db;
   final SyncQueueRepository queue;
+  final String? Function()? ownerUserIdProvider;
 
   @override
   Stream<RelioSosEvent?> watchActive({String? ownerDeviceId}) =>
@@ -979,11 +980,16 @@ class DriftSosRepository implements SOSRepository {
               deliveryStatus: DeliveryStatus.pending.name,
             ),
           );
-      await queue.enqueue(
-        entityType: SyncEntityType.sosEvent.value,
-        entityId: id,
-        operation: SyncOperation.sosUpsert.value,
-      );
+      // Guest SOS ต้องอยู่ในเครื่อง ไม่ผูกกับ Cloud identity ที่อาจเปลี่ยนภายหลัง
+      final currentOwner = ownerUserIdProvider?.call();
+      if (ownerUserId.isNotEmpty && currentOwner == ownerUserId) {
+        await queue.enqueue(
+          entityType: SyncEntityType.sosEvent.value,
+          entityId: id,
+          operation: SyncOperation.sosUpsert.value,
+          ownerUserId: ownerUserId,
+        );
+      }
     });
     return RelioSosEvent(
       id: id,
@@ -1004,17 +1010,26 @@ class DriftSosRepository implements SOSRepository {
   @override
   Future<void> deactivate(String id) async {
     await db.transaction(() async {
+      final event = await (db.select(
+        db.sosEvents,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
       await (db.update(db.sosEvents)..where((row) => row.id.equals(id))).write(
         SosEventsCompanion(
           isActive: const Value(false),
           updatedAt: Value(DateTime.now()),
         ),
       );
-      await queue.enqueue(
-        entityType: SyncEntityType.sosEvent.value,
-        entityId: id,
-        operation: SyncOperation.sosUpsert.value,
-      );
+      final currentOwner = ownerUserIdProvider?.call();
+      if (event != null &&
+          event.ownerUserId.isNotEmpty &&
+          event.ownerUserId == currentOwner) {
+        await queue.enqueue(
+          entityType: SyncEntityType.sosEvent.value,
+          entityId: id,
+          operation: SyncOperation.sosUpsert.value,
+          ownerUserId: event.ownerUserId,
+        );
+      }
     });
   }
 
@@ -1464,8 +1479,16 @@ class RelioDeviceIdentityRepository {
       db.appSettings,
     )..where((row) => row.key.equals('display_name'))).getSingleOrNull();
     if (saved != null && saved.value.isNotEmpty) return saved.value;
-    await _write('display_name', 'มินนี่');
-    return 'มินนี่';
+    await _write('display_name', 'ผู้ใช้ RELIO');
+    return 'ผู้ใช้ RELIO';
+  }
+
+  Future<void> setDisplayName(String displayName) async {
+    final normalized = displayName.trim();
+    if (normalized.isEmpty || normalized.length > 60) {
+      throw ArgumentError.value(displayName, 'displayName');
+    }
+    await _write('display_name', normalized);
   }
 
   Future<void> _write(String key, String value) async {
@@ -1517,7 +1540,11 @@ class RelioRepositories {
       settings = RelioSettingsRepository(database),
       attachments = DriftAttachmentRepository(database) {
     messages = DriftMessageRepository(database, conversations, syncQueue);
-    sos = DriftSosRepository(database, syncQueue);
+    sos = DriftSosRepository(
+      database,
+      syncQueue,
+      ownerUserIdProvider: ownerUserIdProvider,
+    );
   }
 
   final AppDatabase database;

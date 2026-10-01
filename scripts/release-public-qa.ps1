@@ -222,8 +222,14 @@ $releaseTag = "qa-v$versionName-b$buildNumber"
 $releaseTitle = "RELIO Test v$versionName Build $buildNumber"
 
 if ((git branch --show-current) -ne 'main') { throw 'Public QA publishing requires branch main.' }
-$sourceStatus = git status --porcelain
-if (-not [string]::IsNullOrWhiteSpace(($sourceStatus -join "`n"))) { throw 'Public QA publishing requires a clean source tree.' }
+$sourceStatus = @(git status --porcelain --untracked-files=all)
+# เก็บบันทึก Huawei ส่วนตัวที่ผู้ใช้วางไว้ใน root โดยไม่ stage หรือเผยแพร่
+$preservedUserNotes = @(
+    '?? huawei-build16-to17-ota.txt',
+    '?? huawei-build17-install-stage.txt'
+)
+$unexpectedStatus = @($sourceStatus | Where-Object { $_ -notin $preservedUserNotes })
+if ($unexpectedStatus.Count -gt 0) { throw 'Public QA publishing requires clean tracked source and no unapproved untracked files.' }
 $sourceCommit = (git rev-parse HEAD).Trim()
 $originCommit = (git rev-parse origin/main).Trim()
 if ($LASTEXITCODE -ne 0 -or $sourceCommit -ne $originCommit) { throw 'Public QA publishing requires HEAD to equal origin/main.' }

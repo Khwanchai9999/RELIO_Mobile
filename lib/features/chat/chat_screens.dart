@@ -135,20 +135,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (text.isEmpty) return;
     final dependencies = RelioDependencyScope.of(context);
     try {
+      final deviceId = await dependencies.identity.getDeviceId();
       final message = await dependencies.repositories.messages
           .createOutgoingText(
             conversationId: widget.chatId,
-            senderId: 'minnie',
-            senderDeviceId: await dependencies.identity.getDeviceId(),
+            senderId: dependencies.authService.identity?.userId ?? deviceId,
+            senderDeviceId: deviceId,
             text: text,
           );
       _composer.clear();
       await dependencies.nearbyService.sendMessage(message);
-    } on Object catch (error) {
+    } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('บันทึกข้อความไม่สำเร็จ: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('บันทึกข้อความไม่สำเร็จ กรุณาลองอีกครั้ง'),
+        ),
+      );
     }
   }
 
@@ -160,6 +163,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         : await picker.pickVideo(source: source ?? ImageSource.gallery);
     if (picked == null) return;
     try {
+      final deviceId = await dependencies.identity.getDeviceId();
       final validation = await dependencies.mediaStorageService.validateFile(
         picked.path,
       );
@@ -184,8 +188,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final message = await dependencies.repositories.messages
           .createOutgoingMedia(
             conversationId: widget.chatId,
-            senderId: 'minnie',
-            senderDeviceId: await dependencies.identity.getDeviceId(),
+            senderId: dependencies.authService.identity?.userId ?? deviceId,
+            senderDeviceId: deviceId,
             type: type,
             fileName: picked.name,
             localPath: localPath,
@@ -198,11 +202,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (attachment != null) {
         await dependencies.nearbyService.sendMediaMessage(message, attachment);
       }
-    } on Object catch (error) {
+    } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('ส่งสื่อไม่สำเร็จ: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ส่งสื่อไม่สำเร็จ กรุณาลองอีกครั้ง')),
+      );
     }
   }
 
@@ -217,19 +221,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       return;
     }
     try {
+      final deviceId = await dependencies.identity.getDeviceId();
       final message = await dependencies.repositories.messages
           .createOutgoingLocation(
             conversationId: widget.chatId,
-            senderId: 'minnie',
-            senderDeviceId: await dependencies.identity.getDeviceId(),
+            senderId: dependencies.authService.identity?.userId ?? deviceId,
+            senderDeviceId: deviceId,
             location: result.location!,
           );
       await dependencies.nearbyService.sendLocationMessage(message);
-    } on Object catch (error) {
+    } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('ส่งตำแหน่งไม่สำเร็จ: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ส่งตำแหน่งไม่สำเร็จ กรุณาลองอีกครั้ง')),
+      );
     }
   }
 
@@ -278,10 +283,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  void _prototypeAction(String label) => ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text('$label เป็น prototype ใน v0.1')));
-
   @override
   Widget build(BuildContext context) {
     final nearby = RelioDependencyScope.of(context).nearbyService;
@@ -305,16 +306,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: Chip(label: Text(isDemo ? 'DEMO' : 'REAL')),
-                ),
-                IconButton(
-                  onPressed: () => _prototypeAction('โทร'),
-                  tooltip: 'โทร',
-                  icon: const Icon(Icons.phone_outlined),
-                ),
-                IconButton(
-                  onPressed: () => _prototypeAction('เมนู'),
-                  tooltip: 'เมนู',
-                  icon: const Icon(Icons.more_vert_rounded),
                 ),
               ],
             );

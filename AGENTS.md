@@ -3,7 +3,7 @@
 ## Purpose
 
 This directory is the Android-first Flutter implementation of RELIO Mobile
-v0.8.6. It is a separate project from the sibling React/Vite
+v0.9.0. It is a separate project from the sibling React/Vite
 `RELIO_SOS` prototype. Do not rewrite the React project or move Flutter files
 into it.
 
@@ -99,6 +99,8 @@ into it.
 - Keep DEV, TEST, and PROD packaging separate. Production ID/signing must not
   be reused casually for TEST builds. Firebase App Distribution is only a test
   delivery channel; Supabase remains the RELIO backend.
+- The visible Android launcher/app label is `RELIO` for every flavor. Flavor
+  identity remains internal in package IDs and build configuration.
 - USB smoke testing may occur before distribution. Do not implement a custom,
   silent, or insecure APK self-updater.
 - Public Android QA updates use Firebase Hosting metadata and an immutable
@@ -142,10 +144,9 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Nearby compatibility hardening is Build 21
-(0.8.6+21); the release brief explicitly authorizes publishing this build
-after all requested tests, signing checks, and OTA validation pass. Do not
-install it on phones during this software release workflow.
+`scripts/public-qa-config.ps1`. The current candidate is 0.9.0+22; do not
+install it on phones during the software release workflow. Public QA release
+requires all automated, signing, and OTA verification gates to pass.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -165,7 +166,7 @@ hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.
 
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
-and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.8. Keep
+and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.9. Keep
 them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
 without performing them. Unit tests, emulator checks, and successful signed
 builds do not prove physical Nearby compatibility across OEMs. Build 21's
@@ -175,7 +176,7 @@ compatibility milestone physically verified.
 ## Change boundaries
 
 - Do not add a background worker, cloud-first UI, live credentials, or live
-  Supabase uploads in v0.8.6. The foreground/lifecycle SyncEngine is optional
+  Supabase uploads in v0.9.0. The foreground/lifecycle SyncEngine is optional
   and ownership-gated. Public QA update behavior and the full Firebase App
   Distribution SDK must never ship inside the PROD Google Play build.
 - Local-first writes remain mandatory: UI → repository → SQLite → Nearby and

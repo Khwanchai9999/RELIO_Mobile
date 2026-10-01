@@ -1,4 +1,4 @@
-# RELIO v0.8.6 Public Android QA Update Channel
+# RELIO v0.9.0 Public Android QA Update Channel
 
 ## Purpose
 
@@ -10,7 +10,7 @@ public `RELIO-Android-Updates` GitHub repository:
 ```text
 https://relio-17dc0.web.app/qa/
 https://relio-17dc0.web.app/qa/latest.json
-https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b13/relio-test-0.8.6+13.apk
+https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.9.0-b22/relio-test-0.9.0+22.apk
 ```
 
 Ordinary testers do not need Firebase App Distribution enrollment, a Firebase
@@ -45,9 +45,9 @@ the APK is not downloaded automatically.
   "schemaVersion": 1,
   "channel": "qa-public",
   "packageName": "com.relio.relio_mobile.test",
-  "versionName": "0.8.6",
-  "versionCode": 13,
-  "apkUrl": "https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.8.6-b13/relio-test-0.8.6+13.apk",
+  "versionName": "0.9.0",
+  "versionCode": 22,
+  "apkUrl": "https://github.com/<OWNER>/RELIO-Android-Updates/releases/download/qa-v0.9.0-b22/relio-test-0.9.0+22.apk",
   "sha256": "64 lowercase hexadecimal characters",
   "sizeBytes": 123,
   "signingCertSha256": "64 hexadecimal characters",
@@ -110,14 +110,15 @@ to Flutter. The Dart compile-time guard rejects QA builds that omit or change a
 required value before producing an APK. DEV and PROD do not require these
 QA-only values.
 
-From `D:\RELIO_Mobile`, use:
+From the active project root (`D:\RELIO_Mobile`), use:
 
 ```powershell
 .\scripts\release-public-qa.ps1 -NoDeploy
 .\scripts\release-public-qa.ps1
 ```
 
-The script derives its root from `$PSScriptRoot`, requires `0.8.6+13`, verifies
+The script derives its root from `$PSScriptRoot`, requires the currently
+maintained version baseline (currently `0.9.0+22`), verifies
 Firebase and GitHub CLI identity, runs format/analyze/tests, checks QA/PROD
 isolation, builds the signed QA APK, verifies package/version/signing, creates
 or reuses the immutable GitHub release asset, and generates

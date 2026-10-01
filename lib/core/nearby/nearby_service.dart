@@ -36,6 +36,7 @@ class NearbyService extends ChangeNotifier {
     required this.conversations,
     required this.identity,
     required this.nearbyDevices,
+    this.currentUserIdProvider,
     this.sos,
     this.settings,
     this.attachments,
@@ -49,6 +50,7 @@ class NearbyService extends ChangeNotifier {
   final ConversationRepository conversations;
   final RelioDeviceIdentityRepository identity;
   final NearbyDeviceRepository nearbyDevices;
+  final String? Function()? currentUserIdProvider;
   final SOSRepository? sos;
   final RelioSettingsRepository? settings;
   final AttachmentRepository? attachments;
@@ -321,7 +323,7 @@ class NearbyService extends ChangeNotifier {
   Future<void> sendHello({String? peerId}) async {
     final packet = RelioPacket.hello(
       senderDeviceId: await identity.getDeviceId(),
-      senderUserId: 'minnie',
+      senderUserId: await _senderUserId(),
       displayName: await identity.getDisplayName(),
       status: await currentStatus(),
     );
@@ -334,7 +336,7 @@ class NearbyService extends ChangeNotifier {
     await _sendPacket(
       RelioPacket.deviceStatus(
         senderDeviceId: deviceId,
-        senderUserId: 'minnie',
+        senderUserId: await _senderUserId(),
         displayName: await identity.getDisplayName(),
         status: status,
       ),
@@ -345,10 +347,13 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> sendSos(RelioSosEvent event, {String? peerId}) async {
+    final deviceId = await identity.getDeviceId();
     await _sendPacket(
       RelioPacket.sos(
-        senderDeviceId: await identity.getDeviceId(),
-        senderUserId: event.ownerUserId,
+        senderDeviceId: deviceId,
+        senderUserId: event.ownerUserId.isNotEmpty
+            ? event.ownerUserId
+            : deviceId,
         displayName: await identity.getDisplayName(),
         sosId: event.id,
         message: event.message,
@@ -368,7 +373,7 @@ class NearbyService extends ChangeNotifier {
     await _sendPacket(
       RelioPacket.textMessage(
         senderDeviceId: await identity.getDeviceId(),
-        senderUserId: 'minnie',
+        senderUserId: await _senderUserId(),
         messageId: const Uuid().v4(),
         conversationId: 'diagnostics',
         text: 'Hello RELIO',
@@ -383,7 +388,7 @@ class NearbyService extends ChangeNotifier {
     await _sendPacket(
       RelioPacket.sos(
         senderDeviceId: await identity.getDeviceId(),
-        senderUserId: 'minnie',
+        senderUserId: await _senderUserId(),
         displayName: await identity.getDisplayName(),
         sosId: const Uuid().v4(),
         message: 'TEST SOS จาก diagnostics',
@@ -401,7 +406,7 @@ class NearbyService extends ChangeNotifier {
     await _sendPacket(
       RelioPacket.deviceStatus(
         senderDeviceId: await identity.getDeviceId(),
-        senderUserId: 'minnie',
+        senderUserId: await _senderUserId(),
         displayName: await identity.getDisplayName(),
         status: DeviceStatus.rescue,
       ),
@@ -413,7 +418,7 @@ class NearbyService extends ChangeNotifier {
   Future<void> sendMessage(RelioMessage message) async {
     final packet = RelioPacket.textMessage(
       senderDeviceId: await identity.getDeviceId(),
-      senderUserId: message.senderId ?? 'minnie',
+      senderUserId: message.senderId ?? await _senderUserId(),
       messageId: message.id,
       conversationId: message.conversationId ?? 'somchai',
       text: message.text,
@@ -466,7 +471,7 @@ class NearbyService extends ChangeNotifier {
     if (peerId == null && transport is! MockNearbyTransport) return;
     final packet = RelioPacket.locationMessage(
       senderDeviceId: await identity.getDeviceId(),
-      senderUserId: message.senderId ?? 'minnie',
+      senderUserId: message.senderId ?? await _senderUserId(),
       messageId: message.id,
       conversationId: message.conversationId ?? 'unknown',
       latitude: message.latitude!,
@@ -518,7 +523,7 @@ class NearbyService extends ChangeNotifier {
       _payloadTransferIds[payloadId] = attachment.transferId;
       final packet = RelioPacket.mediaMetadata(
         senderDeviceId: await identity.getDeviceId(),
-        senderUserId: message.senderId ?? 'minnie',
+        senderUserId: message.senderId ?? await _senderUserId(),
         messageId: message.id,
         attachmentId: attachment.id,
         transferId: attachment.transferId,
@@ -947,7 +952,7 @@ class NearbyService extends ChangeNotifier {
     final payload = source.payload;
     final ack = RelioPacket.mediaAck(
       senderDeviceId: await identity.getDeviceId(),
-      senderUserId: 'minnie',
+      senderUserId: await _senderUserId(),
       messageId: payload['messageId']! as String,
       attachmentId: payload['attachmentId']! as String,
       transferId: payload['transferId']! as String,
@@ -1135,7 +1140,7 @@ class NearbyService extends ChangeNotifier {
   Future<void> _sendAck(String endpointId, RelioPacket packet) async {
     final ack = RelioPacket.ack(
       senderDeviceId: await identity.getDeviceId(),
-      senderUserId: 'minnie',
+      senderUserId: await _senderUserId(),
       acknowledgedPacketId: packet.packetId,
       messageId: packet.payload['messageId'] as String?,
     );
@@ -1158,6 +1163,12 @@ class NearbyService extends ChangeNotifier {
   String _peerName(String endpointId, String fallback) {
     final matches = discoveredPeers.where((peer) => peer.id == endpointId);
     return matches.isEmpty ? fallback : matches.first.name;
+  }
+
+  Future<String> _senderUserId() async {
+    final userId = currentUserIdProvider?.call();
+    if (userId != null && userId.isNotEmpty) return userId;
+    return identity.getDeviceId();
   }
 
   void _updatePeerIdentity(

@@ -38,13 +38,25 @@ class _HomeScreenState extends State<HomeScreen> {
         titleSpacing: 20,
         title: Row(
           children: [
-            const RelioUserAvatar(name: 'มินนี่', size: 42),
+            FutureBuilder<String>(
+              future: _dependencies.identity.getDisplayName(),
+              builder: (context, snapshot) => RelioUserAvatar(
+                name: snapshot.data ?? 'ผู้ใช้ RELIO',
+                size: 42,
+              ),
+            ),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('สวัสดี 👋', style: Theme.of(context).textTheme.bodySmall),
-                Text('มินนี่', style: Theme.of(context).textTheme.titleLarge),
+                FutureBuilder<String>(
+                  future: _dependencies.identity.getDisplayName(),
+                  builder: (context, snapshot) => Text(
+                    snapshot.data ?? 'ผู้ใช้ RELIO',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
               ],
             ),
           ],
@@ -54,11 +66,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () => _dependencies.connectivityStatus.refresh(),
             tooltip: 'ตรวจสอบสถานะเครือข่ายจริง',
             icon: const Icon(Icons.refresh_rounded),
-          ),
-          IconButton(
-            onPressed: () {},
-            tooltip: 'การแจ้งเตือน',
-            icon: const Icon(Icons.notifications_none_rounded),
           ),
           const SizedBox(width: 8),
         ],

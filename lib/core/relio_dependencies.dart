@@ -83,6 +83,7 @@ class RelioDependencies {
       conversations: repositories.conversations,
       identity: identity,
       nearbyDevices: repositories.nearbyDevices,
+      currentUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
       sos: repositories.sos,
       settings: repositories.settings,
       attachments: repositories.attachments,

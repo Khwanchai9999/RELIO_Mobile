@@ -76,8 +76,9 @@ $defines = @(
 
 if (($versionName -eq '0.8.5' -and [int]$buildNumber -lt 11) -or
     ($versionName -eq '0.8.6' -and [int]$buildNumber -lt 13) -or
-    $versionName -notin @('0.8.5', '0.8.6')) {
-    throw "TEST deployment requires the maintained 0.8.5+11 or 0.8.6+13-or-newer baseline; found $version."
+    ($versionName -eq '0.9.0' -and [int]$buildNumber -lt 22) -or
+    $versionName -notin @('0.8.5', '0.8.6', '0.9.0')) {
+    throw "TEST deployment requires 0.8.5+11, 0.8.6+13-or-newer, or 0.9.0+22-or-newer; found $version."
 }
 
 # ขั้นนี้ตั้งใจรัน quality gate ก่อน build และ upload
@@ -192,7 +193,10 @@ Copy-Item -LiteralPath $builtApk -Destination $artifactPath -Force
 $notesSource = if ($ReleaseNotesPath) {
     [IO.Path]::GetFullPath($ReleaseNotesPath)
 } else {
-    Join-Path $projectRoot "release_notes\$versionName.md"
+    Join-Path $projectRoot "release_notes\$versionName-build-$buildNumber.md"
+}
+if (-not (Test-Path -LiteralPath $notesSource) -and -not $ReleaseNotesPath) {
+    $notesSource = Join-Path $projectRoot "release_notes\$versionName.md"
 }
 $notesPath = Join-Path $distRoot "relio-test-$version-release-notes.txt"
 if (Test-Path -LiteralPath $notesSource) {

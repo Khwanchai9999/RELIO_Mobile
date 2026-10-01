@@ -113,3 +113,19 @@ not evidence of Build 21 installation. No phone was modified during Build 21
 preparation. Physical acceptance for Build 21—including API-level permission
 prompts, OEM radios, discovery/reconnect, and cross-version transfer—remains
 **PENDING PHYSICAL TEST**.
+
+## Build 22 — final development candidate
+
+- Candidate: `0.9.0+22`, QA package `com.relio.relio_mobile.test`.
+- Applied the supplied master logo to Flutter onboarding/About and generated
+  Android legacy/adaptive launcher assets and splash resources from that same
+  source. All flavors use the visible label `RELIO`.
+- Guest-created SOS is stored locally and no longer enters the Cloud queue or
+  inherits a later signed-in identity. Authenticated SOS queue rows are
+  explicitly bound to the matching current user.
+- Outgoing chat identity uses the current Cloud account when signed in and the
+  stable device ID for guest/offline use; user-facing chat failures no longer
+  expose raw exception strings. Unsupported call/menu actions were removed.
+- Build 22 remains unpublished until the current candidate passes all
+  automated, signed-build, isolation, and remote release gates. No physical
+  device has been modified; Nearby radio/OEM behavior remains deferred.

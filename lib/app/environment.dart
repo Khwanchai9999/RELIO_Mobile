@@ -6,11 +6,11 @@ enum RelioEnvironment { development, test, production }
 abstract final class RelioBuildInfo {
   static const versionName = String.fromEnvironment(
     'RELIO_VERSION',
-    defaultValue: '0.8.5',
+    defaultValue: '0.9.0',
   );
   static const buildNumber = String.fromEnvironment(
     'RELIO_BUILD',
-    defaultValue: '11',
+    defaultValue: '22',
   );
   static const publicUpdateManifestUrl = String.fromEnvironment(
     'RELIO_PUBLIC_UPDATE_MANIFEST_URL',
@@ -52,7 +52,7 @@ abstract final class RelioBuildInfo {
   static bool get developerDiagnosticsEnabled =>
       environment != RelioEnvironment.production;
 
-  static String get appName => isTest ? 'RELIO Test' : 'RELIO';
+  static const String appName = 'RELIO';
 
   static String get environmentLabel => switch (environment) {
     RelioEnvironment.development => 'Development',

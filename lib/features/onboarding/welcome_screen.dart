@@ -19,55 +19,19 @@ class WelcomeScreen extends StatelessWidget {
               child: Column(
                 children: [
                   const SizedBox(height: 16),
-                  Container(
+                  Image.asset(
+                    'assets/branding/relio-logo-master.png',
                     width: 210,
                     height: 210,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        colors: [Color(0x2214B8A6), Color(0x113B82F6)],
-                      ),
-                    ),
-                    child: const Center(
-                      child: Icon(
-                        Icons.groups_2_rounded,
-                        size: 100,
-                        color: RelioColors.primary,
-                      ),
-                    ),
+                    semanticLabel: 'โลโก้ RELIO',
                   ),
                   const SizedBox(height: 18),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: RelioColors.primary,
-                          borderRadius: BorderRadius.circular(11),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'R',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 21,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 9),
-                      Text(
-                        'RELIO',
-                        style: Theme.of(context).textTheme.displaySmall
-                            ?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1,
-                            ),
-                      ),
-                    ],
+                  Text(
+                    'RELIO',
+                    style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
+                    ),
                   ),
                   const SizedBox(height: 9),
                   Text(

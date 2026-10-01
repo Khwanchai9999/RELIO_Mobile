@@ -54,7 +54,7 @@ void main() {
     await pumpApp(tester);
 
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
-    expect(find.text('มินนี่'), findsOneWidget);
+    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
 
     await tester.tap(find.text('ใกล้เคียง'));
     await tester.pumpAndSettle();

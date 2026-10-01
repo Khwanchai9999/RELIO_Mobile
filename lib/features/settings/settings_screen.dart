@@ -80,7 +80,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final shouldDownload = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('พบอัปเดต RELIO Test'),
+        title: const Text('พบอัปเดต RELIO'),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -132,10 +132,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       AppUpdateStatus.checked => 'ยังไม่มีอัปเดตใหม่',
       AppUpdateStatus.installing => 'เปิด Android Package Installer แล้ว',
       AppUpdateStatus.installPermissionRequired =>
-        'โปรดอนุญาตให้ RELIO Test ติดตั้ง APK จากภายนอก แล้วกดยืนยันอีกครั้ง',
+        'โปรดอนุญาตให้ RELIO ติดตั้ง APK จากภายนอก แล้วกดยืนยันอีกครั้ง',
       AppUpdateStatus.error => _friendlyUpdateError(snapshot.code),
       AppUpdateStatus.unavailable => 'ยังไม่พร้อมใช้งาน โปรดลองภายหลัง',
-      _ => 'ฟีเจอร์นี้ใช้เฉพาะ RELIO Test',
+      _ => 'ฟีเจอร์นี้ใช้ได้เฉพาะแอป QA',
     };
     ScaffoldMessenger.of(
       context,

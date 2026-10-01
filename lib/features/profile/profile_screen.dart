@@ -11,7 +11,8 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final identity = RelioDependencyScope.of(context).authService.identity;
+    final dependencies = RelioDependencyScope.of(context);
+    final identity = dependencies.authService.identity;
     return Scaffold(
       appBar: RelioAppBar(
         title: 'โปรไฟล์',
@@ -37,15 +38,29 @@ class ProfileScreen extends StatelessWidget {
               padding: const EdgeInsets.all(18),
               child: Row(
                 children: [
-                  const RelioUserAvatar(name: 'มินนี่', size: 72),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.asset(
+                      'assets/branding/relio-logo-master.png',
+                      width: 72,
+                      height: 72,
+                      fit: BoxFit.cover,
+                      semanticLabel: 'โลโก้ RELIO',
+                    ),
+                  ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          identity?.displayName ?? 'มินนี่',
-                          style: Theme.of(context).textTheme.headlineSmall,
+                        FutureBuilder<String>(
+                          future: dependencies.identity.getDisplayName(),
+                          builder: (context, snapshot) => Text(
+                            snapshot.data ??
+                                identity?.displayName ??
+                                'ผู้ใช้ RELIO',
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -56,11 +71,7 @@ class ProfileScreen extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('แก้ไขโปรไฟล์เป็น prototype ใน v0.1'),
-                      ),
-                    ),
+                    onPressed: () => _editDisplayName(context),
                     tooltip: 'แก้ไขโปรไฟล์',
                     icon: const Icon(Icons.edit_outlined),
                   ),
@@ -94,20 +105,19 @@ class ProfileScreen extends StatelessWidget {
           RelioSettingTile(
             icon: Icons.person_outline,
             title: 'ข้อมูลส่วนตัว',
-            onTap: () => _prototype(context, 'ข้อมูลส่วนตัว'),
+            onTap: () => _editDisplayName(context),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.medical_information_outlined,
             title: 'ข้อมูลฉุกเฉิน',
-            onTap: () => _prototype(context, 'ข้อมูลฉุกเฉิน'),
+            subtitle: 'ยังไม่มีข้อมูลที่บันทึกไว้',
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.notifications_none_rounded,
             title: 'การแจ้งเตือน',
-            subtitle: 'ตัวอย่างการตั้งค่า • ยังไม่ผูกการแจ้งเตือนระบบ',
-            onTap: () => _prototype(context, 'การแจ้งเตือน'),
+            subtitle: 'ยังไม่รองรับการแจ้งเตือนจากระบบ',
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
@@ -115,13 +125,6 @@ class ProfileScreen extends StatelessWidget {
             title: 'การเชื่อมต่อ',
             subtitle: 'ตรวจดูสถานะ Internet, Bluetooth และ Nearby จริง',
             onTap: () => context.push('/settings'),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.storage_outlined,
-            title: 'พื้นที่จัดเก็บ',
-            subtitle: 'ตัวอย่างข้อมูลพื้นที่ • ไม่ใช่ค่าจากระบบ',
-            onTap: () => context.push('/sync'),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
@@ -134,7 +137,7 @@ class ProfileScreen extends StatelessWidget {
           RelioSettingTile(
             icon: Icons.lock_outline,
             title: 'ความเป็นส่วนตัว',
-            onTap: () => _prototype(context, 'ความเป็นส่วนตัว'),
+            onTap: () => _showPrivacy(context),
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
@@ -142,23 +145,98 @@ class ProfileScreen extends StatelessWidget {
             title: 'เกี่ยวกับ RELIO',
             subtitle:
                 'เวอร์ชัน ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
-            onTap: () => _prototype(context, 'เกี่ยวกับ RELIO'),
+            onTap: () => _showAbout(context),
           ),
           const SizedBox(height: 14),
-          OutlinedButton.icon(
-            onPressed: () async {
-              await RelioDependencyScope.of(context).authService.signOut();
-              if (context.mounted) context.go('/welcome');
-            },
-            icon: const Icon(Icons.logout_rounded),
-            label: const Text('ออกจากระบบ'),
-          ),
+          if (identity != null)
+            OutlinedButton.icon(
+              onPressed: () async {
+                await dependencies.authService.signOut();
+                if (context.mounted) context.go('/welcome');
+              },
+              icon: const Icon(Icons.logout_rounded),
+              label: const Text('ออกจากระบบ'),
+            ),
         ],
       ),
     );
   }
 
-  void _prototype(BuildContext context, String label) => ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text('$label เป็น prototype ใน v0.1')));
+  Future<void> _editDisplayName(BuildContext context) async {
+    final dependencies = RelioDependencyScope.of(context);
+    final controller = TextEditingController(
+      text: await dependencies.identity.getDisplayName(),
+    );
+    if (!context.mounted) {
+      controller.dispose();
+      return;
+    }
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('ชื่อที่แสดง'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 60,
+          decoration: const InputDecoration(labelText: 'ชื่อของคุณ'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('บันทึก'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true && context.mounted) {
+      final value = controller.text.trim();
+      if (value.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('กรุณาระบุชื่อที่แสดง')));
+      } else {
+        await dependencies.identity.setDisplayName(value);
+        (context as Element).markNeedsBuild();
+      }
+    }
+    controller.dispose();
+  }
+
+  void _showAbout(BuildContext context) => showAboutDialog(
+    context: context,
+    applicationName: RelioBuildInfo.appName,
+    applicationVersion:
+        '${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
+    applicationIcon: Image.asset(
+      'assets/branding/relio-logo-master.png',
+      width: 52,
+      height: 52,
+    ),
+    children: const [
+      Text('สื่อสารและขอความช่วยเหลือผ่านอุปกรณ์ใกล้เคียง แม้ออฟไลน์'),
+      SizedBox(height: 8),
+      Text('ข้อมูลหลักจัดเก็บในเครื่อง; Cloud เป็นทางเลือก'),
+    ],
+  );
+
+  void _showPrivacy(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('ความเป็นส่วนตัว'),
+      content: const Text(
+        'RELIO เก็บข้อมูลการสื่อสารไว้ในเครื่องก่อนเสมอ และใช้ Cloud เฉพาะเมื่อกำหนดค่าบัญชีไว้ ข้อมูลตำแหน่งจะขอเมื่อคุณสั่งแชร์ตำแหน่งหรือเปิด SOS เท่านั้น',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('ปิด'),
+        ),
+      ],
+    ),
+  );
 }

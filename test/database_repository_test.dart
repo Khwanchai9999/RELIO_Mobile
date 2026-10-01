@@ -112,24 +112,51 @@ void main() {
   });
 
   test('SOS active state and sync queue transitions are local', () async {
-    final sos = await repositories.sos.createAndActivate(
+    final signedInRepositories = RelioRepositories(
+      database,
+      ownerUserIdProvider: () => 'user-1',
+    );
+    final sos = await signedInRepositories.sos.createAndActivate(
       ownerDeviceId: 'device-1',
-      ownerUserId: 'minnie',
+      ownerUserId: 'user-1',
       message: 'need help',
       latitude: 13.7,
       longitude: 100.5,
     );
 
-    expect((await repositories.sos.readActive())?.id, sos.id);
-    expect(await repositories.syncQueue.pendingCount(), 1);
-    final queueItem = (await repositories.syncQueue.listPending()).single;
-    await repositories.syncQueue.markProcessing(queueItem.id);
-    await repositories.syncQueue.markCompleted(queueItem.id);
-    expect(await repositories.syncQueue.pendingCount(), 0);
+    expect((await signedInRepositories.sos.readActive())?.id, sos.id);
+    expect(await signedInRepositories.syncQueue.pendingCount(), 1);
+    final queueItem =
+        (await signedInRepositories.syncQueue.listPending()).single;
+    expect(queueItem.ownerUserId, 'user-1');
+    await signedInRepositories.syncQueue.markProcessing(queueItem.id);
+    await signedInRepositories.syncQueue.markCompleted(queueItem.id);
+    expect(await signedInRepositories.syncQueue.pendingCount(), 0);
 
-    await repositories.sos.deactivate(sos.id);
-    expect(await repositories.sos.readActive(), isNull);
+    await signedInRepositories.sos.deactivate(sos.id);
+    expect(await signedInRepositories.sos.readActive(), isNull);
   });
+
+  test(
+    'guest SOS stays local and is never assigned to a later account',
+    () async {
+      final sos = await repositories.sos.createAndActivate(
+        ownerDeviceId: 'device-guest',
+        ownerUserId: '',
+        message: 'SOS offline',
+      );
+
+      expect((await repositories.sos.readActive())?.id, sos.id);
+      expect(await repositories.syncQueue.pendingCount(), 0);
+
+      final laterSignedInRepositories = RelioRepositories(
+        database,
+        ownerUserIdProvider: () => 'user-later',
+      );
+      await laterSignedInRepositories.sos.deactivate(sos.id);
+      expect(await laterSignedInRepositories.syncQueue.pendingCount(), 0);
+    },
+  );
 
   test('prototype seed data is written once and remains queryable', () async {
     await repositories.seedPrototypeData();
@@ -151,6 +178,16 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'local device name can be changed and survives repository reads',
+    () async {
+      final identity = RelioDeviceIdentityRepository(database);
+      await identity.setDisplayName('Rescue Team');
+
+      expect(await identity.getDisplayName(), 'Rescue Team');
+    },
+  );
 
   test('dependency bootstrap completes in the Flutter test runtime', () async {
     final dependencies = RelioDependencies(database: createTestDatabase());

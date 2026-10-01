@@ -21,7 +21,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.relio.relio_mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -52,14 +51,14 @@ android {
         create("dev") {
             dimension = "environment"
             applicationIdSuffix = ".dev"
-            manifestPlaceholders["appLabel"] = "RELIO Dev"
+            manifestPlaceholders["appLabel"] = "RELIO"
         }
         // AGP 9 reserves flavor names that start with "test"; qa is the
         // internal Android variant name for the RELIO TEST environment.
         create("qa") {
             dimension = "environment"
             applicationIdSuffix = ".test"
-            manifestPlaceholders["appLabel"] = "RELIO Test"
+            manifestPlaceholders["appLabel"] = "RELIO"
             val testSigningConfig = signingConfigs.findByName("test")
             if (testSigningConfig != null) signingConfig = testSigningConfig
         }

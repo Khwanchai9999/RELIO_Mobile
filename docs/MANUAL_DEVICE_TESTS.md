@@ -222,8 +222,8 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 21 (`0.8.6+21`) is the current compatibility
-candidate; its local automated/build checks passed, but no physical-device
+current install recipe. Build 22 (`0.9.0+22`) is the current QA candidate; its
+software validation is covered in the status report, but no physical-device
 Nearby test has been performed for it. Do not install or update a phone unless
 the user explicitly authorizes the physical test and the exact release
 artifact, device serial, package, version, and signing identity are verified.
@@ -255,11 +255,11 @@ The acceptance steps below remain applicable only after that authorization.
    Enable Rescue and verify Rescue propagates to Normal when disabled, while
    SOS remains higher priority than Rescue.
 
-## N. Build 21 Android Nearby compatibility matrix — DEFERRED
+## N. Android Nearby compatibility matrix — DEFERRED
 
-Build 21 (`0.8.6+21`) adds SDK-driven permission selection and runtime
-readiness. Test real phones before describing OEM compatibility as physically
-verified. Do not clear app data or uninstall during OTA tests.
+Build 21 introduced SDK-driven permission selection and runtime readiness;
+Build 22 retains it. Test real phones before describing OEM compatibility as
+physically verified. Do not clear app data or uninstall during OTA tests.
 
 | Android API | Expected Nearby permissions | Location toggle | Result to verify |
 | --- | --- | --- | --- |

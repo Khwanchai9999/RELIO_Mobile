@@ -16,9 +16,7 @@ class SOSScreen extends StatefulWidget {
 }
 
 class _SOSScreenState extends State<SOSScreen> {
-  final _message = TextEditingController(
-    text: 'ต้องการความช่วยเหลือ บาดเจ็บที่ขา',
-  );
+  final _message = TextEditingController();
 
   @override
   void dispose() {
@@ -54,7 +52,7 @@ class _SOSScreenState extends State<SOSScreen> {
       );
       await dependencies.repositories.sos.createAndActivate(
         ownerDeviceId: await dependencies.identity.getDeviceId(),
-        ownerUserId: 'minnie',
+        ownerUserId: dependencies.authService.identity?.userId ?? '',
         message: _message.text.trim(),
         latitude: location.location?.latitude,
         longitude: location.location?.longitude,
@@ -368,7 +366,19 @@ class _SOSActiveScreenState extends State<SOSActiveScreen>
                       color: RelioColors.sos,
                     ),
                     title: const Text('ข้อความฉุกเฉิน'),
-                    subtitle: const Text('ต้องการความช่วยเหลือ บาดเจ็บที่ขา'),
+                    subtitle: FutureBuilder<RelioSosEvent?>(
+                      future: RelioDependencyScope.of(
+                        context,
+                      ).repositories.sos.readActive(),
+                      builder: (context, snapshot) {
+                        final message = snapshot.data?.message?.trim();
+                        return Text(
+                          message?.isNotEmpty == true
+                              ? message!
+                              : 'ไม่ได้ระบุข้อความ',
+                        );
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(height: 18),

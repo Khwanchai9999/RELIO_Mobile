@@ -1,7 +1,7 @@
-# RELIO Mobile — v0.8.6
+# RELIO Mobile — v0.9.0
 
 RELIO Mobile Foundation is the Android-first Flutter companion to the existing
-`RELIO_SOS` React/Vite prototype. v0.8.6 keeps the offline-first local core,
+`RELIO_SOS` React/Vite prototype. v0.9.0 keeps the offline-first local core,
 ownership-gated cloud boundary, bounded Nearby relay foundation, and adds a
 hybrid public Android QA update channel: Firebase Hosting serves metadata and
 GitHub Releases serves the signed APK.
@@ -9,7 +9,7 @@ GitHub Releases serves the signed APK.
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
-## Current scope (v0.8.6)
+## Current scope (v0.9.0 development / Android QA)
 
 - Optional Supabase email/password authentication with guest/offline entry
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
@@ -149,21 +149,18 @@ For a release build, configure signing and run:
 flutter build apk --release
 ```
 
-The default Android application id is `com.relio.relio_mobile`. It is a safe
-temporary identifier for this foundation and can be replaced when the product
-package identity is finalized.
+The PROD Android application ID is `com.relio.relio_mobile`; DEV and QA have
+separate flavor IDs. These IDs and the QA signing identity are preserved.
 
-The current source version is `0.8.6+21`. Build 21 hardens Android Nearby
-permission, radio-readiness, and lifecycle handling for API 24+. Format,
-analysis, all 123 automated tests, DEV/QA/PROD verification builds, QA
-signing, and QA/PROD Firebase SDK isolation have passed. Build 21 is publicly
-available through the verified [QA download page](https://relio-17dc0.web.app/qa/)
-and [GitHub release](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.8.6-b21).
-Physical cross-version/OEM Nearby verification remains deferred; release
-publication does not establish device interoperability. PROD remains
-`com.relio.relio_mobile`.
+The current source version is `0.9.0+22` (QA versionCode 22). This candidate
+applies the supplied RELIO artwork to Android branding, standardizes the
+launcher label, and keeps guest SOS records local instead of assigning them
+to a Cloud account. Build 21 remains the latest published QA release until
+the Build 22 validation and publication gates complete. Physical cross-version
+and OEM Nearby verification remains deferred; release publication alone does
+not establish device interoperability. PROD remains `com.relio.relio_mobile`.
 
-## Public QA distribution and wireless updates (v0.8.6)
+## Public QA distribution and wireless updates (v0.9.0)
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
 `com.relio.relio_mobile.test`, and a dedicated local signing key. Prepare the
@@ -204,8 +201,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13 and Build 16 are immutable historical releases.
-Build 21 is the current verified public QA release; physical-device acceptance
-remains pending.
+Build 21 is the current verified public QA release until Build 22 completes
+the release gates; physical-device acceptance remains pending.
 
 ## Architecture
 
@@ -263,7 +260,9 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 - **v0.5:** Supabase Auth + Cloud Data + Storage Foundation
 - **v0.6:** ownership-gated queue-driven cloud synchronization
 - **v0.7:** live Supabase integration preparation and Cloud hardening
-- **v0.8:** bounded Nearby relay/store-and-forward foundation (current)
+- **v0.8:** bounded Nearby relay/store-and-forward foundation
+- **v0.9.0+22:** Android branding and guest SOS account-isolation candidate;
+  QA release remains gated on automated and remote verification.
 - **v0.9:** routing/receipt and ecosystem evaluation (not implemented)
 - **v1.0:** production security review, observability, accessibility audit,
   signed Android release, and end-to-end field testing
