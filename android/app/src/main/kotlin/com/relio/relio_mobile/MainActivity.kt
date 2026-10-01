@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.util.Base64
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -21,10 +22,14 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     private val updateChannel = "relio/app_update"
     private val notificationChannel = "relio/notifications"
+    private val identityChannel = "relio/device_identity"
+    private val identityKeyStore = RelioIdentityKeyStore()
+    private val identityExecutor = Executors.newSingleThreadExecutor()
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
     private var notificationPermissionResult: MethodChannel.Result? = null
     private var notificationsMethodChannel: MethodChannel? = null
@@ -43,6 +48,8 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannel)
             .setMethodCallHandler(::handleUpdateCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, identityChannel)
+            .setMethodCallHandler(::handleIdentityCall)
         createNotificationChannels()
         notificationsMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -94,6 +101,57 @@ class MainActivity : FlutterActivity() {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             },
         )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_SYSTEM, "RELIO system", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "แจ้งเตือนสถานะ Sync และการอัปเดตที่สำคัญ"
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
+            },
+        )
+    }
+
+    private fun handleIdentityCall(call: MethodCall, result: MethodChannel.Result) {
+        identityExecutor.execute {
+            try {
+                val value = when (call.method) {
+                    "getPublicIdentity" -> identityKeyStore.getOrCreatePublicIdentity().let {
+                        mapOf("publicKey" to it.publicKey, "fingerprint" to it.fingerprint)
+                    }
+                    "fingerprint" -> identityKeyStore.fingerprint(
+                        call.argument<String>("publicKey")
+                            ?: throw IllegalArgumentException("missing public key"),
+                    )
+                    "sign" -> {
+                        val encoded = call.argument<String>("message")
+                            ?: throw IllegalArgumentException("missing message")
+                        identityKeyStore.sign(decodeIdentityBytes(encoded))
+                    }
+                    "verify" -> {
+                        val publicKey = call.argument<String>("publicKey")
+                            ?: throw IllegalArgumentException("missing public key")
+                        val message = call.argument<String>("message")
+                            ?: throw IllegalArgumentException("missing message")
+                        val signature = call.argument<String>("signature")
+                            ?: throw IllegalArgumentException("missing signature")
+                        identityKeyStore.verify(
+                            publicKey,
+                            decodeIdentityBytes(message),
+                            signature,
+                        )
+                    }
+                    else -> return@execute runOnUiThread { result.notImplemented() }
+                }
+                runOnUiThread { result.success(value) }
+            } catch (_: Throwable) {
+                runOnUiThread {
+                    result.error("identity_unavailable", "Device identity operation unavailable", null)
+                }
+            }
+        }
+    }
+
+    private fun decodeIdentityBytes(value: String): ByteArray {
+        require(value.length <= 6000)
+        return Base64.decode(value, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
     }
 
     private fun requestNotificationPermission(result: MethodChannel.Result) {
@@ -296,6 +354,7 @@ class MainActivity : FlutterActivity() {
         private const val REQUEST_NOTIFICATIONS = 9024
         private const val CHANNEL_MESSAGES = "relio_messages"
         private const val CHANNEL_SAFETY = "relio_safety"
+        private const val CHANNEL_SYSTEM = "relio_system"
         private const val EXTRA_NOTIFICATION_ROUTE = "relio_notification_route"
         private const val QA_APPLICATION_ID = "com.relio.relio_mobile.test"
     }

@@ -145,9 +145,10 @@ flutter build apk --flavor prod --debug
 
 QA debug builds must receive the approved updater dart-defines from
 `scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the latest public QA
-release. Build 24 (`0.9.0+24`) is a local software candidate only until its
-automated, signing, and OTA gates pass. Do not install it on phones or claim
-physical Nearby verification without explicit physical-test authorization.
+release. Build 24 is the local checkpoint; Build 25 (`0.9.0+25`) is the current
+unpublished candidate. Android Keystore identity is implemented, but not
+physically verified. Do not install it on phones or claim physical Nearby
+verification without explicit physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -169,10 +170,9 @@ the normal AOT build cannot write its snapshot.
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
 and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.9. Keep
 them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
-without performing them. Build 24 persists trust and requires an explicit
-connection decision, but automatic reconnect is not enabled: stable cryptographic
-peer authorization is not implemented. Unit tests, emulator checks, and signed
-builds do not prove physical Nearby compatibility across OEMs.
+without performing them. Build 25 pins cryptographic peer identity and gates
+automatic reconnect on signed challenge-response; unit tests, emulator checks,
+and signed builds do not prove physical Nearby compatibility across OEMs.
 
 ## Change boundaries
 
@@ -203,6 +203,9 @@ builds do not prove physical Nearby compatibility across OEMs.
 - Do not silently replace mock data with remote data.
 - Do not remove pending/sent/synced status visibility from message UI.
 - Do not make broad destructive changes to either project.
+- `scripts/seed-qa-users.ps1` fails closed unless distinct QA and PROD project
+  refs and QA-only credentials are supplied through process environment
+  variables. `.env.qa.local` is ignored and must never be committed.
 - Update this file and `README.md` when architecture or milestone boundaries
   materially change.
 - All maintained scripts derive the project root from `$PSScriptRoot`; no

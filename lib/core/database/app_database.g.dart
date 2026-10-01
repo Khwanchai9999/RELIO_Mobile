@@ -1717,6 +1717,29 @@ class $NearbyDevicesTable extends NearbyDevices
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _publicIdentityKeyMeta = const VerificationMeta(
+    'publicIdentityKey',
+  );
+  @override
+  late final GeneratedColumn<String> publicIdentityKey =
+      GeneratedColumn<String>(
+        'public_identity_key',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _publicIdentityFingerprintMeta =
+      const VerificationMeta('publicIdentityFingerprint');
+  @override
+  late final GeneratedColumn<String> publicIdentityFingerprint =
+      GeneratedColumn<String>(
+        'public_identity_fingerprint',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     deviceId,
@@ -1728,6 +1751,8 @@ class $NearbyDevicesTable extends NearbyDevices
     isTrusted,
     isBlocked,
     autoReconnectEnabled,
+    publicIdentityKey,
+    publicIdentityFingerprint,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1818,6 +1843,24 @@ class $NearbyDevicesTable extends NearbyDevices
         ),
       );
     }
+    if (data.containsKey('public_identity_key')) {
+      context.handle(
+        _publicIdentityKeyMeta,
+        publicIdentityKey.isAcceptableOrUnknown(
+          data['public_identity_key']!,
+          _publicIdentityKeyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('public_identity_fingerprint')) {
+      context.handle(
+        _publicIdentityFingerprintMeta,
+        publicIdentityFingerprint.isAcceptableOrUnknown(
+          data['public_identity_fingerprint']!,
+          _publicIdentityFingerprintMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -1863,6 +1906,14 @@ class $NearbyDevicesTable extends NearbyDevices
         DriftSqlType.bool,
         data['${effectivePrefix}auto_reconnect_enabled'],
       )!,
+      publicIdentityKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}public_identity_key'],
+      ),
+      publicIdentityFingerprint: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}public_identity_fingerprint'],
+      ),
     );
   }
 
@@ -1882,6 +1933,8 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
   final bool isTrusted;
   final bool isBlocked;
   final bool autoReconnectEnabled;
+  final String? publicIdentityKey;
+  final String? publicIdentityFingerprint;
   const NearbyDevice({
     required this.deviceId,
     required this.displayName,
@@ -1892,6 +1945,8 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     required this.isTrusted,
     required this.isBlocked,
     required this.autoReconnectEnabled,
+    this.publicIdentityKey,
+    this.publicIdentityFingerprint,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1909,6 +1964,14 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     map['is_trusted'] = Variable<bool>(isTrusted);
     map['is_blocked'] = Variable<bool>(isBlocked);
     map['auto_reconnect_enabled'] = Variable<bool>(autoReconnectEnabled);
+    if (!nullToAbsent || publicIdentityKey != null) {
+      map['public_identity_key'] = Variable<String>(publicIdentityKey);
+    }
+    if (!nullToAbsent || publicIdentityFingerprint != null) {
+      map['public_identity_fingerprint'] = Variable<String>(
+        publicIdentityFingerprint,
+      );
+    }
     return map;
   }
 
@@ -1927,6 +1990,13 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       isTrusted: Value(isTrusted),
       isBlocked: Value(isBlocked),
       autoReconnectEnabled: Value(autoReconnectEnabled),
+      publicIdentityKey: publicIdentityKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(publicIdentityKey),
+      publicIdentityFingerprint:
+          publicIdentityFingerprint == null && nullToAbsent
+          ? const Value.absent()
+          : Value(publicIdentityFingerprint),
     );
   }
 
@@ -1947,6 +2017,12 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       autoReconnectEnabled: serializer.fromJson<bool>(
         json['autoReconnectEnabled'],
       ),
+      publicIdentityKey: serializer.fromJson<String?>(
+        json['publicIdentityKey'],
+      ),
+      publicIdentityFingerprint: serializer.fromJson<String?>(
+        json['publicIdentityFingerprint'],
+      ),
     );
   }
   @override
@@ -1962,6 +2038,10 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       'isTrusted': serializer.toJson<bool>(isTrusted),
       'isBlocked': serializer.toJson<bool>(isBlocked),
       'autoReconnectEnabled': serializer.toJson<bool>(autoReconnectEnabled),
+      'publicIdentityKey': serializer.toJson<String?>(publicIdentityKey),
+      'publicIdentityFingerprint': serializer.toJson<String?>(
+        publicIdentityFingerprint,
+      ),
     };
   }
 
@@ -1975,6 +2055,8 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     bool? isTrusted,
     bool? isBlocked,
     bool? autoReconnectEnabled,
+    Value<String?> publicIdentityKey = const Value.absent(),
+    Value<String?> publicIdentityFingerprint = const Value.absent(),
   }) => NearbyDevice(
     deviceId: deviceId ?? this.deviceId,
     displayName: displayName ?? this.displayName,
@@ -1989,6 +2071,12 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     isTrusted: isTrusted ?? this.isTrusted,
     isBlocked: isBlocked ?? this.isBlocked,
     autoReconnectEnabled: autoReconnectEnabled ?? this.autoReconnectEnabled,
+    publicIdentityKey: publicIdentityKey.present
+        ? publicIdentityKey.value
+        : this.publicIdentityKey,
+    publicIdentityFingerprint: publicIdentityFingerprint.present
+        ? publicIdentityFingerprint.value
+        : this.publicIdentityFingerprint,
   );
   NearbyDevice copyWithCompanion(NearbyDevicesCompanion data) {
     return NearbyDevice(
@@ -2011,6 +2099,12 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       autoReconnectEnabled: data.autoReconnectEnabled.present
           ? data.autoReconnectEnabled.value
           : this.autoReconnectEnabled,
+      publicIdentityKey: data.publicIdentityKey.present
+          ? data.publicIdentityKey.value
+          : this.publicIdentityKey,
+      publicIdentityFingerprint: data.publicIdentityFingerprint.present
+          ? data.publicIdentityFingerprint.value
+          : this.publicIdentityFingerprint,
     );
   }
 
@@ -2025,7 +2119,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           ..write('approxDistance: $approxDistance, ')
           ..write('isTrusted: $isTrusted, ')
           ..write('isBlocked: $isBlocked, ')
-          ..write('autoReconnectEnabled: $autoReconnectEnabled')
+          ..write('autoReconnectEnabled: $autoReconnectEnabled, ')
+          ..write('publicIdentityKey: $publicIdentityKey, ')
+          ..write('publicIdentityFingerprint: $publicIdentityFingerprint')
           ..write(')'))
         .toString();
   }
@@ -2041,6 +2137,8 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     isTrusted,
     isBlocked,
     autoReconnectEnabled,
+    publicIdentityKey,
+    publicIdentityFingerprint,
   );
   @override
   bool operator ==(Object other) =>
@@ -2054,7 +2152,9 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           other.approxDistance == this.approxDistance &&
           other.isTrusted == this.isTrusted &&
           other.isBlocked == this.isBlocked &&
-          other.autoReconnectEnabled == this.autoReconnectEnabled);
+          other.autoReconnectEnabled == this.autoReconnectEnabled &&
+          other.publicIdentityKey == this.publicIdentityKey &&
+          other.publicIdentityFingerprint == this.publicIdentityFingerprint);
 }
 
 class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
@@ -2067,6 +2167,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
   final Value<bool> isTrusted;
   final Value<bool> isBlocked;
   final Value<bool> autoReconnectEnabled;
+  final Value<String?> publicIdentityKey;
+  final Value<String?> publicIdentityFingerprint;
   final Value<int> rowid;
   const NearbyDevicesCompanion({
     this.deviceId = const Value.absent(),
@@ -2078,6 +2180,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     this.isTrusted = const Value.absent(),
     this.isBlocked = const Value.absent(),
     this.autoReconnectEnabled = const Value.absent(),
+    this.publicIdentityKey = const Value.absent(),
+    this.publicIdentityFingerprint = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NearbyDevicesCompanion.insert({
@@ -2090,6 +2194,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     this.isTrusted = const Value.absent(),
     this.isBlocked = const Value.absent(),
     this.autoReconnectEnabled = const Value.absent(),
+    this.publicIdentityKey = const Value.absent(),
+    this.publicIdentityFingerprint = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : deviceId = Value(deviceId),
        displayName = Value(displayName),
@@ -2105,6 +2211,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Expression<bool>? isTrusted,
     Expression<bool>? isBlocked,
     Expression<bool>? autoReconnectEnabled,
+    Expression<String>? publicIdentityKey,
+    Expression<String>? publicIdentityFingerprint,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2118,6 +2226,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       if (isBlocked != null) 'is_blocked': isBlocked,
       if (autoReconnectEnabled != null)
         'auto_reconnect_enabled': autoReconnectEnabled,
+      if (publicIdentityKey != null) 'public_identity_key': publicIdentityKey,
+      if (publicIdentityFingerprint != null)
+        'public_identity_fingerprint': publicIdentityFingerprint,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2132,6 +2243,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Value<bool>? isTrusted,
     Value<bool>? isBlocked,
     Value<bool>? autoReconnectEnabled,
+    Value<String?>? publicIdentityKey,
+    Value<String?>? publicIdentityFingerprint,
     Value<int>? rowid,
   }) {
     return NearbyDevicesCompanion(
@@ -2144,6 +2257,9 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       isTrusted: isTrusted ?? this.isTrusted,
       isBlocked: isBlocked ?? this.isBlocked,
       autoReconnectEnabled: autoReconnectEnabled ?? this.autoReconnectEnabled,
+      publicIdentityKey: publicIdentityKey ?? this.publicIdentityKey,
+      publicIdentityFingerprint:
+          publicIdentityFingerprint ?? this.publicIdentityFingerprint,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -2180,6 +2296,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
         autoReconnectEnabled.value,
       );
     }
+    if (publicIdentityKey.present) {
+      map['public_identity_key'] = Variable<String>(publicIdentityKey.value);
+    }
+    if (publicIdentityFingerprint.present) {
+      map['public_identity_fingerprint'] = Variable<String>(
+        publicIdentityFingerprint.value,
+      );
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -2198,6 +2322,8 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
           ..write('isTrusted: $isTrusted, ')
           ..write('isBlocked: $isBlocked, ')
           ..write('autoReconnectEnabled: $autoReconnectEnabled, ')
+          ..write('publicIdentityKey: $publicIdentityKey, ')
+          ..write('publicIdentityFingerprint: $publicIdentityFingerprint, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7127,6 +7253,8 @@ typedef $$NearbyDevicesTableCreateCompanionBuilder =
       Value<bool> isTrusted,
       Value<bool> isBlocked,
       Value<bool> autoReconnectEnabled,
+      Value<String?> publicIdentityKey,
+      Value<String?> publicIdentityFingerprint,
       Value<int> rowid,
     });
 typedef $$NearbyDevicesTableUpdateCompanionBuilder =
@@ -7140,6 +7268,8 @@ typedef $$NearbyDevicesTableUpdateCompanionBuilder =
       Value<bool> isTrusted,
       Value<bool> isBlocked,
       Value<bool> autoReconnectEnabled,
+      Value<String?> publicIdentityKey,
+      Value<String?> publicIdentityFingerprint,
       Value<int> rowid,
     });
 
@@ -7194,6 +7324,16 @@ class $$NearbyDevicesTableFilterComposer
 
   ColumnFilters<bool> get autoReconnectEnabled => $composableBuilder(
     column: $table.autoReconnectEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get publicIdentityKey => $composableBuilder(
+    column: $table.publicIdentityKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get publicIdentityFingerprint => $composableBuilder(
+    column: $table.publicIdentityFingerprint,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -7251,6 +7391,16 @@ class $$NearbyDevicesTableOrderingComposer
     column: $table.autoReconnectEnabled,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get publicIdentityKey => $composableBuilder(
+    column: $table.publicIdentityKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get publicIdentityFingerprint => $composableBuilder(
+    column: $table.publicIdentityFingerprint,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$NearbyDevicesTableAnnotationComposer
@@ -7298,6 +7448,16 @@ class $$NearbyDevicesTableAnnotationComposer
     column: $table.autoReconnectEnabled,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get publicIdentityKey => $composableBuilder(
+    column: $table.publicIdentityKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get publicIdentityFingerprint => $composableBuilder(
+    column: $table.publicIdentityFingerprint,
+    builder: (column) => column,
+  );
 }
 
 class $$NearbyDevicesTableTableManager
@@ -7340,6 +7500,8 @@ class $$NearbyDevicesTableTableManager
                 Value<bool> isTrusted = const Value.absent(),
                 Value<bool> isBlocked = const Value.absent(),
                 Value<bool> autoReconnectEnabled = const Value.absent(),
+                Value<String?> publicIdentityKey = const Value.absent(),
+                Value<String?> publicIdentityFingerprint = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion(
                 deviceId: deviceId,
@@ -7351,6 +7513,8 @@ class $$NearbyDevicesTableTableManager
                 isTrusted: isTrusted,
                 isBlocked: isBlocked,
                 autoReconnectEnabled: autoReconnectEnabled,
+                publicIdentityKey: publicIdentityKey,
+                publicIdentityFingerprint: publicIdentityFingerprint,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -7364,6 +7528,8 @@ class $$NearbyDevicesTableTableManager
                 Value<bool> isTrusted = const Value.absent(),
                 Value<bool> isBlocked = const Value.absent(),
                 Value<bool> autoReconnectEnabled = const Value.absent(),
+                Value<String?> publicIdentityKey = const Value.absent(),
+                Value<String?> publicIdentityFingerprint = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion.insert(
                 deviceId: deviceId,
@@ -7375,6 +7541,8 @@ class $$NearbyDevicesTableTableManager
                 isTrusted: isTrusted,
                 isBlocked: isBlocked,
                 autoReconnectEnabled: autoReconnectEnabled,
+                publicIdentityKey: publicIdentityKey,
+                publicIdentityFingerprint: publicIdentityFingerprint,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

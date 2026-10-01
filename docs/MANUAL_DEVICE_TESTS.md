@@ -283,13 +283,13 @@ prints their runtime facts, and captures filtered logs without clearing existing
 logcat. One connected device is reported and left untouched until another
 device is connected.
 
-## O. Build 24 communication acceptance — DEFERRED
+## O. Build 25 secure communication acceptance — DEFERRED
 
-Build 24 is currently a local-only candidate. Do not install it unless a later
-release is explicitly authorized and its exact signed artifact is verified.
-Automatic reconnect is not part of this candidate. The following acceptance is
-for a future candidate after secure persistent peer-key binding and reconnect
-coverage have been implemented:
+Build 25 is an unpublished local candidate and has not been installed. Do not
+install it until a later release is explicitly authorized and its exact signed
+artifact is verified. Software-side identity pinning and challenge-response do
+not prove Android Keystore or Nearby behavior on physical devices. After the
+software release gate, perform these human checks:
 
 1. On two phones, connect once and compare the actual Nearby authentication
    token on both screens before accepting. Confirm an unknown peer can be
@@ -298,8 +298,9 @@ coverage have been implemented:
    state persist after navigating away and restarting the app.
 3. Receive a message outside its open chat. Confirm the badge/notification,
    tap-through destination, preview privacy setting, and read receipt behavior.
-4. Disconnect and reconnect. Confirm no chat/history loss and no automatic
-   reconnect until a later build explicitly implements and verifies it.
+4. Disconnect and rediscover. Confirm the same peer reconnects without another
+   Accept prompt only after its pinned key proves possession; confirm chat
+   history remains intact.
 5. Verify untrust and block are distinct; untrust preserves the chat and block
    prevents future RELIO message handling.
 6. Test Internet-disabled Nearby messaging and existing SOS/Rescue/media/relay

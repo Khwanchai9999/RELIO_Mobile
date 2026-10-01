@@ -115,6 +115,8 @@ class RelioNearbyDevice {
     this.isTrusted = false,
     this.isBlocked = false,
     this.autoReconnectEnabled = false,
+    this.publicIdentityKey,
+    this.publicIdentityFingerprint,
   });
 
   final String deviceId;
@@ -128,6 +130,8 @@ class RelioNearbyDevice {
   final bool isTrusted;
   final bool isBlocked;
   final bool autoReconnectEnabled;
+  final String? publicIdentityKey;
+  final String? publicIdentityFingerprint;
 }
 
 class RelioSosEvent {

@@ -363,6 +363,8 @@ class RelayEngine {
           isActive: packet.payload['isActive']! as bool,
         );
       case RelioPacketType.hello ||
+          RelioPacketType.identityChallenge ||
+          RelioPacketType.identityProof ||
           RelioPacketType.deviceStatus ||
           RelioPacketType.ack ||
           RelioPacketType.readReceipt ||

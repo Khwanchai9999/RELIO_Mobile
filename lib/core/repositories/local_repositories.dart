@@ -186,6 +186,11 @@ abstract interface class NearbyDeviceRepository {
   });
   Future<void> updateStatus(String deviceId, DeviceStatus status);
   Future<void> setTrusted(String deviceId, bool trusted);
+  Future<void> setTrustedIdentity({
+    required String deviceId,
+    required String publicIdentityKey,
+    required String fingerprint,
+  });
   Future<void> setBlocked(String deviceId, bool blocked);
   Future<void> rename(String deviceId, String displayName);
 }
@@ -1531,6 +1536,8 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
       isTrusted: Value(existing?.isTrusted ?? false),
       isBlocked: Value(existing?.isBlocked ?? false),
       autoReconnectEnabled: Value(existing?.autoReconnectEnabled ?? false),
+      publicIdentityKey: Value(existing?.publicIdentityKey),
+      publicIdentityFingerprint: Value(existing?.publicIdentityFingerprint),
     );
     await db.into(db.nearbyDevices).insertOnConflictUpdate(companion);
   }
@@ -1549,21 +1556,65 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
 
   @override
   Future<void> setTrusted(String deviceId, bool trusted) async {
+    final saved = await getDevice(deviceId);
+    final mayReconnect =
+        trusted &&
+        saved?.publicIdentityKey != null &&
+        saved?.publicIdentityFingerprint != null &&
+        saved?.isBlocked != true;
     await (db.update(
       db.nearbyDevices,
     )..where((row) => row.deviceId.equals(deviceId))).write(
       NearbyDevicesCompanion(
         isTrusted: Value(trusted),
-        autoReconnectEnabled: Value(trusted),
+        autoReconnectEnabled: Value(mayReconnect),
+      ),
+    );
+  }
+
+  @override
+  Future<void> setTrustedIdentity({
+    required String deviceId,
+    required String publicIdentityKey,
+    required String fingerprint,
+  }) async {
+    if (publicIdentityKey.isEmpty ||
+        publicIdentityKey.length > 2048 ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(fingerprint)) {
+      throw ArgumentError('Invalid peer identity material.');
+    }
+    final saved = await getDevice(deviceId);
+    if (saved?.isBlocked == true) {
+      throw StateError('Blocked peers cannot be trusted.');
+    }
+    await (db.update(
+      db.nearbyDevices,
+    )..where((row) => row.deviceId.equals(deviceId))).write(
+      NearbyDevicesCompanion(
+        isTrusted: const Value(true),
+        autoReconnectEnabled: const Value(true),
+        publicIdentityKey: Value(publicIdentityKey),
+        publicIdentityFingerprint: Value(fingerprint),
       ),
     );
   }
 
   @override
   Future<void> setBlocked(String deviceId, bool blocked) async {
-    await (db.update(db.nearbyDevices)
-          ..where((row) => row.deviceId.equals(deviceId)))
-        .write(NearbyDevicesCompanion(isBlocked: Value(blocked)));
+    final saved = await getDevice(deviceId);
+    final reconnect =
+        !blocked &&
+        saved?.isTrusted == true &&
+        saved?.publicIdentityKey != null &&
+        saved?.publicIdentityFingerprint != null;
+    await (db.update(
+      db.nearbyDevices,
+    )..where((row) => row.deviceId.equals(deviceId))).write(
+      NearbyDevicesCompanion(
+        isBlocked: Value(blocked),
+        autoReconnectEnabled: Value(reconnect),
+      ),
+    );
   }
 
   @override
@@ -1587,6 +1638,8 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     isTrusted: row.isTrusted,
     isBlocked: row.isBlocked,
     autoReconnectEnabled: row.autoReconnectEnabled,
+    publicIdentityKey: row.publicIdentityKey,
+    publicIdentityFingerprint: row.publicIdentityFingerprint,
   );
 }
 

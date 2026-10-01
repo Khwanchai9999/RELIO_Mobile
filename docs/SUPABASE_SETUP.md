@@ -41,14 +41,22 @@ errors to safe stable codes, validates the current-user Storage path, and
 accepts local attachment files only from RELIO's managed media root. These
 checks are covered by fake/in-memory tests before any live project is used.
 
-## Build 24 communication migration — not applied
+## Build 25 communication migrations — not applied remotely
 
-`0005_communication_platform.sql` adds read-receipt fields, owner-scoped push
-tokens, narrowly scoped Admin metadata operations, and server-only push
-deduplication state. Review this migration and apply it only to an explicitly
-verified disposable QA project; do not infer its project from Firebase
-`relio-17dc0` and never apply it to production as part of local validation.
+`0005_communication_platform.sql` adds read receipts, owner-scoped push tokens,
+narrowly scoped Admin metadata operations, and server-only push deduplication.
+`0006_admin_sos_rpc_only.sql` removes direct Admin SOS table updates so state
+changes use the audited RPC. The migrations were source-audited but not applied
+or SQL-executed; do not infer a Supabase project from Firebase `relio-17dc0`.
+Never apply them to production as part of local validation.
 The matching `send-message-push` Edge Function requires a service account and
 webhook secret stored only in Supabase's server-side secret store. It has not
-been deployed or remotely tested. The local Build 24 push-token client remains
-inactive until that separately configured QA backend is proven.
+been deployed or remotely tested. The QA seed utility is
+`scripts/seed-qa-users.ps1`; it creates/reuses four distinct configured QA
+identities (two users, one rescuer, one admin) and sets their roles, without
+logging passwords or key material. It requires both QA and PROD refs, a QA
+service-role key in process environment variables, and a QA ref matching the
+reviewed `supabase/qa-project-allowlist.json`. `.env.qa.local` is ignored and
+is never read automatically. No QA Supabase ref, CLI, URL/key, or service-role
+credential is configured in this workspace, so no seeding or remote mutation
+was performed.

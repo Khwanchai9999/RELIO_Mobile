@@ -51,11 +51,16 @@ class AndroidNearbyTransport implements NearbyTransport {
   Stream<NearbyConnectionEvent> get connectionEvents => _connections.stream;
 
   @override
-  Future<void> startAdvertising({required String displayName}) async {
+  Future<void> startAdvertising({
+    required String displayName,
+    String? identityFingerprint,
+  }) async {
     if (_disposed || _advertising) return;
     try {
       final started = await _nearby.startAdvertising(
-        displayName,
+        identityFingerprint == null
+            ? displayName
+            : 'RELIO-ID-V1:$identityFingerprint',
         Strategy.P2P_CLUSTER,
         serviceId: serviceId,
         onConnectionInitiated: _connectionInitiated,
@@ -103,12 +108,27 @@ class AndroidNearbyTransport implements NearbyTransport {
         serviceId: serviceId,
         onEndpointFound: (id, name, _) {
           _peerNames[id] = name;
-          _peers.add(NearbyPeer(id: id, name: name));
+          final hint = _identityFingerprintHint(name);
+          _peers.add(
+            NearbyPeer(
+              id: id,
+              name: hint == null ? name : 'RELIO ${hint.substring(0, 8)}',
+              identityFingerprintHint: hint,
+            ),
+          );
         },
         onEndpointLost: (id) {
           if (id != null) {
             final name = _peerNames.remove(id) ?? id;
-            _peers.add(NearbyPeer(id: id, name: name, isLost: true));
+            final hint = _identityFingerprintHint(name);
+            _peers.add(
+              NearbyPeer(
+                id: id,
+                name: hint == null ? name : 'RELIO ${hint.substring(0, 8)}',
+                identityFingerprintHint: hint,
+                isLost: true,
+              ),
+            );
           }
         },
       );
@@ -251,15 +271,29 @@ class AndroidNearbyTransport implements NearbyTransport {
     ConnectionInfo info,
   ) async {
     _peerNames[endpointId] = info.endpointName;
+    final fingerprintHint = _identityFingerprintHint(info.endpointName);
     if (!_pendingConnectionRequests.add(endpointId)) return;
     _connections.add(
       NearbyConnectionEvent(
-        peer: NearbyPeer(id: endpointId, name: info.endpointName),
+        peer: NearbyPeer(
+          id: endpointId,
+          name: fingerprintHint == null
+              ? info.endpointName
+              : 'RELIO ${fingerprintHint.substring(0, 8)}',
+          identityFingerprintHint: fingerprintHint,
+        ),
         state: NearbyConnectionState.incomingRequest,
         authenticationToken: info.authenticationToken,
         isIncomingRequest: info.isIncomingConnection,
       ),
     );
+  }
+
+  String? _identityFingerprintHint(String endpointName) {
+    const prefix = 'RELIO-ID-V1:';
+    if (!endpointName.startsWith(prefix)) return null;
+    final fingerprint = endpointName.substring(prefix.length);
+    return RegExp(r'^[a-f0-9]{64}$').hasMatch(fingerprint) ? fingerprint : null;
   }
 
   void _payloadReceived(String id, Payload payload) {
@@ -333,8 +367,13 @@ class AndroidNearbyTransport implements NearbyTransport {
     _connectionRequests.remove(endpointId);
     final peer = NearbyPeer(
       id: endpointId,
-      name: _peerNames[endpointId] ?? endpointId,
+      name: _identityFingerprintHint(_peerNames[endpointId] ?? '') == null
+          ? _peerNames[endpointId] ?? endpointId
+          : 'RELIO ${_identityFingerprintHint(_peerNames[endpointId]!)!.substring(0, 8)}',
       connected: status == Status.CONNECTED,
+      identityFingerprintHint: _identityFingerprintHint(
+        _peerNames[endpointId] ?? '',
+      ),
     );
     if (status == Status.CONNECTED) {
       _connectedPeers.add(endpointId);
@@ -361,7 +400,12 @@ class AndroidNearbyTransport implements NearbyTransport {
       NearbyConnectionEvent(
         peer: NearbyPeer(
           id: endpointId,
-          name: _peerNames[endpointId] ?? endpointId,
+          name: _identityFingerprintHint(_peerNames[endpointId] ?? '') == null
+              ? _peerNames[endpointId] ?? endpointId
+              : 'RELIO ${_identityFingerprintHint(_peerNames[endpointId]!)!.substring(0, 8)}',
+          identityFingerprintHint: _identityFingerprintHint(
+            _peerNames[endpointId] ?? '',
+          ),
         ),
         state: NearbyConnectionState.disconnected,
       ),

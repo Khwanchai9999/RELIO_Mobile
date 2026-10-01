@@ -8,6 +8,7 @@ class NearbyPeer {
     required this.name,
     this.connected = false,
     this.deviceId,
+    this.identityFingerprintHint,
     this.capabilities = const [],
     this.isLost = false,
   });
@@ -20,6 +21,9 @@ class NearbyPeer {
 
   /// RELIO's stable application identity, learned from the hello packet.
   final String? deviceId;
+
+  /// Public-key fingerprint advertised as a candidate hint, never as proof.
+  final String? identityFingerprintHint;
 
   /// Capabilities learned from the completed RELIO hello handshake.
   final List<String> capabilities;
@@ -146,7 +150,10 @@ abstract interface class NearbyTransport {
   Stream<NearbyFilePayloadEvent> get incomingFilePayloads;
   Stream<NearbyTransferEvent> get transferEvents;
   Stream<NearbyConnectionEvent> get connectionEvents;
-  Future<void> startAdvertising({required String displayName});
+  Future<void> startAdvertising({
+    required String displayName,
+    String? identityFingerprint,
+  });
   Future<void> stopAdvertising();
   Future<void> startDiscovery();
   Future<void> stopDiscovery();
@@ -216,7 +223,10 @@ class MockNearbyTransport implements NearbyTransport {
   Stream<NearbyConnectionEvent> get connectionEvents => _connections.stream;
 
   @override
-  Future<void> startAdvertising({required String displayName}) async {
+  Future<void> startAdvertising({
+    required String displayName,
+    String? identityFingerprint,
+  }) async {
     advertisingStartCount++;
     if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
     if (advertisingStartFailure case final failure?) throw failure;

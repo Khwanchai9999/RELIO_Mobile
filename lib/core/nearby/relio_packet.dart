@@ -6,6 +6,8 @@ import 'package:uuid/uuid.dart';
 import '../../data/models/prototype_models.dart';
 
 enum RelioPacketType {
+  identityChallenge,
+  identityProof,
   hello,
   textMessage,
   deviceStatus,
@@ -45,6 +47,60 @@ class RelioPacket {
   final String senderUserId;
   final DateTime createdAt;
   final Map<String, Object?> payload;
+
+  factory RelioPacket.identityChallenge({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String challengeId,
+    required String nonce,
+    required String targetDeviceId,
+    required DateTime expiresAt,
+  }) => RelioPacket(
+    protocolVersion: 2,
+    packetId: const Uuid().v4(),
+    type: RelioPacketType.identityChallenge,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: DateTime.now().toUtc(),
+    payload: {
+      'challengeId': challengeId,
+      'nonce': nonce,
+      'targetDeviceId': targetDeviceId,
+      'expiresAt': expiresAt.toUtc().toIso8601String(),
+    },
+  );
+
+  factory RelioPacket.identityProof({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String challengeId,
+    required String nonce,
+    required String challengerDeviceId,
+    required String displayName,
+    required String status,
+    required List<String> capabilities,
+    required String publicKey,
+    required String fingerprint,
+    required String signature,
+  }) => RelioPacket(
+    protocolVersion: 2,
+    packetId: const Uuid().v4(),
+    type: RelioPacketType.identityProof,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: DateTime.now().toUtc(),
+    payload: {
+      'challengeId': challengeId,
+      'nonce': nonce,
+      'challengerDeviceId': challengerDeviceId,
+      'displayName': displayName,
+      'status': status,
+      'capabilities': capabilities,
+      'publicKey': publicKey,
+      'fingerprint': fingerprint,
+      'signature': signature,
+    },
+  );
 
   factory RelioPacket.hello({
     required String senderDeviceId,
@@ -336,7 +392,7 @@ class RelioPacket {
 
   factory RelioPacket.fromJson(Map<String, dynamic> json) {
     final version = json['protocolVersion'];
-    if (version is! int || version != 1) {
+    if (version is! int || (version != 1 && version != 2)) {
       throw RelioPacketException('Unsupported protocol version: $version');
     }
     final packetId = _requiredString(json, 'packetId');
@@ -344,6 +400,15 @@ class RelioPacket {
     final type = RelioPacketType.values.where((item) => item.name == typeName);
     if (type.isEmpty) {
       throw RelioPacketException('Unknown packet type: $typeName');
+    }
+    final isIdentityPacket =
+        type.first == RelioPacketType.identityChallenge ||
+        type.first == RelioPacketType.identityProof;
+    if ((isIdentityPacket && version != 2) ||
+        (!isIdentityPacket && version != 1)) {
+      throw const RelioPacketException(
+        'Packet type is not valid for protocol version.',
+      );
     }
     final createdAt = DateTime.tryParse(_requiredString(json, 'createdAt'));
     if (createdAt == null) {
@@ -370,6 +435,48 @@ class RelioPacket {
 
   void _validatePayload() {
     switch (type) {
+      case RelioPacketType.identityChallenge:
+        if (protocolVersion != 2) {
+          throw const RelioPacketException(
+            'Identity handshake requires protocol v2.',
+          );
+        }
+        if (_payloadString('challengeId').length > 64 ||
+            _payloadString('nonce').length != 43 ||
+            _payloadString('targetDeviceId').length > 128 ||
+            _payloadString('expiresAt').length > 40) {
+          throw const RelioPacketException(
+            'Invalid identity challenge fields.',
+          );
+        }
+      case RelioPacketType.identityProof:
+        if (protocolVersion != 2) {
+          throw const RelioPacketException(
+            'Identity proof requires protocol v2.',
+          );
+        }
+        _payloadString('challengeId');
+        _payloadString('nonce');
+        _payloadString('challengerDeviceId');
+        _payloadString('displayName');
+        _statusField();
+        _payloadString('publicKey');
+        _payloadString('fingerprint');
+        _payloadString('signature');
+        if (_payloadString('challengeId').length > 64 ||
+            _payloadString('nonce').length != 43 ||
+            _payloadString('challengerDeviceId').length > 128 ||
+            _payloadString('publicKey').length > 2048 ||
+            _payloadString('fingerprint').length != 64 ||
+            _payloadString('signature').length > 512) {
+          throw const RelioPacketException('Invalid identity proof fields.');
+        }
+        final capabilities = payload['capabilities'];
+        if (capabilities is! List ||
+            capabilities.length > 32 ||
+            capabilities.any((item) => item is! String || item.length > 40)) {
+          throw const RelioPacketException('Invalid identity capabilities.');
+        }
       case RelioPacketType.hello:
         _payloadString('displayName');
         // v0.2 hello packets did not carry status. Treat that older shape as

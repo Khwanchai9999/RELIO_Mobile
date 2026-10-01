@@ -1,0 +1,4 @@
+{
+  "qaProjectRef": "",
+  "note": "Populate only after independently verifying a disposable QA Supabase project. Keep distinct from the verified PROD project ref."
+}

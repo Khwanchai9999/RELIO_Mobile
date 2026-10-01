@@ -1,6 +1,15 @@
-# RELIO communication platform — Build 24
+# RELIO communication platform — Build 24 baseline / Build 25 identity update
 
 ## Implemented in source
+
+Build 24 is the preserved local communication-platform baseline. Build 25 adds
+an Android Keystore P-256 signing identity, local public-key/fingerprint pins,
+protocol-v2 nonce challenges, and fingerprint-hint candidate routing. Only a
+challenge proof matching the pinned key can authorize a trusted reconnect; the
+endpoint name itself never grants trust. Old trusted records migrate without
+their auto-reconnect bit so they must pair again. Dart protocol behavior is
+automated-tested and Android flavors compile; real Keystore signatures and
+reconnection are not physically verified.
 
 - Nearby connection requests require a user decision and show the transport
   authentication code on both phones. The saved peer directory stores trust
@@ -25,6 +34,13 @@
   and uses audited server functions for role and SOS changes. Its browser code
   uses only a public Supabase anon key.
 
+Cloud boundary: the foreground SyncEngine currently processes owner-matched
+local queue uploads. A verified cross-account conversation membership/linking
+flow and cloud-to-local message reconciliation are not implemented; the
+existing `fetchMessages` adapter is not called by SyncEngine. Do not describe
+messages as deliverable between separate cloud accounts while that remains so.
+Local-first Nearby messaging remains independent of this cloud limitation.
+
 ## QA backend setup — not yet applied
 
 No Supabase project ref/URL or service-role/FCM server credentials are stored in
@@ -32,8 +48,9 @@ this workspace. Do not infer the QA Supabase project from Firebase project
 `relio-17dc0`; they are separate systems. Before enabling remote services:
 
 1. An operator verifies the exact disposable QA Supabase project ref and URL.
-2. Apply `supabase/migrations/0005_communication_platform.sql` only to that QA
-   project, after reviewing its RLS/column grants. Do not run it on production.
+2. Apply `0005_communication_platform.sql` and then
+   `0006_admin_sos_rpc_only.sql` only to that QA project, after reviewing RLS
+   and grants. Do not run them on production.
 3. Provision the initial Admin role out-of-band for the explicitly approved QA
    account. Ordinary client sessions cannot promote themselves.
 4. Deploy `send-message-push` to that verified QA project. Set
@@ -48,18 +65,21 @@ this workspace. Do not infer the QA Supabase project from Firebase project
    deployment. Apply the same migration before exposing the site.
 
 These operations are intentionally not executed by local build/test commands.
-The Supabase CLI is not installed/configured here, and the Admin site is not
+`scripts/seed-qa-users.ps1` also requires the QA ref to match the reviewed
+`supabase/qa-project-allowlist.json`; it fails closed while the allowlist is
+blank. The Supabase CLI is not installed/configured here, and the Admin site is not
 linked to a Vercel project. Remote account setup, migration application, FCM
 service-account provisioning, webhook wiring, and deployment remain manual.
 
-Automatic reconnect is deliberately not enabled yet: Nearby endpoint IDs are
-ephemeral and the current app has no persisted cryptographic key binding that
-can safely authorize a silent reconnect. A trusted peer still requires a
-user-initiated connection and visible authentication-code check. Do not
-interpret a stored trust flag as automatic transport authorization.
+Build 25 implements cryptographically authorized auto-reconnect in source.
+Its physical-device acceptance remains deferred. A persisted trust flag alone
+does not authorize a connection; the peer must prove the pinned key.
 
 ## Release/device boundary
 
-Build 24 is software-side QA candidate only. This task does not install an APK
-on a phone. Verify acceptance on physical Android devices before describing
-Nearby trust/reconnect, notifications, or read receipts as device-verified.
+Build 25 remains an unpublished software-side QA candidate. Format, analyze,
+151 Flutter tests, DEV/QA/PROD builds, QA isolation, PowerShell syntax checks,
+and the signed QA `-NoUpload` pipeline passed locally. No APK was uploaded or
+installed on a phone. Verify acceptance on physical Android devices before
+describing Nearby trust/reconnect, notifications, or read receipts as
+device-verified.

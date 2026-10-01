@@ -4,9 +4,75 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
+import 'package:relio_mobile/core/nearby/peer_identity_crypto.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 void main() {
+  test('identity challenge packet is versioned and bounded', () {
+    final nonce = List.filled(43, 'A').join();
+    final packet = RelioPacket.identityChallenge(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      challengeId: 'challenge-1',
+      nonce: nonce,
+      targetDeviceId: 'device-b',
+      expiresAt: DateTime.utc(2026, 9, 30, 12),
+    );
+    final decoded = RelioPacket.fromBytes(packet.toBytes());
+    expect(decoded.protocolVersion, 2);
+    expect(decoded.type, RelioPacketType.identityChallenge);
+    expect(decoded.payload['nonce'], nonce);
+  });
+
+  test(
+    'protocol v2 cannot be used to bypass identity proof for chat packets',
+    () {
+      final json =
+          jsonDecode(
+                utf8.decode(
+                  RelioPacket.hello(
+                    senderDeviceId: 'device-a',
+                    senderUserId: 'user-a',
+                    displayName: 'RELIO',
+                  ).toBytes(),
+                ),
+              )
+              as Map<String, dynamic>;
+      json['protocolVersion'] = 2;
+      expect(
+        () => RelioPacket.fromJson(json),
+        throwsA(isA<RelioPacketException>()),
+      );
+    },
+  );
+
+  test('identity signature context changes with either peer or nonce', () {
+    final original = identityChallengeMessage(
+      challengeId: 'challenge',
+      nonce: 'nonce',
+      challengerDeviceId: 'device-a',
+      responderDeviceId: 'device-b',
+    );
+    expect(
+      identityChallengeMessage(
+        challengeId: 'challenge',
+        nonce: 'changed',
+        challengerDeviceId: 'device-a',
+        responderDeviceId: 'device-b',
+      ),
+      isNot(equals(original)),
+    );
+    expect(
+      identityChallengeMessage(
+        challengeId: 'challenge',
+        nonce: 'nonce',
+        challengerDeviceId: 'device-a',
+        responderDeviceId: 'device-c',
+      ),
+      isNot(equals(original)),
+    );
+  });
+
   test('hello packet encodes and decodes with protocol version 1', () {
     final packet = RelioPacket.hello(
       senderDeviceId: 'device-1',

@@ -6,11 +6,13 @@
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
 - Latest public QA release: `0.9.0+23`
-- Local candidate: `0.9.0+24` / versionCode 24 (not published or installed)
+- Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
+- Current candidate: `0.9.0+25` / versionCode 25 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current public release tag: `qa-v0.9.0-b23`
-- Drift schema: v5 in the local Build 24 candidate
+- Drift schema: v6 in the local Build 25 candidate; v5 data is migrated by
+  adding nullable pinned-key fields and disabling reconnect for legacy rows
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
 - PROD package: `com.relio.relio_mobile`
@@ -29,24 +31,46 @@
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
 
-## Build 24 — local communication-platform candidate
+## Build 25 — local secure-identity candidate
 
-- Source target: `0.9.0+24`, QA package `com.relio.relio_mobile.test`.
+- Android Keystore generates and retains a P-256 signing key; only the X.509
+  public key, SHA-256 fingerprint, and ECDSA signature cross the Flutter bridge.
+- Protocol v2 challenges use a 256-bit secure random nonce, a short expiry,
+  one-use local challenge state, and a signature binding protocol context and
+  both stable device IDs. The fingerprint hint only selects a candidate peer.
+- First/untrusted peers still require authentication-code approval. A matching
+  pinned identity may auto-accept/reconnect; changed or blocked identities fail
+  closed. Reconnect initiator is deterministic and retries are capped with
+  exponential backoff.
+- Migration v6 preserves v5 data and disables auto-reconnect for legacy trust
+  records without a public-key pin.
+- `dart format .`, `flutter analyze`, and all 151 Flutter tests passed locally.
+  DEV debug, QA debug, signed QA release, and PROD verification builds passed;
+  `scripts/deploy-test.ps1 -NoUpload` passed without uploading.
+- The candidate remains local and unpublished. GitHub CLI's stored credential
+  is invalid, so no release, push, or remote artifact verification was made.
+- No phone was modified. Nearby radio/reconnect and OEM Keystore behavior are
+  not physically verified.
+- Supabase remote migrations, multi-user conversation membership/cloud pull,
+  QA account seeding, FCM delivery, and Admin deployment remain unverified.
+
+## Build 24 — local communication-platform checkpoint
+
+The following is the historical Build 24 checkpoint record; it is superseded
+by the current Build 25 section above.
+
+- Historical source target: `0.9.0+24`, QA package `com.relio.relio_mobile.test`.
 - Format, analyze, all 145 mobile tests, Windows PowerShell 5.1 syntax checks,
   QA/PROD isolation, DEV/QA/PROD debug builds, and the signed QA `-NoUpload`
   pipeline passed locally.
 - The signed QA artifact is local at `dist/relio-test-0.9.0+24.apk`; it has not
   been uploaded, published, or installed on a phone.
-- Automatic reconnect is not implemented. Trust is persisted, but endpoint IDs
-  are ephemeral and there is no pinned cryptographic RELIO peer identity to
-  authorize silent transport acceptance.
 - The migration and push Edge Function are source-only. No verified disposable
   QA Supabase project, Supabase CLI session, FCM service identity, or deployed
   webhook is configured. Admin deployment is not linked to Vercel.
-- GitHub CLI currently reports the stored `Khwanchai9999` credential as invalid;
-  Firebase project listing also fails. No remote push or release was attempted.
-- Build 24 requires secure reconnect design/coverage and the separately verified
-  remote QA setup before the full integration acceptance criteria are met.
+- GitHub CLI reported an invalid stored credential at the time of this checkpoint.
+- Build 24 did not include pinned cryptographic peer identity. Do not treat the
+  historical checkpoint as a Build 25 capability or verification statement.
 
 ## Historical Build 17 — offline two-device demo hardening
 

@@ -84,20 +84,20 @@ if (($versionName -eq '0.8.5' -and [int]$buildNumber -lt 11) -or
 # ขั้นนี้ตั้งใจรัน quality gate ก่อน build และ upload
 # ถ้า format, analyze หรือ test ไม่ผ่าน จะหยุดทันทีเพื่อไม่ปล่อย APK ที่มีปัญหา
 Invoke-QualityStep 'กำลังตรวจ dart format...' 'dart format' {
-    & dart format --output=none --set-exit-if-changed .
+    & dart --suppress-analytics format --output=none --set-exit-if-changed .
 }
 Invoke-QualityStep 'กำลังตรวจ flutter analyze...' 'flutter analyze' {
-    & flutter analyze --no-pub
+    & flutter --suppress-analytics analyze --no-pub
 }
 Invoke-QualityStep 'กำลังรัน flutter test...' 'flutter test' {
-    & flutter test --no-pub
+    & flutter --suppress-analytics test --no-pub
 }
 Invoke-QualityStep 'กำลังตรวจ QA/PROD Firebase SDK isolation...' 'verify-qa-update-isolation.ps1' {
     & "$PSScriptRoot\verify-qa-update-isolation.ps1"
 }
 
 Invoke-QualityStep 'กำลังสร้าง RELIO Test APK...' 'flutter build apk' {
-    & flutter build apk --no-pub --flavor qa --release @defines
+    & flutter --suppress-analytics build apk --no-pub --flavor qa --release @defines
 }
 
 $builtApk = Join-Path $projectRoot 'build\app\outputs\flutter-apk\app-qa-release.apk'

@@ -54,6 +54,8 @@ class NearbyDevices extends Table {
   BoolColumn get isBlocked => boolean().withDefault(const Constant(false))();
   BoolColumn get autoReconnectEnabled =>
       boolean().withDefault(const Constant(false))();
+  TextColumn get publicIdentityKey => text().nullable()();
+  TextColumn get publicIdentityFingerprint => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {deviceId};
@@ -183,7 +185,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -222,6 +224,20 @@ class AppDatabase extends _$AppDatabase {
         await migrator.addColumn(
           nearbyDevices,
           nearbyDevices.autoReconnectEnabled,
+        );
+      }
+      if (from < 6) {
+        await migrator.addColumn(
+          nearbyDevices,
+          nearbyDevices.publicIdentityKey,
+        );
+        await migrator.addColumn(
+          nearbyDevices,
+          nearbyDevices.publicIdentityFingerprint,
+        );
+        // Peers created before key pinning must pair again before auto-reconnect.
+        await customStatement(
+          'UPDATE nearby_devices SET auto_reconnect_enabled = 0',
         );
       }
     },

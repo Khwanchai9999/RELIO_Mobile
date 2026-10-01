@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
@@ -12,6 +13,7 @@ import '../repositories/local_repositories.dart';
 import '../relay/relay_engine.dart';
 import 'nearby_transport.dart';
 import 'nearby_readiness.dart';
+import 'peer_identity_crypto.dart';
 import 'relio_packet.dart';
 
 enum NearbyApplicationState {
@@ -30,6 +32,20 @@ enum NearbyApplicationState {
   failed,
 }
 
+class _PendingIdentityChallenge {
+  const _PendingIdentityChallenge({
+    required this.challengeId,
+    required this.nonce,
+    required this.challengerDeviceId,
+    required this.expiresAt,
+  });
+
+  final String challengeId;
+  final String nonce;
+  final String challengerDeviceId;
+  final DateTime expiresAt;
+}
+
 class NearbyService extends ChangeNotifier {
   NearbyService({
     required this.transport,
@@ -44,8 +60,13 @@ class NearbyService extends ChangeNotifier {
     this.mediaStorage,
     this.localNotifications,
     this.relayEngine,
+    PeerIdentityCrypto? identityCrypto,
     this.handshakeTimeout = const Duration(seconds: 8),
-  });
+  }) : identityCrypto =
+           identityCrypto ??
+           (transport is MockNearbyTransport
+               ? MockPeerIdentityCrypto('mock-local-device')
+               : AndroidPeerIdentityCrypto());
 
   final NearbyTransport transport;
   final MessageRepository messages;
@@ -59,6 +80,7 @@ class NearbyService extends ChangeNotifier {
   final MediaStorageService? mediaStorage;
   final LocalNotificationSink? localNotifications;
   final RelayEngine? relayEngine;
+  final PeerIdentityCrypto identityCrypto;
   final Duration handshakeTimeout;
   NearbyReadiness? readiness;
   NearbyApplicationState? _transition;
@@ -126,6 +148,12 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
   final Map<String, Timer> _helloTimeouts = {};
+  final Map<String, _PendingIdentityChallenge> _identityChallenges = {};
+  final Set<String> _automaticConnectionAttempts = {};
+  final Map<String, DateTime> _nextReconnectAt = {};
+  final Map<String, int> _reconnectAttemptCounts = {};
+  final Map<String, DateTime> _receivedChallengeExpiries = {};
+  final Map<String, Timer> _reconnectTimers = {};
   final Map<String, DeviceStatus> peerStatuses = {};
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   final Set<Future<void>> _inFlightOperations = {};
@@ -206,6 +234,8 @@ class NearbyService extends ChangeNotifier {
       _log('advertising start');
       await transport.startAdvertising(
         displayName: await identity.getDisplayName(),
+        identityFingerprint:
+            (await identityCrypto.getPublicIdentity()).fingerprint,
       );
       isAdvertising = true;
       _log('advertising started');
@@ -403,13 +433,17 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> connect(String peerId) async {
+    await _connect(peerId, userInitiated: true);
+  }
+
+  Future<void> _connect(String peerId, {required bool userInitiated}) async {
     final currentState = peerStates[peerId];
     if (currentState == NearbyConnectionState.connected ||
         currentState == NearbyConnectionState.connecting) {
       return;
     }
     peerStates[peerId] = NearbyConnectionState.connecting;
-    _userInitiatedEndpoints.add(peerId);
+    if (userInitiated) _userInitiatedEndpoints.add(peerId);
     notifyListeners();
     try {
       await transport.requestConnection(peerId);
@@ -808,16 +842,81 @@ class NearbyService extends ChangeNotifier {
     );
     _log('endpoint found id=${peer.endpointId}');
     notifyListeners();
+    _track(_maybeReconnect(peer));
+  }
+
+  Future<void> _maybeReconnect(NearbyPeer peer) async {
+    final hint = peer.identityFingerprintHint;
+    if (hint == null || !RegExp(r'^[a-f0-9]{64}$').hasMatch(hint)) return;
+    final candidates = await nearbyDevices.listDevices();
+    final saved = candidates.where(
+      (device) => device.publicIdentityFingerprint == hint,
+    );
+    if (saved.length != 1) return;
+    final device = saved.single;
+    if (!device.isTrusted ||
+        !device.autoReconnectEnabled ||
+        device.isBlocked ||
+        device.publicIdentityKey == null) {
+      return;
+    }
+    // Both peers see the same pinned fingerprints, so only the lower one
+    // initiates. The fingerprint is only a candidate selector; proof is still
+    // required after connecting.
+    final local = await identityCrypto.getPublicIdentity();
+    if (local.fingerprint.compareTo(hint) >= 0) return;
+    final retryAt = _nextReconnectAt[hint];
+    if (retryAt != null && retryAt.isAfter(DateTime.now().toUtc())) return;
+    if (!_automaticConnectionAttempts.add(hint)) return;
+    final attempts = _reconnectAttemptCounts.update(
+      hint,
+      (count) => (count + 1).clamp(1, 5).toInt(),
+      ifAbsent: () => 1,
+    );
+    _nextReconnectAt[hint] = DateTime.now().toUtc().add(
+      Duration(seconds: 1 << attempts),
+    );
+    await _connect(peer.endpointId, userInitiated: false);
+    if (peerStates[peer.endpointId] == NearbyConnectionState.failed) {
+      _automaticConnectionAttempts.remove(hint);
+      _scheduleReconnect(peer, hint, attempts);
+    }
+  }
+
+  void _scheduleReconnect(NearbyPeer peer, String fingerprint, int attempts) {
+    if (attempts >= 5 || _closed) return;
+    _reconnectTimers.remove(fingerprint)?.cancel();
+    final delay = Duration(seconds: 1 << attempts);
+    _reconnectTimers[fingerprint] = Timer(delay, () {
+      _reconnectTimers.remove(fingerprint);
+      _nextReconnectAt.remove(fingerprint);
+      _track(_maybeReconnect(peer));
+    });
   }
 
   void _onConnection(NearbyConnectionEvent event) {
     final endpointId = event.peer.endpointId;
     if (event.state == NearbyConnectionState.incomingRequest) {
-      pendingConnectionRequests[endpointId] = event;
-      peerStates[endpointId] = event.state;
-      _log('incoming connection request name=${event.peer.name}');
-      notifyListeners();
+      final fingerprint = event.peer.identityFingerprintHint;
+      if (fingerprint != null) {
+        _track(_acceptKnownPeerRequest(event, fingerprint));
+        return;
+      }
+      _queueIncomingRequest(event);
       return;
+    }
+    final eventFingerprint = event.peer.identityFingerprintHint;
+    if (eventFingerprint != null &&
+        (event.state == NearbyConnectionState.failed ||
+            event.state == NearbyConnectionState.disconnected)) {
+      _automaticConnectionAttempts.remove(eventFingerprint);
+      if (event.state == NearbyConnectionState.failed) {
+        _scheduleReconnect(
+          event.peer,
+          eventFingerprint,
+          _reconnectAttemptCounts[eventFingerprint] ?? 5,
+        );
+      }
     }
     peerStates[endpointId] = event.state;
     if (event.state == NearbyConnectionState.connected) {
@@ -839,17 +938,19 @@ class NearbyService extends ChangeNotifier {
         name: event.peer.name,
         connected: true,
         deviceId: endpointToDeviceId[endpointId],
+        identityFingerprintHint: event.peer.identityFingerprintHint,
       );
       if (index == -1) {
         discoveredPeers.add(peer);
       } else {
         discoveredPeers[index] = peer;
       }
-      _track(_handshakeAndShareActiveSos(endpointId));
+      _track(_beginPeerHandshake(endpointId));
     } else if (event.state == NearbyConnectionState.disconnected) {
       pendingConnectionRequests.remove(endpointId);
       _approvedConnectionEndpoints.remove(endpointId);
       _userInitiatedEndpoints.remove(endpointId);
+      _identityChallenges.remove(endpointId);
       _helloTimeouts.remove(endpointId)?.cancel();
       peerErrors.remove(endpointId);
       final deviceId = endpointToDeviceId.remove(endpointId);
@@ -872,6 +973,241 @@ class NearbyService extends ChangeNotifier {
     await sendHello(peerId: endpointId);
     final deviceId = await identity.getDeviceId();
     final active = await sos?.readActive(ownerDeviceId: deviceId);
+    if (active != null) await sendSos(active, peerId: endpointId);
+  }
+
+  Future<void> _beginPeerHandshake(String endpointId) async {
+    if (identityCrypto is MockPeerIdentityCrypto) {
+      await _handshakeAndShareActiveSos(endpointId);
+      return;
+    }
+    await _sendIdentityChallenge(endpointId);
+  }
+
+  void _queueIncomingRequest(NearbyConnectionEvent event) {
+    final endpointId = event.peer.endpointId;
+    pendingConnectionRequests[endpointId] = event;
+    peerStates[endpointId] = event.state;
+    _log('incoming connection request name=${event.peer.name}');
+    notifyListeners();
+  }
+
+  Future<void> _acceptKnownPeerRequest(
+    NearbyConnectionEvent event,
+    String fingerprintHint,
+  ) async {
+    final endpointId = event.peer.endpointId;
+    final devices = await nearbyDevices.listDevices();
+    final matches = devices.where(
+      (device) => device.publicIdentityFingerprint == fingerprintHint,
+    );
+    if (matches.length != 1) {
+      _queueIncomingRequest(event);
+      return;
+    }
+    final device = matches.single;
+    if (device.isBlocked) {
+      peerStates[endpointId] = NearbyConnectionState.disconnected;
+      await transport.rejectConnection(endpointId);
+      return;
+    }
+    if (!device.isTrusted ||
+        !device.autoReconnectEnabled ||
+        device.publicIdentityKey == null) {
+      _queueIncomingRequest(event);
+      return;
+    }
+    await acceptConnectionRequest(endpointId);
+  }
+
+  Future<void> _sendIdentityChallenge(String endpointId) async {
+    final localId = await identity.getDeviceId();
+    final bytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
+    final challengeId = const Uuid().v4();
+    final nonce = base64Url.encode(bytes).replaceAll('=', '');
+    final expiresAt = DateTime.now().toUtc().add(const Duration(seconds: 20));
+    _identityChallenges[endpointId] = _PendingIdentityChallenge(
+      challengeId: challengeId,
+      nonce: nonce,
+      challengerDeviceId: localId,
+      expiresAt: expiresAt,
+    );
+    final packet = RelioPacket.identityChallenge(
+      senderDeviceId: localId,
+      senderUserId: await _senderUserId(),
+      challengeId: challengeId,
+      nonce: nonce,
+      targetDeviceId: endpointToDeviceId[endpointId] ?? '',
+      expiresAt: expiresAt,
+    );
+    await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+  }
+
+  Future<void> _handleIdentityChallenge(
+    String endpointId,
+    RelioPacket packet,
+  ) async {
+    final payload = packet.payload;
+    final challengeId = payload['challengeId']! as String;
+    final nonce = payload['nonce']! as String;
+    final localId = await identity.getDeviceId();
+    final target = payload['targetDeviceId']! as String;
+    final expiresAt = DateTime.tryParse(payload['expiresAt']! as String);
+    if ((target.isNotEmpty && target != localId) ||
+        expiresAt == null ||
+        !expiresAt.isAfter(DateTime.now().toUtc()) ||
+        expiresAt.difference(DateTime.now().toUtc()) >
+            const Duration(seconds: 30) ||
+        !RegExp(r'^[A-Za-z0-9_-]{40,48}$').hasMatch(nonce)) {
+      protocolErrorCount++;
+      await disconnect(endpointId);
+      return;
+    }
+    final now = DateTime.now().toUtc();
+    // เก็บ challenge ที่เคยตอบไว้ชั่วคราว เพื่อกัน request เดิมถูก replay
+    _receivedChallengeExpiries.removeWhere((_, expiry) => !expiry.isAfter(now));
+    if (_receivedChallengeExpiries.containsKey(challengeId)) {
+      protocolErrorCount++;
+      await disconnect(endpointId);
+      return;
+    }
+    if (_receivedChallengeExpiries.length >= 128) {
+      final oldest = _receivedChallengeExpiries.keys.first;
+      _receivedChallengeExpiries.remove(oldest);
+    }
+    _receivedChallengeExpiries[challengeId] = expiresAt;
+    final own = await identityCrypto.getPublicIdentity();
+    final signed = identityChallengeMessage(
+      challengeId: challengeId,
+      nonce: nonce,
+      challengerDeviceId: packet.senderDeviceId,
+      responderDeviceId: localId,
+    );
+    final signature = await identityCrypto.sign(signed);
+    final proof = RelioPacket.identityProof(
+      senderDeviceId: localId,
+      senderUserId: await _senderUserId(),
+      challengeId: challengeId,
+      nonce: nonce,
+      challengerDeviceId: packet.senderDeviceId,
+      displayName: await identity.getDisplayName(),
+      status: (await currentStatus()).name,
+      capabilities: const ['textMessage', 'deviceStatus', 'ack', 'relay-v1'],
+      publicKey: own.publicKey,
+      fingerprint: own.fingerprint,
+      signature: signature,
+    );
+    await transport.sendBytes(proof.toBytes(), peerId: endpointId);
+  }
+
+  Future<void> _handleIdentityProof(
+    String endpointId,
+    RelioPacket packet,
+  ) async {
+    final challenge = _identityChallenges[endpointId];
+    final payload = packet.payload;
+    if (challenge == null ||
+        !challenge.expiresAt.isAfter(DateTime.now().toUtc()) ||
+        payload['challengeId'] != challenge.challengeId ||
+        payload['nonce'] != challenge.nonce ||
+        payload['challengerDeviceId'] != challenge.challengerDeviceId) {
+      protocolErrorCount++;
+      await disconnect(endpointId);
+      return;
+    }
+    // Consume before signature work: a replay cannot reuse this challenge even
+    // if verification fails or the packet handler is re-entered.
+    _identityChallenges.remove(endpointId);
+    final deviceId = packet.senderDeviceId;
+    final publicKey = payload['publicKey']! as String;
+    final fingerprint = payload['fingerprint']! as String;
+    String computed;
+    try {
+      computed = await identityCrypto.fingerprint(publicKey);
+    } on Object {
+      protocolErrorCount++;
+      await disconnect(endpointId);
+      return;
+    }
+    final signed = identityChallengeMessage(
+      challengeId: challenge.challengeId,
+      nonce: challenge.nonce,
+      challengerDeviceId: challenge.challengerDeviceId,
+      responderDeviceId: deviceId,
+    );
+    final valid =
+        computed == fingerprint &&
+        await identityCrypto.verify(
+          publicKey: publicKey,
+          message: signed,
+          signature: payload['signature']! as String,
+        );
+    if (!valid) {
+      protocolErrorCount++;
+      await disconnect(endpointId);
+      return;
+    }
+    final saved = await nearbyDevices.getDevice(deviceId);
+    if (saved?.isBlocked == true) {
+      await disconnect(endpointId);
+      return;
+    }
+    final wasPinned = saved?.publicIdentityFingerprint != null;
+    final pinnedMatches =
+        wasPinned &&
+        saved!.publicIdentityFingerprint == fingerprint &&
+        saved.publicIdentityKey == publicKey;
+    final consented =
+        _approvedConnectionEndpoints.contains(endpointId) ||
+        _userInitiatedEndpoints.contains(endpointId);
+    if (wasPinned && !pinnedMatches && !consented) {
+      peerErrors[endpointId] = 'identity_changed';
+      await disconnect(endpointId);
+      return;
+    }
+    if (!pinnedMatches && !consented) {
+      peerErrors[endpointId] = 'approval_required';
+      await disconnect(endpointId);
+      return;
+    }
+    _updatePeerIdentity(
+      endpointId,
+      deviceId,
+      displayName: payload['displayName']! as String,
+      capabilities: _capabilitiesFrom(payload['capabilities']),
+    );
+    final status = _statusFrom(payload['status']! as String);
+    peerStatuses[deviceId] = status;
+    await nearbyDevices.upsert(
+      deviceId: deviceId,
+      displayName: payload['displayName']! as String,
+      status: status,
+    );
+    if (!pinnedMatches) {
+      await nearbyDevices.setTrustedIdentity(
+        deviceId: deviceId,
+        publicIdentityKey: publicKey,
+        fingerprint: fingerprint,
+      );
+    }
+    _automaticConnectionAttempts.remove(fingerprint);
+    _reconnectTimers.remove(fingerprint)?.cancel();
+    _nextReconnectAt.remove(fingerprint);
+    _reconnectAttemptCounts.remove(fingerprint);
+    final conversationId = await _conversationIdForDevice(deviceId, deviceId);
+    await conversations.ensureConversation(
+      id: conversationId,
+      participantId: deviceId,
+      displayName: payload['displayName']! as String,
+      participantStatus: status,
+    );
+    _helloTimeouts.remove(endpointId)?.cancel();
+    peerErrors.remove(endpointId);
+    await sendHello(peerId: endpointId);
+    _track(_flushPendingMessages(conversationId));
+    final active = await sos?.readActive(
+      ownerDeviceId: await identity.getDeviceId(),
+    );
     if (active != null) await sendSos(active, peerId: endpointId);
   }
 
@@ -931,7 +1267,11 @@ class NearbyService extends ChangeNotifier {
     try {
       final packet = RelioPacket.fromBytes(event.bytes);
       final mappedDeviceId = endpointToDeviceId[event.peerId];
-      if (packet.type != RelioPacketType.hello &&
+      final isIdentityHandshake =
+          packet.type == RelioPacketType.identityChallenge ||
+          packet.type == RelioPacketType.identityProof;
+      if (!isIdentityHandshake &&
+          packet.type != RelioPacketType.hello &&
           mappedDeviceId != packet.senderDeviceId) {
         protocolErrorCount += 1;
         _log('ปฏิเสธ ${packet.type.name}: endpoint ยังไม่ผ่าน hello handshake');
@@ -942,6 +1282,10 @@ class NearbyService extends ChangeNotifier {
       lastReceivedPacket = _diagnosticPacket(packet);
       _log('รับ ${packet.type.name} จาก ${event.peerId}');
       switch (packet.type) {
+        case RelioPacketType.identityChallenge:
+          await _handleIdentityChallenge(event.peerId, packet);
+        case RelioPacketType.identityProof:
+          await _handleIdentityProof(event.peerId, packet);
         case RelioPacketType.hello:
           await _handleHello(event.peerId, packet);
         case RelioPacketType.textMessage:
@@ -1174,6 +1518,15 @@ class NearbyService extends ChangeNotifier {
       await disconnect(endpointId);
       return;
     }
+    if (identityCrypto is! MockPeerIdentityCrypto &&
+        (endpointToDeviceId[endpointId] != packet.senderDeviceId ||
+            savedPeer?.publicIdentityKey == null ||
+            savedPeer?.publicIdentityFingerprint == null)) {
+      protocolErrorCount += 1;
+      _log('hello rejected before cryptographic identity proof');
+      await disconnect(endpointId);
+      return;
+    }
     if (savedPeer?.isTrusted != true &&
         !_approvedConnectionEndpoints.contains(endpointId) &&
         !_userInitiatedEndpoints.contains(endpointId)) {
@@ -1190,7 +1543,10 @@ class NearbyService extends ChangeNotifier {
       displayName: displayName,
       status: status,
     );
-    await nearbyDevices.setTrusted(packet.senderDeviceId, true);
+    if (identityCrypto is MockPeerIdentityCrypto) {
+      // Test transport only: production trust is pinned only after proof.
+      await nearbyDevices.setTrusted(packet.senderDeviceId, true);
+    }
     final conversationId = await _conversationIdForDevice(
       packet.senderDeviceId,
       packet.senderDeviceId,
@@ -1446,6 +1802,7 @@ class NearbyService extends ChangeNotifier {
           peerStates[endpointId] == NearbyConnectionState.connected,
       deviceId: deviceId,
       capabilities: capabilities ?? peer.capabilities,
+      identityFingerprintHint: peer.identityFingerprintHint,
     );
     _log('identity established endpoint=$endpointId');
   }
@@ -1516,6 +1873,10 @@ class NearbyService extends ChangeNotifier {
       timer.cancel();
     }
     _helloTimeouts.clear();
+    for (final timer in _reconnectTimers.values) {
+      timer.cancel();
+    }
+    _reconnectTimers.clear();
     await Future.wait(
       _subscriptions.map((subscription) => subscription.cancel()),
     );

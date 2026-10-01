@@ -229,6 +229,56 @@ void main() {
     },
   );
 
+  test('trusted Nearby identity requires a persisted public-key pin', () async {
+    await repositories.nearbyDevices.upsert(
+      deviceId: 'peer-device-25',
+      displayName: 'Peer',
+      status: DeviceStatus.normal,
+    );
+    await repositories.nearbyDevices.setTrusted('peer-device-25', true);
+    expect(
+      (await repositories.nearbyDevices.getDevice(
+        'peer-device-25',
+      ))!.autoReconnectEnabled,
+      isFalse,
+    );
+
+    const publicKey = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEtest-public-key';
+    final fingerprint = List.filled(64, 'a').join();
+    await repositories.nearbyDevices.setTrustedIdentity(
+      deviceId: 'peer-device-25',
+      publicIdentityKey: publicKey,
+      fingerprint: fingerprint,
+    );
+    var saved = (await repositories.nearbyDevices.getDevice('peer-device-25'))!;
+    expect(saved.isTrusted, isTrue);
+    expect(saved.publicIdentityKey, publicKey);
+    expect(saved.publicIdentityFingerprint, fingerprint);
+    expect(saved.autoReconnectEnabled, isTrue);
+
+    await repositories.nearbyDevices.setTrusted('peer-device-25', false);
+    saved = (await repositories.nearbyDevices.getDevice('peer-device-25'))!;
+    expect(saved.isTrusted, isFalse);
+    expect(saved.autoReconnectEnabled, isFalse);
+    expect(saved.publicIdentityFingerprint, fingerprint);
+
+    await repositories.nearbyDevices.setBlocked('peer-device-25', true);
+    expect(
+      (await repositories.nearbyDevices.getDevice(
+        'peer-device-25',
+      ))!.autoReconnectEnabled,
+      isFalse,
+    );
+    await expectLater(
+      repositories.nearbyDevices.setTrustedIdentity(
+        deviceId: 'peer-device-25',
+        publicIdentityKey: publicKey,
+        fingerprint: fingerprint,
+      ),
+      throwsStateError,
+    );
+  });
+
   test('dependency bootstrap completes in the Flutter test runtime', () async {
     final dependencies = RelioDependencies(database: createTestDatabase());
     addTearDown(dependencies.dispose);
