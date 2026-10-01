@@ -19,7 +19,8 @@ enum SyncOperation {
   messageUpsert('messageUpsert'),
   sosUpsert('sosUpsert'),
   attachmentMetadataUpsert('attachmentMetadataUpsert'),
-  attachmentUpload('attachmentUpload');
+  attachmentUpload('attachmentUpload'),
+  readReceiptUpsert('readReceiptUpsert');
 
   const SyncOperation(this.value);
 

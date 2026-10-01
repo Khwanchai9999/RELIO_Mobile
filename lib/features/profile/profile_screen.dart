@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/environment.dart';
@@ -88,6 +89,24 @@ class ProfileScreen extends StatelessWidget {
             onTap: () => context.push('/rescue'),
           ),
           const SizedBox(height: 8),
+          if (identity != null) ...[
+            RelioSettingTile(
+              icon: Icons.content_copy_rounded,
+              title: 'Cloud Account ID',
+              subtitle: 'แตะเพื่อคัดลอกและแชร์กับผู้ติดต่อที่เชื่อถือได้',
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: identity.userId));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('คัดลอก Cloud Account ID แล้ว'),
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
           RelioSettingTile(
             icon: Icons.dark_mode_outlined,
             title: 'ธีม',

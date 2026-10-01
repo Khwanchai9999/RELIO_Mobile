@@ -18,6 +18,22 @@ class Conversations extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class CloudConversationLinks extends Table {
+  TextColumn get localConversationId => text()();
+  TextColumn get cloudConversationId => text()();
+  TextColumn get ownerUserId => text()();
+  TextColumn get peerUserId => text()();
+  DateTimeColumn get messageCursorAt => dateTime().nullable()();
+  TextColumn get messageCursorId => text().nullable()();
+  DateTimeColumn get receiptCursorAt => dateTime().nullable()();
+  TextColumn get receiptCursorMessageId => text().nullable()();
+  TextColumn get receiptCursorReaderId => text().nullable()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {localConversationId, ownerUserId};
+}
+
 class Messages extends Table {
   TextColumn get id => text()();
   TextColumn get conversationId => text()();
@@ -169,6 +185,7 @@ class RelayForwardHistory extends Table {
 @DriftDatabase(
   tables: [
     Conversations,
+    CloudConversationLinks,
     Messages,
     NearbyDevices,
     SyncQueue,
@@ -184,8 +201,10 @@ class AppDatabase extends _$AppDatabase {
 
   AppDatabase.memory() : super(NativeDatabase.memory());
 
+  AppDatabase.withExecutor(super.executor);
+
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -239,6 +258,9 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'UPDATE nearby_devices SET auto_reconnect_enabled = 0',
         );
+      }
+      if (from < 7) {
+        await migrator.createTable(cloudConversationLinks);
       }
     },
     beforeOpen: (OpeningDetails details) async {

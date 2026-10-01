@@ -22,6 +22,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool notifications = true;
+  bool notificationPreview = false;
   bool rescue = false;
   bool _settingsLoaded = false;
   bool _updateCheckInProgress = false;
@@ -185,11 +186,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         'notifications_enabled',
         defaultValue: true,
       ),
+      dependencies.repositories.settings.getBool(
+        'notification_preview',
+        defaultValue: false,
+      ),
     ]);
     if (mounted) {
       setState(() {
         rescue = values[0];
         notifications = values[1];
+        notificationPreview = values[2];
       });
     }
   }
@@ -280,6 +286,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             trailing: Switch(
               value: notifications,
               onChanged: (value) => unawaited(_setNotifications(value)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          RelioSettingTile(
+            icon: Icons.visibility_outlined,
+            title: 'แสดงตัวอย่างข้อความในการแจ้งเตือน',
+            subtitle: notificationPreview
+                ? 'แสดงเนื้อหาข้อความ'
+                : 'แสดงข้อความทั่วไป',
+            trailing: Switch(
+              value: notificationPreview,
+              onChanged: notifications
+                  ? (value) {
+                      setState(() => notificationPreview = value);
+                      unawaited(
+                        RelioDependencyScope.of(context).repositories.settings
+                            .setBool('notification_preview', value),
+                      );
+                    }
+                  : null,
             ),
           ),
           const SizedBox(height: 18),

@@ -67,6 +67,14 @@ into it.
   adapter. Do not
   perform live Supabase uploads during implementation without an explicitly
   configured disposable test environment and clearly test data.
+- Direct Cloud conversations are created only through the server-side,
+  idempotent membership RPC. Keep Supabase user IDs, RELIO device IDs, Nearby
+  endpoint IDs, and local/cloud conversation IDs distinct. Persist account-
+  scoped local/cloud mappings in Drift; merge Cloud text and receipts into
+  SQLite before UI observation. Message UUID/content are immutable; pull
+  cursors use server-controlled timestamps, never a device clock. Preserve the
+  shared-backend multi-account FakeCloud tests for restore, authorization,
+  dedupe, unread counts, and receipt reconciliation.
 - Android app runtime uses `AndroidNearbyTransport` by default once Flutter is
   running; Mock transport is an explicit test/developer override.
 - Keep transport endpoint IDs separate from stable RELIO `deviceId` values.
@@ -145,10 +153,12 @@ flutter build apk --flavor prod --debug
 
 QA debug builds must receive the approved updater dart-defines from
 `scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the latest public QA
-release. Build 24 is the local checkpoint; Build 25 (`0.9.0+25`) is the current
-unpublished candidate. Android Keystore identity is implemented, but not
-physically verified. Do not install it on phones or claim physical Nearby
-verification without explicit physical-test authorization.
+release. Build 24 and Build 25 are historical local checkpoints; Build 26
+(`0.9.0+26`) is the current unpublished candidate. Android Keystore identity
+and bidirectional direct Cloud text sync are implemented and locally
+automated-tested, but are not physically or remotely backend verified. Do not
+install it on phones or claim physical Nearby verification without explicit
+physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -167,18 +177,20 @@ Drift generated files are produced by build_runner and must not be edited by
 hand. On this Windows path, use `dart run build_runner build --force-jit` if
 the normal AOT build cannot write its snapshot.
 
-Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
-and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.9. Keep
-them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
-without performing them. Build 25 pins cryptographic peer identity and gates
-automatic reconnect on signed challenge-response; unit tests, emulator checks,
-and signed builds do not prove physical Nearby compatibility across OEMs.
+Physical-radio, runtime-permission, GPS, and two-phone relay checks are
+`DEFERRED MANUAL VERIFICATION` for v0.9. Keep them in
+`docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
+performing them. Build 25 pins cryptographic peer identity and gates automatic
+reconnect on signed challenge-response; Build 26 adds Cloud pull/merge but its
+Supabase migration/RLS still requires separate QA backend verification. Unit
+tests, emulator checks, and signed builds do not prove physical behavior or
+remote policy enforcement.
 
 ## Change boundaries
 
-- Do not add a background worker, cloud-first UI, live credentials, or live
-  Supabase uploads in v0.9.0. The foreground/lifecycle SyncEngine is optional
-  and ownership-gated. Public QA update behavior and the full Firebase App
+- Do not add a background worker, cloud-first UI, or live credentials; live
+  Supabase uploads require an explicitly authorized QA test. The
+  foreground/lifecycle SyncEngine is implemented and ownership-gated. Public QA update behavior and the full Firebase App
   Distribution SDK must never ship inside the PROD Google Play build.
 - FCM token registration is QA-only and consent/account-gated. Do not enable
   remote push or Admin operations until the reviewed migration and Edge
@@ -191,8 +203,9 @@ and signed builds do not prove physical Nearby compatibility across OEMs.
 - `sync_queue` is SQLite-authoritative. Queue processing must preserve
   `ownerUserId`, retry locally, and never upload across accounts.
 - Supabase adapter changes must preserve safe error mapping, RLS ownership, and
-  managed local-media boundaries. Reconciliation/pull is architecture only;
-  do not silently overwrite newer local rows.
+  managed local-media boundaries. Cloud text/receipt pull merges by stable
+  identity and must not overwrite immutable message content or newer local
+  state.
 - Relay is limited to the `relay-v1` store-and-forward envelope. It supports
   bounded text, location, and SOS hops with persistent deduplication and
   forward history; it does not flood, relay media, or run as a background

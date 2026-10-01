@@ -287,8 +287,57 @@ class SupabaseCloudDataSource implements CloudDataSource {
       );
     }
     try {
-      await (await _ready()).from('messages').upsert(message.toJson());
+      final client = await _ready();
+      final existing = await client
+          .from('messages')
+          .select()
+          .eq('id', message.id)
+          .maybeSingle();
+      if (existing != null) {
+        final saved = CloudMessageDto.fromJson(
+          Map<String, dynamic>.from(existing),
+        );
+        if (saved.conversationId != message.conversationId ||
+            saved.senderId != message.senderId ||
+            saved.messageType != message.messageType ||
+            saved.content != message.content) {
+          throw const CloudException(
+            'รหัสข้อความซ้ำกับข้อมูลคนละรายการ',
+            code: 'invalidLocalData',
+          );
+        }
+        return;
+      }
+      final data = message.toJson()
+        ..remove('created_at')
+        ..remove('updated_at')
+        ..remove('delivery_status')
+        ..remove('is_outgoing');
+      await client.from('messages').insert(data);
     } catch (error) {
+      if (error is CloudException) rethrow;
+      // Concurrent retries can race after the existence check. A conflict is
+      // accepted only when the persisted immutable payload matches exactly.
+      try {
+        final existing = await (await _ready())
+            .from('messages')
+            .select()
+            .eq('id', message.id)
+            .maybeSingle();
+        if (existing != null) {
+          final saved = CloudMessageDto.fromJson(
+            Map<String, dynamic>.from(existing),
+          );
+          if (saved.conversationId == message.conversationId &&
+              saved.senderId == message.senderId &&
+              saved.messageType == message.messageType &&
+              saved.content == message.content) {
+            return;
+          }
+        }
+      } on Object {
+        // Preserve the original safe error mapping below.
+      }
       throw _failure(error);
     }
   }
@@ -310,19 +359,165 @@ class SupabaseCloudDataSource implements CloudDataSource {
 
   @override
   Future<List<CloudMessageDto>> fetchMessages(String conversationId) async {
+    final result = <CloudMessageDto>[];
+    CloudMessageCursor? cursor;
+    while (true) {
+      final page = await fetchMessagesPage(
+        conversationId: conversationId,
+        cursor: cursor,
+      );
+      result.addAll(page.messages);
+      if (!page.hasMore || page.messages.isEmpty) return result;
+      final last = page.messages.last;
+      cursor = CloudMessageCursor(createdAt: last.createdAt, id: last.id);
+    }
+  }
+
+  @override
+  Future<CloudConversationDto> createOrGetDirectConversation({
+    required String peerUserId,
+  }) async {
+    _requireAuth();
+    if (peerUserId.trim().isEmpty || peerUserId == _identity!.userId) {
+      throw const CloudException(
+        'บัญชีปลายทางไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    try {
+      final result = await (await _ready()).rpc(
+        'create_or_get_direct_conversation',
+        params: {'target_user_id': peerUserId},
+      );
+      if (result is! List || result.isEmpty) {
+        throw const CloudException(
+          'สร้างบทสนทนา Cloud ไม่สำเร็จ',
+          code: 'invalidLocalData',
+        );
+      }
+      final data = Map<String, dynamic>.from(result.first as Map);
+      return CloudConversationDto(
+        id: data['conversation_id'] as String,
+        participantId: data['peer_user_id'] as String,
+        displayName: data['peer_display_name'] as String? ?? '',
+        updatedAt: DateTime.parse(data['updated_at'] as String),
+      );
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<List<CloudConversationDto>> listMyDirectConversations() async {
     _requireAuth();
     try {
-      final rows = await (await _ready())
+      final rows = await (await _ready()).rpc('list_my_direct_conversations');
+      return (rows as List)
+          .map((item) {
+            final row = Map<String, dynamic>.from(item as Map);
+            return CloudConversationDto(
+              id: row['conversation_id'] as String,
+              participantId: row['peer_user_id'] as String,
+              displayName: row['peer_display_name'] as String? ?? '',
+              updatedAt: DateTime.parse(row['updated_at'] as String),
+            );
+          })
+          .toList(growable: false);
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<CloudMessagePage> fetchMessagesPage({
+    required String conversationId,
+    CloudMessageCursor? cursor,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    if (limit < 1 || limit > 250) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    try {
+      var query = (await _ready())
           .from('messages')
           .select()
-          .eq('conversation_id', conversationId)
-          .order('created_at');
-      return (rows as List)
+          .eq('conversation_id', conversationId);
+      if (cursor != null) {
+        final at = cursor.createdAt.toUtc().toIso8601String();
+        query = query.or(
+          'created_at.gt.$at,and(created_at.eq.$at,id.gt.${cursor.id})',
+        );
+      }
+      final rows = await query.order('created_at').order('id').limit(limit + 1);
+      final values = (rows as List)
           .map(
             (row) =>
                 CloudMessageDto.fromJson(Map<String, dynamic>.from(row as Map)),
           )
-          .toList();
+          .toList(growable: false);
+      return CloudMessagePage(
+        messages: values.take(limit).toList(growable: false),
+        hasMore: values.length > limit,
+      );
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<void> upsertReadReceipt(CloudReadReceipt receipt) async {
+    _requireAuth();
+    try {
+      await (await _ready())
+          .from('message_receipts')
+          .upsert(
+            {
+              'message_id': receipt.messageId,
+              'reader_id': _identity!.userId,
+              'read_at': receipt.readAt.toUtc().toIso8601String(),
+            },
+            onConflict: 'message_id,reader_id',
+            ignoreDuplicates: true,
+          );
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<List<CloudReadReceipt>> fetchReadReceipts({
+    required String conversationId,
+    required DateTime? afterReadAt,
+    String? afterMessageId,
+    String? afterReaderId,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    try {
+      final rows = await (await _ready()).rpc(
+        'fetch_conversation_read_receipts',
+        params: {
+          'target_conversation_id': conversationId,
+          'after_read_at': afterReadAt?.toUtc().toIso8601String(),
+          'after_message_id': afterMessageId,
+          'after_reader_id': afterReaderId,
+          'page_size': limit,
+        },
+      );
+      return (rows as List)
+          .map((item) {
+            final row = Map<String, dynamic>.from(item as Map);
+            return CloudReadReceipt(
+              messageId: row['message_id'] as String,
+              readerId: row['reader_id'] as String,
+              readAt: DateTime.parse(row['read_at'] as String),
+            );
+          })
+          .toList(growable: false);
     } catch (error) {
       throw _failure(error);
     }

@@ -81,7 +81,7 @@ class CloudMessageDto {
         id: json['id'] as String,
         conversationId: json['conversation_id'] as String,
         senderId: json['sender_id'] as String,
-        senderDeviceId: json['sender_device_id'] as String,
+        senderDeviceId: json['sender_device_id'] as String? ?? '',
         messageType: json['message_type'] as String,
         content: json['content'] as String?,
         createdAt: DateTime.parse(json['created_at'] as String),
@@ -89,6 +89,32 @@ class CloudMessageDto {
         deliveryStatus: json['delivery_status'] as String? ?? 'pending',
         isOutgoing: json['is_outgoing'] as bool? ?? false,
       );
+}
+
+class CloudMessageCursor {
+  const CloudMessageCursor({required this.createdAt, required this.id});
+
+  final DateTime createdAt;
+  final String id;
+}
+
+class CloudMessagePage {
+  const CloudMessagePage({required this.messages, required this.hasMore});
+
+  final List<CloudMessageDto> messages;
+  final bool hasMore;
+}
+
+class CloudReadReceipt {
+  const CloudReadReceipt({
+    required this.messageId,
+    required this.readerId,
+    required this.readAt,
+  });
+
+  final String messageId;
+  final String readerId;
+  final DateTime readAt;
 }
 
 class CloudConversationDto {

@@ -334,6 +334,7 @@ String _operationLabel(String operation) =>
       SyncOperation.sosUpsert => 'ข้อมูล SOS',
       SyncOperation.attachmentMetadataUpsert => 'ข้อมูลไฟล์แนบ',
       SyncOperation.attachmentUpload => 'ไฟล์แนบ',
+      SyncOperation.readReceiptUpsert => 'ใบตอบรับการอ่าน',
       null => 'รายการที่ไม่รู้จัก',
     };
 

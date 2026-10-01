@@ -103,6 +103,9 @@ class RelioDependencies {
       cloud: this.cloudDataSource,
       identity: identity,
       mediaStorage: mediaStorageService,
+      localNotifications: localNotificationService,
+      isConversationActive: (conversationId) =>
+          nearbyService.activeConversationId == conversationId,
     );
     this.appUpdateService = appUpdateService ?? AppUpdateService();
   }
@@ -278,6 +281,7 @@ class RelioDependencies {
     if (_isAndroid && !useMockTransport) {
       _readinessSubscription = connectivityStatus.changes.listen((_) {
         unawaited(startNearbySessionIfPermitted());
+        unawaited(syncEngine.run());
       });
     }
     unawaited(connectivityStatus.initialize());

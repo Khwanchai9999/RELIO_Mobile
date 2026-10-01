@@ -7,15 +7,34 @@
 - Previous Firebase App Distribution release: `0.8.5+11`
 - Latest public QA release: `0.9.0+23`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+25` / versionCode 25 (unpublished, not installed)
+- Current candidate: `0.9.0+26` / versionCode 26 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current public release tag: `qa-v0.9.0-b23`
-- Drift schema: v6 in the local Build 25 candidate; v5 data is migrated by
+- Drift schema: v7 in the local Build 26 candidate; v6 data is migrated by
   adding nullable pinned-key fields and disabling reconnect for legacy rows
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
 - PROD package: `com.relio.relio_mobile`
+
+## Build 26 — local Cloud communication candidate
+
+- Cross-account direct conversation creation/linking, owner-scoped persistent
+  mappings, paged Cloud pull, SQLite merge, UUID dedupe, unread tracking, and
+  Cloud read-receipt reconciliation are implemented.
+- SyncEngine actually calls paged message and receipt fetch methods. The
+  shared-backend FakeCloud integration test models independent accounts and
+  verifies import/restore, authorization, pagination, duplicate Nearby/Cloud
+  delivery, unread count stability, and read receipts.
+- Supabase migration `0007_cloud_direct_chat.sql` is source-reviewed only; no
+  local PostgreSQL or QA backend is configured. No claim of live RLS/backend
+  verification is made.
+- FCM Edge Function dispatcher has seven mocked Node tests. It is not deployed,
+  and real Android push delivery is not verified. Admin remains separately
+  protected by authenticated profile roles and audited RPCs; no Admin source
+  changes were needed for this Mobile pass.
+- Build 26 stays unpublished and uninstalled. Physical Nearby, notification,
+  and device acceptance remain deferred.
 
 ## Firebase identity
 

@@ -56,7 +56,11 @@ void main() {
   test('fake cloud upsert is idempotent by local UUID', () async {
     final cloud = FakeCloudDataSource();
     await cloud.register(email: 'tester@example.com', password: 'password123');
-    final message = _message();
+    final peer = cloud.createTestIdentity(email: 'peer@example.com');
+    final conversation = await cloud.createOrGetDirectConversation(
+      peerUserId: peer.userId,
+    );
+    final message = _message(conversationId: conversation.id);
     await cloud.upsertMessage(message);
     await cloud.upsertMessage(message);
     expect(cloud.messages, hasLength(1));
@@ -95,15 +99,16 @@ void main() {
   );
 }
 
-CloudMessageDto _message() => CloudMessageDto(
-  id: 'message-1',
-  conversationId: 'conversation-1',
-  senderId: 'fake-1',
-  senderDeviceId: 'device-1',
-  messageType: 'text',
-  content: 'hello',
-  createdAt: DateTime.utc(2026, 1, 1),
-  updatedAt: DateTime.utc(2026, 1, 1),
-  deliveryStatus: 'pending',
-  isOutgoing: true,
-);
+CloudMessageDto _message({String conversationId = 'conversation-1'}) =>
+    CloudMessageDto(
+      id: 'message-1',
+      conversationId: conversationId,
+      senderId: 'fake-1',
+      senderDeviceId: 'device-1',
+      messageType: 'text',
+      content: 'hello',
+      createdAt: DateTime.utc(2026, 1, 1),
+      updatedAt: DateTime.utc(2026, 1, 1),
+      deliveryStatus: 'pending',
+      isOutgoing: true,
+    );

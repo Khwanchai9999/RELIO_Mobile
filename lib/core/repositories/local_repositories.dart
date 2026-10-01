@@ -7,6 +7,7 @@ import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import '../database/app_database.dart';
 import '../domain/relio_entities.dart';
+import '../cloud/cloud_models.dart';
 import '../sync/sync_types.dart';
 
 abstract interface class ConversationRepository {
@@ -79,8 +80,62 @@ abstract interface class MessageRepository {
   Future<void> updateDeliveryStatus(String messageId, DeliveryStatus status);
   Future<List<String>> markConversationRead(String conversationId);
   Future<void> markMessageRead(String messageId);
+  Future<void> mergeCloudReadReceipt({
+    required String messageId,
+    required DateTime readAt,
+  });
+  Future<bool> mergeCloudText({
+    required String conversationId,
+    required String messageId,
+    required String senderUserId,
+    required String senderDeviceId,
+    required String text,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    required String currentUserId,
+    DateTime? readAt,
+  });
   Future<void> updateCloudSyncStatus(String messageId, String status);
   Future<void> markFailed(String messageId, String error);
+}
+
+class CloudConversationBinding {
+  const CloudConversationBinding({
+    required this.localConversationId,
+    required this.cloudConversationId,
+    required this.ownerUserId,
+    required this.peerUserId,
+    this.messageCursor,
+    this.receiptCursorAt,
+    this.receiptCursorMessageId,
+    this.receiptCursorReaderId,
+  });
+
+  final String localConversationId;
+  final String cloudConversationId;
+  final String ownerUserId;
+  final String peerUserId;
+  final CloudMessageCursor? messageCursor;
+  final DateTime? receiptCursorAt;
+  final String? receiptCursorMessageId;
+  final String? receiptCursorReaderId;
+}
+
+abstract interface class CloudConversationLinkRepository {
+  Future<CloudConversationBinding?> get({
+    required String localConversationId,
+    required String ownerUserId,
+  });
+  Future<List<CloudConversationBinding>> listForOwner(String ownerUserId);
+  Future<void> save(CloudConversationBinding link);
+  Future<void> updateMessageCursor(
+    CloudConversationBinding link,
+    CloudMessageCursor cursor,
+  );
+  Future<void> updateReceiptCursor(
+    CloudConversationBinding link,
+    CloudReadReceipt cursor,
+  );
 }
 
 abstract interface class AttachmentRepository {
@@ -766,6 +821,103 @@ class DriftMessageRepository implements MessageRepository {
               row.readAt.isNull(),
         ))
         .write(MessagesCompanion(readAt: Value(now), updatedAt: Value(now)));
+  }
+
+  @override
+  Future<void> mergeCloudReadReceipt({
+    required String messageId,
+    required DateTime readAt,
+  }) async {
+    final existing = await (db.select(
+      db.messages,
+    )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+    if (existing == null || !existing.isOutgoing) return;
+    final current = existing.readAt;
+    if (current != null && !readAt.isBefore(current)) return;
+    await (db.update(db.messages)..where(
+          (row) => row.id.equals(messageId) & row.isOutgoing.equals(true),
+        ))
+        .write(
+          MessagesCompanion(
+            readAt: Value(readAt),
+            updatedAt: Value(
+              readAt.isAfter(existing.updatedAt) ? readAt : existing.updatedAt,
+            ),
+          ),
+        );
+  }
+
+  @override
+  Future<bool> mergeCloudText({
+    required String conversationId,
+    required String messageId,
+    required String senderUserId,
+    required String senderDeviceId,
+    required String text,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    required String currentUserId,
+    DateTime? readAt,
+  }) async {
+    final result = await db.transaction(() async {
+      final existing = await (db.select(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+      if (existing != null) {
+        if (existing.conversationId != conversationId ||
+            existing.senderId != senderUserId ||
+            existing.content != text) {
+          throw const CloudException(
+            'รหัสข้อความซ้ำกับข้อมูลคนละรายการ',
+            code: 'invalidLocalData',
+          );
+        }
+        await (db.update(
+          db.messages,
+        )..where((row) => row.id.equals(messageId))).write(
+          MessagesCompanion(
+            cloudSyncStatus: const Value('synced'),
+            readAt: Value(_earliest(existing.readAt, readAt)),
+            updatedAt: Value(
+              updatedAt.isAfter(existing.updatedAt)
+                  ? updatedAt
+                  : existing.updatedAt,
+            ),
+          ),
+        );
+        return false;
+      }
+
+      final outgoing = senderUserId == currentUserId;
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: messageId,
+              conversationId: conversationId,
+              senderId: senderUserId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: MessageType.text.name,
+              content: text,
+              createdAt: createdAt,
+              updatedAt: updatedAt,
+              deliveryStatus: DeliveryStatus.delivered.name,
+              cloudSyncStatus: const Value('synced'),
+              isOutgoing: outgoing,
+              readAt: Value(readAt),
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, createdAt);
+      if (!outgoing && readAt == null) await _incrementUnread(conversationId);
+      return true;
+    });
+    return result;
+  }
+
+  DateTime? _earliest(DateTime? current, DateTime? incoming) {
+    if (current == null) return incoming;
+    if (incoming == null) return current;
+    return current.isBefore(incoming) ? current : incoming;
   }
 
   @override
@@ -1712,6 +1864,115 @@ class RelioSettingsRepository {
   }
 }
 
+class DriftCloudConversationLinkRepository
+    implements CloudConversationLinkRepository {
+  DriftCloudConversationLinkRepository(this.db);
+
+  final AppDatabase db;
+
+  @override
+  Future<CloudConversationBinding?> get({
+    required String localConversationId,
+    required String ownerUserId,
+  }) async {
+    final row =
+        await (db.select(db.cloudConversationLinks)..where(
+              (link) =>
+                  link.localConversationId.equals(localConversationId) &
+                  link.ownerUserId.equals(ownerUserId),
+            ))
+            .getSingleOrNull();
+    return row == null ? null : _map(row);
+  }
+
+  @override
+  Future<List<CloudConversationBinding>> listForOwner(
+    String ownerUserId,
+  ) async =>
+      (await (db.select(
+            db.cloudConversationLinks,
+          )..where((link) => link.ownerUserId.equals(ownerUserId))).get())
+          .map(_map)
+          .toList(growable: false);
+
+  @override
+  Future<void> save(CloudConversationBinding link) async {
+    await db
+        .into(db.cloudConversationLinks)
+        .insertOnConflictUpdate(
+          CloudConversationLinksCompanion.insert(
+            localConversationId: link.localConversationId,
+            cloudConversationId: link.cloudConversationId,
+            ownerUserId: link.ownerUserId,
+            peerUserId: link.peerUserId,
+            messageCursorAt: Value(link.messageCursor?.createdAt),
+            messageCursorId: Value(link.messageCursor?.id),
+            receiptCursorAt: Value(link.receiptCursorAt),
+            receiptCursorMessageId: Value(link.receiptCursorMessageId),
+            receiptCursorReaderId: Value(link.receiptCursorReaderId),
+            updatedAt: DateTime.now(),
+          ),
+        );
+  }
+
+  @override
+  Future<void> updateMessageCursor(
+    CloudConversationBinding link,
+    CloudMessageCursor cursor,
+  ) async {
+    await (db.update(db.cloudConversationLinks)..where(
+          (row) =>
+              row.localConversationId.equals(link.localConversationId) &
+              row.ownerUserId.equals(link.ownerUserId),
+        ))
+        .write(
+          CloudConversationLinksCompanion(
+            messageCursorAt: Value(cursor.createdAt),
+            messageCursorId: Value(cursor.id),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  }
+
+  @override
+  Future<void> updateReceiptCursor(
+    CloudConversationBinding link,
+    CloudReadReceipt cursor,
+  ) async {
+    await (db.update(db.cloudConversationLinks)..where(
+          (row) =>
+              row.localConversationId.equals(link.localConversationId) &
+              row.ownerUserId.equals(link.ownerUserId),
+        ))
+        .write(
+          CloudConversationLinksCompanion(
+            receiptCursorAt: Value(cursor.readAt),
+            receiptCursorMessageId: Value(cursor.messageId),
+            receiptCursorReaderId: Value(cursor.readerId),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  }
+
+  CloudConversationBinding _map(CloudConversationLink row) =>
+      CloudConversationBinding(
+        localConversationId: row.localConversationId,
+        cloudConversationId: row.cloudConversationId,
+        ownerUserId: row.ownerUserId,
+        peerUserId: row.peerUserId,
+        messageCursor:
+            row.messageCursorAt == null || row.messageCursorId == null
+            ? null
+            : CloudMessageCursor(
+                createdAt: row.messageCursorAt!,
+                id: row.messageCursorId!,
+              ),
+        receiptCursorAt: row.receiptCursorAt,
+        receiptCursorMessageId: row.receiptCursorMessageId,
+        receiptCursorReaderId: row.receiptCursorReaderId,
+      );
+}
+
 class RelioRepositories {
   RelioRepositories(this.database, {String? Function()? ownerUserIdProvider})
     : syncQueue = DriftSyncQueueRepository(
@@ -1719,6 +1980,7 @@ class RelioRepositories {
         ownerUserIdProvider: ownerUserIdProvider,
       ),
       conversations = DriftConversationRepository(database),
+      cloudLinks = DriftCloudConversationLinkRepository(database),
       nearbyDevices = DriftNearbyDeviceRepository(database),
       settings = RelioSettingsRepository(database),
       attachments = DriftAttachmentRepository(database) {
@@ -1733,6 +1995,7 @@ class RelioRepositories {
   final AppDatabase database;
   late final MessageRepository messages;
   late final ConversationRepository conversations;
+  final CloudConversationLinkRepository cloudLinks;
   late final SOSRepository sos;
   final SyncQueueRepository syncQueue;
   final NearbyDeviceRepository nearbyDevices;

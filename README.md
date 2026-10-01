@@ -106,9 +106,12 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
 overrides use Mock transport. Build 23 remains the latest public release;
-Build 25 (`0.9.0+25`) is the unpublished integration candidate. Android
-Keystore identity and Nearby challenge-response are implemented, but physical
-reconnect, remote QA backend, and release verification remain unverified.
+Build 26 (`0.9.0+26`) is the unpublished local cloud-communication candidate.
+Cross-account direct conversation linking, local mapping, paged cloud-to-local
+message reconciliation, and receipt merge are implemented and covered by
+multi-account FakeCloud tests. The Supabase migration has not been applied or
+remotely verified; physical Nearby reconnect and release verification remain
+unverified.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -274,7 +277,13 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
   release; physical device acceptance remains pending.
 - **v0.9.0+24 checkpoint:** persistent trust/chat read state and Android
   notifications.
-- **v0.9.0+25 candidate:** Android Keystore-backed ECDSA identity, versioned
+- **v0.9.0+26 candidate:** bidirectional direct Cloud chat with explicit
+  account linking, persistent local/cloud mappings, server-timestamp paging,
+  stable-UUID merge, read-receipt reconciliation, and multi-account test
+  coverage. Android Keystore-backed identity remains in place. Build 26 is
+  local-only and unpublished; QA Supabase RLS and physical acceptance remain
+  unverified.
+- **v0.9.0+25 checkpoint:** Android Keystore-backed ECDSA identity, versioned
   replay-resistant challenge-response, pinned peer identity, and guarded
   trusted reconnect are implemented. Remote Supabase/FCM/Admin verification
   and physical reconnect remain pending. See

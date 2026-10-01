@@ -543,6 +543,713 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   }
 }
 
+class $CloudConversationLinksTable extends CloudConversationLinks
+    with TableInfo<$CloudConversationLinksTable, CloudConversationLink> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CloudConversationLinksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _localConversationIdMeta =
+      const VerificationMeta('localConversationId');
+  @override
+  late final GeneratedColumn<String> localConversationId =
+      GeneratedColumn<String>(
+        'local_conversation_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _cloudConversationIdMeta =
+      const VerificationMeta('cloudConversationId');
+  @override
+  late final GeneratedColumn<String> cloudConversationId =
+      GeneratedColumn<String>(
+        'cloud_conversation_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _ownerUserIdMeta = const VerificationMeta(
+    'ownerUserId',
+  );
+  @override
+  late final GeneratedColumn<String> ownerUserId = GeneratedColumn<String>(
+    'owner_user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _peerUserIdMeta = const VerificationMeta(
+    'peerUserId',
+  );
+  @override
+  late final GeneratedColumn<String> peerUserId = GeneratedColumn<String>(
+    'peer_user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _messageCursorAtMeta = const VerificationMeta(
+    'messageCursorAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> messageCursorAt =
+      GeneratedColumn<DateTime>(
+        'message_cursor_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _messageCursorIdMeta = const VerificationMeta(
+    'messageCursorId',
+  );
+  @override
+  late final GeneratedColumn<String> messageCursorId = GeneratedColumn<String>(
+    'message_cursor_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _receiptCursorAtMeta = const VerificationMeta(
+    'receiptCursorAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> receiptCursorAt =
+      GeneratedColumn<DateTime>(
+        'receipt_cursor_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _receiptCursorMessageIdMeta =
+      const VerificationMeta('receiptCursorMessageId');
+  @override
+  late final GeneratedColumn<String> receiptCursorMessageId =
+      GeneratedColumn<String>(
+        'receipt_cursor_message_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _receiptCursorReaderIdMeta =
+      const VerificationMeta('receiptCursorReaderId');
+  @override
+  late final GeneratedColumn<String> receiptCursorReaderId =
+      GeneratedColumn<String>(
+        'receipt_cursor_reader_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    localConversationId,
+    cloudConversationId,
+    ownerUserId,
+    peerUserId,
+    messageCursorAt,
+    messageCursorId,
+    receiptCursorAt,
+    receiptCursorMessageId,
+    receiptCursorReaderId,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'cloud_conversation_links';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CloudConversationLink> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('local_conversation_id')) {
+      context.handle(
+        _localConversationIdMeta,
+        localConversationId.isAcceptableOrUnknown(
+          data['local_conversation_id']!,
+          _localConversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_localConversationIdMeta);
+    }
+    if (data.containsKey('cloud_conversation_id')) {
+      context.handle(
+        _cloudConversationIdMeta,
+        cloudConversationId.isAcceptableOrUnknown(
+          data['cloud_conversation_id']!,
+          _cloudConversationIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_cloudConversationIdMeta);
+    }
+    if (data.containsKey('owner_user_id')) {
+      context.handle(
+        _ownerUserIdMeta,
+        ownerUserId.isAcceptableOrUnknown(
+          data['owner_user_id']!,
+          _ownerUserIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerUserIdMeta);
+    }
+    if (data.containsKey('peer_user_id')) {
+      context.handle(
+        _peerUserIdMeta,
+        peerUserId.isAcceptableOrUnknown(
+          data['peer_user_id']!,
+          _peerUserIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_peerUserIdMeta);
+    }
+    if (data.containsKey('message_cursor_at')) {
+      context.handle(
+        _messageCursorAtMeta,
+        messageCursorAt.isAcceptableOrUnknown(
+          data['message_cursor_at']!,
+          _messageCursorAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('message_cursor_id')) {
+      context.handle(
+        _messageCursorIdMeta,
+        messageCursorId.isAcceptableOrUnknown(
+          data['message_cursor_id']!,
+          _messageCursorIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('receipt_cursor_at')) {
+      context.handle(
+        _receiptCursorAtMeta,
+        receiptCursorAt.isAcceptableOrUnknown(
+          data['receipt_cursor_at']!,
+          _receiptCursorAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('receipt_cursor_message_id')) {
+      context.handle(
+        _receiptCursorMessageIdMeta,
+        receiptCursorMessageId.isAcceptableOrUnknown(
+          data['receipt_cursor_message_id']!,
+          _receiptCursorMessageIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('receipt_cursor_reader_id')) {
+      context.handle(
+        _receiptCursorReaderIdMeta,
+        receiptCursorReaderId.isAcceptableOrUnknown(
+          data['receipt_cursor_reader_id']!,
+          _receiptCursorReaderIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {localConversationId, ownerUserId};
+  @override
+  CloudConversationLink map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CloudConversationLink(
+      localConversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_conversation_id'],
+      )!,
+      cloudConversationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}cloud_conversation_id'],
+      )!,
+      ownerUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}owner_user_id'],
+      )!,
+      peerUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_user_id'],
+      )!,
+      messageCursorAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}message_cursor_at'],
+      ),
+      messageCursorId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}message_cursor_id'],
+      ),
+      receiptCursorAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}receipt_cursor_at'],
+      ),
+      receiptCursorMessageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_cursor_message_id'],
+      ),
+      receiptCursorReaderId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}receipt_cursor_reader_id'],
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CloudConversationLinksTable createAlias(String alias) {
+    return $CloudConversationLinksTable(attachedDatabase, alias);
+  }
+}
+
+class CloudConversationLink extends DataClass
+    implements Insertable<CloudConversationLink> {
+  final String localConversationId;
+  final String cloudConversationId;
+  final String ownerUserId;
+  final String peerUserId;
+  final DateTime? messageCursorAt;
+  final String? messageCursorId;
+  final DateTime? receiptCursorAt;
+  final String? receiptCursorMessageId;
+  final String? receiptCursorReaderId;
+  final DateTime updatedAt;
+  const CloudConversationLink({
+    required this.localConversationId,
+    required this.cloudConversationId,
+    required this.ownerUserId,
+    required this.peerUserId,
+    this.messageCursorAt,
+    this.messageCursorId,
+    this.receiptCursorAt,
+    this.receiptCursorMessageId,
+    this.receiptCursorReaderId,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['local_conversation_id'] = Variable<String>(localConversationId);
+    map['cloud_conversation_id'] = Variable<String>(cloudConversationId);
+    map['owner_user_id'] = Variable<String>(ownerUserId);
+    map['peer_user_id'] = Variable<String>(peerUserId);
+    if (!nullToAbsent || messageCursorAt != null) {
+      map['message_cursor_at'] = Variable<DateTime>(messageCursorAt);
+    }
+    if (!nullToAbsent || messageCursorId != null) {
+      map['message_cursor_id'] = Variable<String>(messageCursorId);
+    }
+    if (!nullToAbsent || receiptCursorAt != null) {
+      map['receipt_cursor_at'] = Variable<DateTime>(receiptCursorAt);
+    }
+    if (!nullToAbsent || receiptCursorMessageId != null) {
+      map['receipt_cursor_message_id'] = Variable<String>(
+        receiptCursorMessageId,
+      );
+    }
+    if (!nullToAbsent || receiptCursorReaderId != null) {
+      map['receipt_cursor_reader_id'] = Variable<String>(receiptCursorReaderId);
+    }
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  CloudConversationLinksCompanion toCompanion(bool nullToAbsent) {
+    return CloudConversationLinksCompanion(
+      localConversationId: Value(localConversationId),
+      cloudConversationId: Value(cloudConversationId),
+      ownerUserId: Value(ownerUserId),
+      peerUserId: Value(peerUserId),
+      messageCursorAt: messageCursorAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(messageCursorAt),
+      messageCursorId: messageCursorId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(messageCursorId),
+      receiptCursorAt: receiptCursorAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(receiptCursorAt),
+      receiptCursorMessageId: receiptCursorMessageId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(receiptCursorMessageId),
+      receiptCursorReaderId: receiptCursorReaderId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(receiptCursorReaderId),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CloudConversationLink.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CloudConversationLink(
+      localConversationId: serializer.fromJson<String>(
+        json['localConversationId'],
+      ),
+      cloudConversationId: serializer.fromJson<String>(
+        json['cloudConversationId'],
+      ),
+      ownerUserId: serializer.fromJson<String>(json['ownerUserId']),
+      peerUserId: serializer.fromJson<String>(json['peerUserId']),
+      messageCursorAt: serializer.fromJson<DateTime?>(json['messageCursorAt']),
+      messageCursorId: serializer.fromJson<String?>(json['messageCursorId']),
+      receiptCursorAt: serializer.fromJson<DateTime?>(json['receiptCursorAt']),
+      receiptCursorMessageId: serializer.fromJson<String?>(
+        json['receiptCursorMessageId'],
+      ),
+      receiptCursorReaderId: serializer.fromJson<String?>(
+        json['receiptCursorReaderId'],
+      ),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'localConversationId': serializer.toJson<String>(localConversationId),
+      'cloudConversationId': serializer.toJson<String>(cloudConversationId),
+      'ownerUserId': serializer.toJson<String>(ownerUserId),
+      'peerUserId': serializer.toJson<String>(peerUserId),
+      'messageCursorAt': serializer.toJson<DateTime?>(messageCursorAt),
+      'messageCursorId': serializer.toJson<String?>(messageCursorId),
+      'receiptCursorAt': serializer.toJson<DateTime?>(receiptCursorAt),
+      'receiptCursorMessageId': serializer.toJson<String?>(
+        receiptCursorMessageId,
+      ),
+      'receiptCursorReaderId': serializer.toJson<String?>(
+        receiptCursorReaderId,
+      ),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  CloudConversationLink copyWith({
+    String? localConversationId,
+    String? cloudConversationId,
+    String? ownerUserId,
+    String? peerUserId,
+    Value<DateTime?> messageCursorAt = const Value.absent(),
+    Value<String?> messageCursorId = const Value.absent(),
+    Value<DateTime?> receiptCursorAt = const Value.absent(),
+    Value<String?> receiptCursorMessageId = const Value.absent(),
+    Value<String?> receiptCursorReaderId = const Value.absent(),
+    DateTime? updatedAt,
+  }) => CloudConversationLink(
+    localConversationId: localConversationId ?? this.localConversationId,
+    cloudConversationId: cloudConversationId ?? this.cloudConversationId,
+    ownerUserId: ownerUserId ?? this.ownerUserId,
+    peerUserId: peerUserId ?? this.peerUserId,
+    messageCursorAt: messageCursorAt.present
+        ? messageCursorAt.value
+        : this.messageCursorAt,
+    messageCursorId: messageCursorId.present
+        ? messageCursorId.value
+        : this.messageCursorId,
+    receiptCursorAt: receiptCursorAt.present
+        ? receiptCursorAt.value
+        : this.receiptCursorAt,
+    receiptCursorMessageId: receiptCursorMessageId.present
+        ? receiptCursorMessageId.value
+        : this.receiptCursorMessageId,
+    receiptCursorReaderId: receiptCursorReaderId.present
+        ? receiptCursorReaderId.value
+        : this.receiptCursorReaderId,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CloudConversationLink copyWithCompanion(
+    CloudConversationLinksCompanion data,
+  ) {
+    return CloudConversationLink(
+      localConversationId: data.localConversationId.present
+          ? data.localConversationId.value
+          : this.localConversationId,
+      cloudConversationId: data.cloudConversationId.present
+          ? data.cloudConversationId.value
+          : this.cloudConversationId,
+      ownerUserId: data.ownerUserId.present
+          ? data.ownerUserId.value
+          : this.ownerUserId,
+      peerUserId: data.peerUserId.present
+          ? data.peerUserId.value
+          : this.peerUserId,
+      messageCursorAt: data.messageCursorAt.present
+          ? data.messageCursorAt.value
+          : this.messageCursorAt,
+      messageCursorId: data.messageCursorId.present
+          ? data.messageCursorId.value
+          : this.messageCursorId,
+      receiptCursorAt: data.receiptCursorAt.present
+          ? data.receiptCursorAt.value
+          : this.receiptCursorAt,
+      receiptCursorMessageId: data.receiptCursorMessageId.present
+          ? data.receiptCursorMessageId.value
+          : this.receiptCursorMessageId,
+      receiptCursorReaderId: data.receiptCursorReaderId.present
+          ? data.receiptCursorReaderId.value
+          : this.receiptCursorReaderId,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CloudConversationLink(')
+          ..write('localConversationId: $localConversationId, ')
+          ..write('cloudConversationId: $cloudConversationId, ')
+          ..write('ownerUserId: $ownerUserId, ')
+          ..write('peerUserId: $peerUserId, ')
+          ..write('messageCursorAt: $messageCursorAt, ')
+          ..write('messageCursorId: $messageCursorId, ')
+          ..write('receiptCursorAt: $receiptCursorAt, ')
+          ..write('receiptCursorMessageId: $receiptCursorMessageId, ')
+          ..write('receiptCursorReaderId: $receiptCursorReaderId, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    localConversationId,
+    cloudConversationId,
+    ownerUserId,
+    peerUserId,
+    messageCursorAt,
+    messageCursorId,
+    receiptCursorAt,
+    receiptCursorMessageId,
+    receiptCursorReaderId,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CloudConversationLink &&
+          other.localConversationId == this.localConversationId &&
+          other.cloudConversationId == this.cloudConversationId &&
+          other.ownerUserId == this.ownerUserId &&
+          other.peerUserId == this.peerUserId &&
+          other.messageCursorAt == this.messageCursorAt &&
+          other.messageCursorId == this.messageCursorId &&
+          other.receiptCursorAt == this.receiptCursorAt &&
+          other.receiptCursorMessageId == this.receiptCursorMessageId &&
+          other.receiptCursorReaderId == this.receiptCursorReaderId &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CloudConversationLinksCompanion
+    extends UpdateCompanion<CloudConversationLink> {
+  final Value<String> localConversationId;
+  final Value<String> cloudConversationId;
+  final Value<String> ownerUserId;
+  final Value<String> peerUserId;
+  final Value<DateTime?> messageCursorAt;
+  final Value<String?> messageCursorId;
+  final Value<DateTime?> receiptCursorAt;
+  final Value<String?> receiptCursorMessageId;
+  final Value<String?> receiptCursorReaderId;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const CloudConversationLinksCompanion({
+    this.localConversationId = const Value.absent(),
+    this.cloudConversationId = const Value.absent(),
+    this.ownerUserId = const Value.absent(),
+    this.peerUserId = const Value.absent(),
+    this.messageCursorAt = const Value.absent(),
+    this.messageCursorId = const Value.absent(),
+    this.receiptCursorAt = const Value.absent(),
+    this.receiptCursorMessageId = const Value.absent(),
+    this.receiptCursorReaderId = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CloudConversationLinksCompanion.insert({
+    required String localConversationId,
+    required String cloudConversationId,
+    required String ownerUserId,
+    required String peerUserId,
+    this.messageCursorAt = const Value.absent(),
+    this.messageCursorId = const Value.absent(),
+    this.receiptCursorAt = const Value.absent(),
+    this.receiptCursorMessageId = const Value.absent(),
+    this.receiptCursorReaderId = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : localConversationId = Value(localConversationId),
+       cloudConversationId = Value(cloudConversationId),
+       ownerUserId = Value(ownerUserId),
+       peerUserId = Value(peerUserId),
+       updatedAt = Value(updatedAt);
+  static Insertable<CloudConversationLink> custom({
+    Expression<String>? localConversationId,
+    Expression<String>? cloudConversationId,
+    Expression<String>? ownerUserId,
+    Expression<String>? peerUserId,
+    Expression<DateTime>? messageCursorAt,
+    Expression<String>? messageCursorId,
+    Expression<DateTime>? receiptCursorAt,
+    Expression<String>? receiptCursorMessageId,
+    Expression<String>? receiptCursorReaderId,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (localConversationId != null)
+        'local_conversation_id': localConversationId,
+      if (cloudConversationId != null)
+        'cloud_conversation_id': cloudConversationId,
+      if (ownerUserId != null) 'owner_user_id': ownerUserId,
+      if (peerUserId != null) 'peer_user_id': peerUserId,
+      if (messageCursorAt != null) 'message_cursor_at': messageCursorAt,
+      if (messageCursorId != null) 'message_cursor_id': messageCursorId,
+      if (receiptCursorAt != null) 'receipt_cursor_at': receiptCursorAt,
+      if (receiptCursorMessageId != null)
+        'receipt_cursor_message_id': receiptCursorMessageId,
+      if (receiptCursorReaderId != null)
+        'receipt_cursor_reader_id': receiptCursorReaderId,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CloudConversationLinksCompanion copyWith({
+    Value<String>? localConversationId,
+    Value<String>? cloudConversationId,
+    Value<String>? ownerUserId,
+    Value<String>? peerUserId,
+    Value<DateTime?>? messageCursorAt,
+    Value<String?>? messageCursorId,
+    Value<DateTime?>? receiptCursorAt,
+    Value<String?>? receiptCursorMessageId,
+    Value<String?>? receiptCursorReaderId,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CloudConversationLinksCompanion(
+      localConversationId: localConversationId ?? this.localConversationId,
+      cloudConversationId: cloudConversationId ?? this.cloudConversationId,
+      ownerUserId: ownerUserId ?? this.ownerUserId,
+      peerUserId: peerUserId ?? this.peerUserId,
+      messageCursorAt: messageCursorAt ?? this.messageCursorAt,
+      messageCursorId: messageCursorId ?? this.messageCursorId,
+      receiptCursorAt: receiptCursorAt ?? this.receiptCursorAt,
+      receiptCursorMessageId:
+          receiptCursorMessageId ?? this.receiptCursorMessageId,
+      receiptCursorReaderId:
+          receiptCursorReaderId ?? this.receiptCursorReaderId,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (localConversationId.present) {
+      map['local_conversation_id'] = Variable<String>(
+        localConversationId.value,
+      );
+    }
+    if (cloudConversationId.present) {
+      map['cloud_conversation_id'] = Variable<String>(
+        cloudConversationId.value,
+      );
+    }
+    if (ownerUserId.present) {
+      map['owner_user_id'] = Variable<String>(ownerUserId.value);
+    }
+    if (peerUserId.present) {
+      map['peer_user_id'] = Variable<String>(peerUserId.value);
+    }
+    if (messageCursorAt.present) {
+      map['message_cursor_at'] = Variable<DateTime>(messageCursorAt.value);
+    }
+    if (messageCursorId.present) {
+      map['message_cursor_id'] = Variable<String>(messageCursorId.value);
+    }
+    if (receiptCursorAt.present) {
+      map['receipt_cursor_at'] = Variable<DateTime>(receiptCursorAt.value);
+    }
+    if (receiptCursorMessageId.present) {
+      map['receipt_cursor_message_id'] = Variable<String>(
+        receiptCursorMessageId.value,
+      );
+    }
+    if (receiptCursorReaderId.present) {
+      map['receipt_cursor_reader_id'] = Variable<String>(
+        receiptCursorReaderId.value,
+      );
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CloudConversationLinksCompanion(')
+          ..write('localConversationId: $localConversationId, ')
+          ..write('cloudConversationId: $cloudConversationId, ')
+          ..write('ownerUserId: $ownerUserId, ')
+          ..write('peerUserId: $peerUserId, ')
+          ..write('messageCursorAt: $messageCursorAt, ')
+          ..write('messageCursorId: $messageCursorId, ')
+          ..write('receiptCursorAt: $receiptCursorAt, ')
+          ..write('receiptCursorMessageId: $receiptCursorMessageId, ')
+          ..write('receiptCursorReaderId: $receiptCursorReaderId, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -6470,6 +7177,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $ConversationsTable conversations = $ConversationsTable(this);
+  late final $CloudConversationLinksTable cloudConversationLinks =
+      $CloudConversationLinksTable(this);
   late final $MessagesTable messages = $MessagesTable(this);
   late final $NearbyDevicesTable nearbyDevices = $NearbyDevicesTable(this);
   late final $SyncQueueTable syncQueue = $SyncQueueTable(this);
@@ -6485,6 +7194,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     conversations,
+    cloudConversationLinks,
     messages,
     nearbyDevices,
     syncQueue,
@@ -6770,6 +7480,350 @@ typedef $$ConversationsTableProcessedTableManager =
         BaseReferences<_$AppDatabase, $ConversationsTable, Conversation>,
       ),
       Conversation,
+      PrefetchHooks Function()
+    >;
+typedef $$CloudConversationLinksTableCreateCompanionBuilder =
+    CloudConversationLinksCompanion Function({
+      required String localConversationId,
+      required String cloudConversationId,
+      required String ownerUserId,
+      required String peerUserId,
+      Value<DateTime?> messageCursorAt,
+      Value<String?> messageCursorId,
+      Value<DateTime?> receiptCursorAt,
+      Value<String?> receiptCursorMessageId,
+      Value<String?> receiptCursorReaderId,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CloudConversationLinksTableUpdateCompanionBuilder =
+    CloudConversationLinksCompanion Function({
+      Value<String> localConversationId,
+      Value<String> cloudConversationId,
+      Value<String> ownerUserId,
+      Value<String> peerUserId,
+      Value<DateTime?> messageCursorAt,
+      Value<String?> messageCursorId,
+      Value<DateTime?> receiptCursorAt,
+      Value<String?> receiptCursorMessageId,
+      Value<String?> receiptCursorReaderId,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$CloudConversationLinksTableFilterComposer
+    extends Composer<_$AppDatabase, $CloudConversationLinksTable> {
+  $$CloudConversationLinksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get localConversationId => $composableBuilder(
+    column: $table.localConversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get cloudConversationId => $composableBuilder(
+    column: $table.cloudConversationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerUserId => $composableBuilder(
+    column: $table.peerUserId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get messageCursorAt => $composableBuilder(
+    column: $table.messageCursorAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get messageCursorId => $composableBuilder(
+    column: $table.messageCursorId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get receiptCursorAt => $composableBuilder(
+    column: $table.receiptCursorAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptCursorMessageId => $composableBuilder(
+    column: $table.receiptCursorMessageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get receiptCursorReaderId => $composableBuilder(
+    column: $table.receiptCursorReaderId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CloudConversationLinksTableOrderingComposer
+    extends Composer<_$AppDatabase, $CloudConversationLinksTable> {
+  $$CloudConversationLinksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get localConversationId => $composableBuilder(
+    column: $table.localConversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get cloudConversationId => $composableBuilder(
+    column: $table.cloudConversationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerUserId => $composableBuilder(
+    column: $table.peerUserId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get messageCursorAt => $composableBuilder(
+    column: $table.messageCursorAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get messageCursorId => $composableBuilder(
+    column: $table.messageCursorId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get receiptCursorAt => $composableBuilder(
+    column: $table.receiptCursorAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptCursorMessageId => $composableBuilder(
+    column: $table.receiptCursorMessageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get receiptCursorReaderId => $composableBuilder(
+    column: $table.receiptCursorReaderId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CloudConversationLinksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $CloudConversationLinksTable> {
+  $$CloudConversationLinksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get localConversationId => $composableBuilder(
+    column: $table.localConversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get cloudConversationId => $composableBuilder(
+    column: $table.cloudConversationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get ownerUserId => $composableBuilder(
+    column: $table.ownerUserId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get peerUserId => $composableBuilder(
+    column: $table.peerUserId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get messageCursorAt => $composableBuilder(
+    column: $table.messageCursorAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get messageCursorId => $composableBuilder(
+    column: $table.messageCursorId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get receiptCursorAt => $composableBuilder(
+    column: $table.receiptCursorAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptCursorMessageId => $composableBuilder(
+    column: $table.receiptCursorMessageId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get receiptCursorReaderId => $composableBuilder(
+    column: $table.receiptCursorReaderId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$CloudConversationLinksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $CloudConversationLinksTable,
+          CloudConversationLink,
+          $$CloudConversationLinksTableFilterComposer,
+          $$CloudConversationLinksTableOrderingComposer,
+          $$CloudConversationLinksTableAnnotationComposer,
+          $$CloudConversationLinksTableCreateCompanionBuilder,
+          $$CloudConversationLinksTableUpdateCompanionBuilder,
+          (
+            CloudConversationLink,
+            BaseReferences<
+              _$AppDatabase,
+              $CloudConversationLinksTable,
+              CloudConversationLink
+            >,
+          ),
+          CloudConversationLink,
+          PrefetchHooks Function()
+        > {
+  $$CloudConversationLinksTableTableManager(
+    _$AppDatabase db,
+    $CloudConversationLinksTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CloudConversationLinksTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$CloudConversationLinksTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$CloudConversationLinksTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> localConversationId = const Value.absent(),
+                Value<String> cloudConversationId = const Value.absent(),
+                Value<String> ownerUserId = const Value.absent(),
+                Value<String> peerUserId = const Value.absent(),
+                Value<DateTime?> messageCursorAt = const Value.absent(),
+                Value<String?> messageCursorId = const Value.absent(),
+                Value<DateTime?> receiptCursorAt = const Value.absent(),
+                Value<String?> receiptCursorMessageId = const Value.absent(),
+                Value<String?> receiptCursorReaderId = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CloudConversationLinksCompanion(
+                localConversationId: localConversationId,
+                cloudConversationId: cloudConversationId,
+                ownerUserId: ownerUserId,
+                peerUserId: peerUserId,
+                messageCursorAt: messageCursorAt,
+                messageCursorId: messageCursorId,
+                receiptCursorAt: receiptCursorAt,
+                receiptCursorMessageId: receiptCursorMessageId,
+                receiptCursorReaderId: receiptCursorReaderId,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String localConversationId,
+                required String cloudConversationId,
+                required String ownerUserId,
+                required String peerUserId,
+                Value<DateTime?> messageCursorAt = const Value.absent(),
+                Value<String?> messageCursorId = const Value.absent(),
+                Value<DateTime?> receiptCursorAt = const Value.absent(),
+                Value<String?> receiptCursorMessageId = const Value.absent(),
+                Value<String?> receiptCursorReaderId = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CloudConversationLinksCompanion.insert(
+                localConversationId: localConversationId,
+                cloudConversationId: cloudConversationId,
+                ownerUserId: ownerUserId,
+                peerUserId: peerUserId,
+                messageCursorAt: messageCursorAt,
+                messageCursorId: messageCursorId,
+                receiptCursorAt: receiptCursorAt,
+                receiptCursorMessageId: receiptCursorMessageId,
+                receiptCursorReaderId: receiptCursorReaderId,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $CloudConversationLinksTable,
+                    CloudConversationLink
+                  >(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $CloudConversationLinksTable,
+                    CloudConversationLink
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CloudConversationLinksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $CloudConversationLinksTable,
+      CloudConversationLink,
+      $$CloudConversationLinksTableFilterComposer,
+      $$CloudConversationLinksTableOrderingComposer,
+      $$CloudConversationLinksTableAnnotationComposer,
+      $$CloudConversationLinksTableCreateCompanionBuilder,
+      $$CloudConversationLinksTableUpdateCompanionBuilder,
+      (
+        CloudConversationLink,
+        BaseReferences<
+          _$AppDatabase,
+          $CloudConversationLinksTable,
+          CloudConversationLink
+        >,
+      ),
+      CloudConversationLink,
       PrefetchHooks Function()
     >;
 typedef $$MessagesTableCreateCompanionBuilder =
@@ -9605,6 +10659,11 @@ class $AppDatabaseManager {
   $AppDatabaseManager(this._db);
   $$ConversationsTableTableManager get conversations =>
       $$ConversationsTableTableManager(_db, _db.conversations);
+  $$CloudConversationLinksTableTableManager get cloudConversationLinks =>
+      $$CloudConversationLinksTableTableManager(
+        _db,
+        _db.cloudConversationLinks,
+      );
   $$MessagesTableTableManager get messages =>
       $$MessagesTableTableManager(_db, _db.messages);
   $$NearbyDevicesTableTableManager get nearbyDevices =>

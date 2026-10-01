@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
+import 'package:relio_mobile/core/cloud/cloud_models.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
 import 'package:relio_mobile/core/media/media_storage_service.dart';
@@ -12,6 +13,191 @@ import 'package:relio_mobile/core/sync/sync_types.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 void main() {
+  test(
+    'direct Cloud chat pulls, dedupes, and reconciles read receipts',
+    () async {
+      final backend = FakeCloudBackend();
+      final cloudA = FakeCloudDataSource(backend: backend);
+      final cloudB = FakeCloudDataSource(backend: backend);
+      addTearDown(cloudA.dispose);
+      addTearDown(cloudB.dispose);
+      final accountA = await cloudA.register(
+        email: 'a@example.com',
+        password: 'password',
+        displayName: 'Account A',
+      );
+      final accountB = cloudA.createTestIdentity(
+        email: 'b@example.com',
+        displayName: 'Account B',
+      );
+      final harnessA = await SyncHarness.create(cloud: cloudA);
+      addTearDown(harnessA.dispose);
+
+      await harnessA.repositories.conversations.ensureConversation(
+        id: 'nearby-local-conversation',
+        participantId: 'device-b',
+        displayName: 'Account B',
+        participantStatus: DeviceStatus.offline,
+      );
+      final linked = await harnessA.engine.linkConversationToCloud(
+        localConversationId: 'nearby-local-conversation',
+        peerUserId: accountB.userId,
+      );
+      final secondLink = await cloudA.createOrGetDirectConversation(
+        peerUserId: accountB.userId,
+      );
+      expect(secondLink.id, linked.cloudConversationId);
+      String? activeConversationId;
+      final harnessB = await SyncHarness.create(
+        cloud: cloudB,
+        isConversationActive: (id) => id == activeConversationId,
+      );
+      addTearDown(harnessB.dispose);
+
+      final sent = await harnessA.repositories.messages.createOutgoingText(
+        conversationId: 'nearby-local-conversation',
+        senderId: accountA.userId,
+        senderDeviceId: 'device-a',
+        text: 'ข้อความทดสอบ Cloud',
+      );
+      await harnessA.engine.initialize();
+      await harnessA.engine.run();
+      expect(
+        cloudA.messages[sent.id]?.conversationId,
+        linked.cloudConversationId,
+      );
+
+      await cloudB.signIn(email: accountB.email, password: 'password');
+      await harnessB.engine.initialize();
+      await harnessB.engine.run();
+      final imported = await harnessB.repositories.conversations
+          .getConversation(linked.cloudConversationId);
+      expect(imported, isNotNull);
+      final received = await harnessB.repositories.messages.getMessage(sent.id);
+      expect(received?.text, 'ข้อความทดสอบ Cloud');
+      expect(received?.outgoing, isFalse);
+      expect(imported?.unreadCount, 1);
+      expect(
+        (await harnessB.repositories.cloudLinks.get(
+          localConversationId: linked.cloudConversationId,
+          ownerUserId: accountB.userId,
+        ))?.messageCursor?.id,
+        sent.id,
+      );
+
+      await harnessB.repositories.messages.createIncomingText(
+        conversationId: linked.cloudConversationId,
+        senderId: accountA.userId,
+        senderDeviceId: 'device-a',
+        messageId: sent.id,
+        text: sent.text,
+        createdAt: sent.createdAt!,
+      );
+      expect(
+        (await harnessB.repositories.conversations.getConversation(
+          linked.cloudConversationId,
+        ))?.unreadCount,
+        1,
+      );
+
+      final readIds = await harnessB.repositories.messages.markConversationRead(
+        linked.cloudConversationId,
+      );
+      await harnessB.engine.queueReadReceipts(
+        localConversationId: linked.cloudConversationId,
+        messageIds: readIds,
+      );
+      expect(cloudB.readReceipts, hasLength(1));
+
+      await harnessA.engine.run();
+      expect(
+        (await harnessA.repositories.messages.getMessage(sent.id))?.readAt,
+        isNotNull,
+      );
+
+      final second = await harnessA.repositories.messages.createOutgoingText(
+        conversationId: 'nearby-local-conversation',
+        senderId: accountA.userId,
+        senderDeviceId: 'device-a',
+        text: 'ข้อความขณะเปิดแชท',
+      );
+      activeConversationId = linked.cloudConversationId;
+      await harnessA.engine.run();
+      await harnessB.engine.run();
+      expect(
+        (await harnessB.repositories.messages.getMessage(second.id))?.readAt,
+        isNotNull,
+      );
+      expect(
+        (await harnessB.repositories.conversations.getConversation(
+          linked.cloudConversationId,
+        ))?.unreadCount,
+        0,
+      );
+      await harnessA.engine.run();
+      expect(
+        (await harnessA.repositories.messages.getMessage(second.id))?.readAt,
+        isNotNull,
+      );
+    },
+  );
+
+  test('Fake Cloud denies nonmembers and supports keyset pagination', () async {
+    final backend = FakeCloudBackend();
+    final owner = FakeCloudDataSource(backend: backend);
+    final peerClient = FakeCloudDataSource(backend: backend);
+    final outsider = FakeCloudDataSource(backend: backend);
+    final ownerIdentity = await owner.register(
+      email: 'owner@example.com',
+      password: 'password',
+    );
+    final peerIdentity = owner.createTestIdentity(email: 'peer@example.com');
+    owner.createTestIdentity(email: 'outsider@example.com');
+    final direct = await owner.createOrGetDirectConversation(
+      peerUserId: peerIdentity.userId,
+    );
+    await peerClient.signIn(email: 'peer@example.com', password: 'password');
+    await outsider.signIn(email: 'outsider@example.com', password: 'password');
+
+    for (var index = 0; index < 3; index++) {
+      await owner.upsertMessage(
+        CloudMessageDto(
+          id: 'stable-$index',
+          conversationId: direct.id,
+          senderId: ownerIdentity.userId,
+          senderDeviceId: 'owner-device',
+          messageType: 'text',
+          content: 'message $index',
+          createdAt: DateTime.utc(2026, 1, 1, 0, 0, index),
+          updatedAt: DateTime.utc(2026, 1, 1, 0, 0, index),
+          deliveryStatus: 'pending',
+          isOutgoing: true,
+        ),
+      );
+    }
+    final firstPage = await peerClient.fetchMessagesPage(
+      conversationId: direct.id,
+      limit: 2,
+    );
+    expect(firstPage.messages, hasLength(2));
+    expect(firstPage.hasMore, isTrue);
+    final last = firstPage.messages.last;
+    final secondPage = await peerClient.fetchMessagesPage(
+      conversationId: direct.id,
+      cursor: CloudMessageCursor(createdAt: last.createdAt, id: last.id),
+      limit: 2,
+    );
+    expect(secondPage.messages, hasLength(1));
+    expect(secondPage.hasMore, isFalse);
+    await expectLater(
+      outsider.fetchMessagesPage(conversationId: direct.id),
+      throwsA(isA<CloudException>()),
+    );
+    await owner.dispose();
+    await peerClient.dispose();
+    await outsider.dispose();
+  });
+
   test('authenticated data syncs only under its current owner', () async {
     final harness = await SyncHarness.create();
     addTearDown(harness.dispose);
@@ -51,6 +237,14 @@ void main() {
       await harness.cloud.register(
         email: 'new@example.com',
         password: 'password',
+      );
+      final peer = harness.cloud.createTestIdentity(
+        email: 'peer@example.com',
+        displayName: 'Peer',
+      );
+      await harness.engine.linkConversationToCloud(
+        localConversationId: 'conversation-a',
+        peerUserId: peer.userId,
       );
       await harness.repositories.syncQueue.enqueue(
         entityType: SyncEntityType.message.value,
@@ -313,6 +507,7 @@ class SyncHarness {
     this.repositories,
     this.engine,
     this.tempDirectory,
+    this.ownsCloud,
   );
 
   final AppDatabase database;
@@ -320,23 +515,36 @@ class SyncHarness {
   final RelioRepositories repositories;
   final SyncEngine engine;
   final Directory tempDirectory;
+  final bool ownsCloud;
 
-  static Future<SyncHarness> create({SyncClock? clock}) async {
+  static Future<SyncHarness> create({
+    SyncClock? clock,
+    FakeCloudDataSource? cloud,
+    bool Function(String conversationId)? isConversationActive,
+  }) async {
     final database = AppDatabase.memory();
-    final cloud = FakeCloudDataSource();
+    final activeCloud = cloud ?? FakeCloudDataSource();
     final repositories = RelioRepositories(
       database,
-      ownerUserIdProvider: () => cloud.currentIdentity?.userId,
+      ownerUserIdProvider: () => activeCloud.currentIdentity?.userId,
     );
     final tempDirectory = await Directory.systemTemp.createTemp('relio-sync');
     final engine = SyncEngine(
       repositories: repositories,
-      cloud: cloud,
+      cloud: activeCloud,
       identity: RelioDeviceIdentityRepository(database),
       mediaStorage: MediaStorageService(rootDirectory: tempDirectory),
+      isConversationActive: isConversationActive,
       clock: clock,
     );
-    return SyncHarness._(database, cloud, repositories, engine, tempDirectory);
+    return SyncHarness._(
+      database,
+      activeCloud,
+      repositories,
+      engine,
+      tempDirectory,
+      cloud == null,
+    );
   }
 
   Future<RelioMessage> createMessage({required String senderId}) async {
@@ -346,6 +554,17 @@ class SyncHarness {
       displayName: 'Peer A',
       participantStatus: DeviceStatus.normal,
     );
+    final current = cloud.currentIdentity;
+    if (current != null) {
+      final peer = cloud.createTestIdentity(
+        email: 'peer-${current.userId}@example.com',
+        displayName: 'Peer',
+      );
+      await engine.linkConversationToCloud(
+        localConversationId: 'conversation-a',
+        peerUserId: peer.userId,
+      );
+    }
     return repositories.messages.createOutgoingText(
       conversationId: 'conversation-a',
       senderId: senderId,
@@ -356,7 +575,7 @@ class SyncHarness {
 
   Future<void> dispose() async {
     await engine.dispose();
-    await cloud.dispose();
+    if (ownsCloud) await cloud.dispose();
     await database.close();
     await tempDirectory.delete(recursive: true);
   }

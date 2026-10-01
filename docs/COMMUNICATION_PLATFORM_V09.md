@@ -1,4 +1,29 @@
-# RELIO communication platform — Build 24 baseline / Build 25 identity update
+# RELIO communication platform — Build 26 cloud communication update
+
+## Build 26 — implemented and locally automated-tested
+
+Build 26 (`0.9.0+26`) closes the Build 25 cross-account Cloud Chat gap in
+source. Direct conversations are created by an idempotent Supabase RPC using a
+canonical participant key. Membership writes are server-only; the migration
+backfills existing conversation owners before applying membership-only message
+authorization. Each account stores an owner-scoped local/cloud conversation
+mapping. On login/new device, direct conversations are imported into Drift,
+then text messages and read receipts are fetched incrementally with persisted
+keyset cursors. The server controls message ordering timestamps; message UUIDs
+remain the cross-transport identity, and message contents are immutable.
+
+The SyncEngine uploads only owned text messages in explicitly linked
+conversations, merges remote text into SQLite, deduplicates Nearby/Cloud copies,
+keeps unread counts stable, and reconciles peer read receipts monotonically.
+FakeCloud uses a shared backend across independent test clients to exercise
+account A → account B restore, authorization denial, pagination, dedupe,
+unread behavior, and receipts. Cloud attachments remain outside this direct
+chat path; private Storage paths are still account-scoped.
+
+The SQL migration is source-reviewed but has not been executed locally or
+against QA. Thus these behaviors are IMPLEMENTED and AUTOMATED-TESTED against
+FakeCloud, not LOCAL-BACKEND-VERIFIED or QA-BACKEND-VERIFIED. Physical Nearby,
+FCM delivery, and device notification behavior remain unverified.
 
 ## Implemented in source
 
@@ -34,12 +59,10 @@ reconnection are not physically verified.
   and uses audited server functions for role and SOS changes. Its browser code
   uses only a public Supabase anon key.
 
-Cloud boundary: the foreground SyncEngine currently processes owner-matched
-local queue uploads. A verified cross-account conversation membership/linking
-flow and cloud-to-local message reconciliation are not implemented; the
-existing `fetchMessages` adapter is not called by SyncEngine. Do not describe
-messages as deliverable between separate cloud accounts while that remains so.
-Local-first Nearby messaging remains independent of this cloud limitation.
+The following Build 25 gap is now closed in source: the foreground SyncEngine
+calls the paged message/receipt fetch APIs, imports direct conversations, and
+reconciles Cloud data into Drift. Remote database policy enforcement still
+requires the QA migration and two-account backend tests.
 
 ## QA backend setup — not yet applied
 
@@ -48,9 +71,8 @@ this workspace. Do not infer the QA Supabase project from Firebase project
 `relio-17dc0`; they are separate systems. Before enabling remote services:
 
 1. An operator verifies the exact disposable QA Supabase project ref and URL.
-2. Apply `0005_communication_platform.sql` and then
-   `0006_admin_sos_rpc_only.sql` only to that QA project, after reviewing RLS
-   and grants. Do not run them on production.
+2. Apply migrations `0001` through `0007` in order only to that QA project,
+   after reviewing RLS and grants. Do not run them on production.
 3. Provision the initial Admin role out-of-band for the explicitly approved QA
    account. Ordinary client sessions cannot promote themselves.
 4. Deploy `send-message-push` to that verified QA project. Set
@@ -71,15 +93,14 @@ blank. The Supabase CLI is not installed/configured here, and the Admin site is 
 linked to a Vercel project. Remote account setup, migration application, FCM
 service-account provisioning, webhook wiring, and deployment remain manual.
 
-Build 25 implements cryptographically authorized auto-reconnect in source.
-Its physical-device acceptance remains deferred. A persisted trust flag alone
-does not authorize a connection; the peer must prove the pinned key.
+Build 25 implements cryptographically authorized auto-reconnect in source. Its
+physical-device acceptance remains deferred. A persisted trust flag alone does
+not authorize a connection; the peer must prove the pinned key.
 
 ## Release/device boundary
 
-Build 25 remains an unpublished software-side QA candidate. Format, analyze,
-151 Flutter tests, DEV/QA/PROD builds, QA isolation, PowerShell syntax checks,
-and the signed QA `-NoUpload` pipeline passed locally. No APK was uploaded or
-installed on a phone. Verify acceptance on physical Android devices before
-describing Nearby trust/reconnect, notifications, or read receipts as
+Build 26 is an unpublished software-side QA candidate. See the final local
+validation and artifact metadata in the Build 26 completion report. No APK is
+uploaded or installed on a phone. Verify acceptance on physical Android devices
+before describing Nearby trust/reconnect, notifications, or read receipts as
 device-verified.

@@ -29,6 +29,23 @@ abstract interface class CloudDataSource {
   Future<void> upsertMessage(CloudMessageDto message);
   Future<CloudMessageDto?> fetchMessage(String id);
   Future<List<CloudMessageDto>> fetchMessages(String conversationId);
+  Future<CloudConversationDto> createOrGetDirectConversation({
+    required String peerUserId,
+  });
+  Future<List<CloudConversationDto>> listMyDirectConversations();
+  Future<CloudMessagePage> fetchMessagesPage({
+    required String conversationId,
+    CloudMessageCursor? cursor,
+    int limit = 100,
+  });
+  Future<void> upsertReadReceipt(CloudReadReceipt receipt);
+  Future<List<CloudReadReceipt>> fetchReadReceipts({
+    required String conversationId,
+    required DateTime? afterReadAt,
+    String? afterMessageId,
+    String? afterReaderId,
+    int limit = 100,
+  });
   Future<void> upsertConversation(CloudConversationDto conversation);
   Future<CloudConversationDto?> fetchConversation(String id);
   Future<void> upsertAttachment(CloudAttachmentDto attachment);

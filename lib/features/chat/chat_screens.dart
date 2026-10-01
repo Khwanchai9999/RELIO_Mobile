@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../app/theme/relio_spacing.dart';
 import '../../core/relio_dependencies.dart';
+import '../../core/cloud/cloud_models.dart';
 import '../../data/mock_data.dart';
 import '../../core/domain/relio_entities.dart';
 import '../../core/location/location_service.dart';
@@ -140,6 +141,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         peerDeviceId: widget.chatId,
       );
     }
+    await dependencies.syncEngine.queueReadReceipts(
+      localConversationId: widget.chatId,
+      messageIds: messageIds,
+    );
   }
 
   @override
@@ -172,6 +177,59 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           content: Text('บันทึกข้อความไม่สำเร็จ กรุณาลองอีกครั้ง'),
         ),
       );
+    }
+  }
+
+  Future<void> _linkCloudConversation() async {
+    final dependencies = _dependencies;
+    if (dependencies == null || dependencies.authService.identity == null) {
+      return;
+    }
+    final controller = TextEditingController();
+    final peerUserId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('เชื่อมแชทผ่าน Cloud'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 64,
+          decoration: const InputDecoration(
+            labelText: 'Cloud Account ID ของคู่สนทนา',
+            helperText: 'ให้คู่สนทนาแชร์ ID จากหน้าโปรไฟล์โดยตรง',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('เชื่อมต่อ'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (peerUserId == null || peerUserId.isEmpty || !mounted) return;
+    try {
+      await dependencies.syncEngine.linkConversationToCloud(
+        localConversationId: widget.chatId,
+        peerUserId: peerUserId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('เชื่อมบทสนทนา Cloud แล้ว')),
+        );
+      }
+    } on CloudException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
     }
   }
 
@@ -323,6 +381,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   : 'Nearby • ยังไม่เชื่อมต่อ — ข้อความจะค้างในเครื่อง',
               onBack: () => context.pop(),
               actions: [
+                if (!isDemo && _dependencies?.authService.identity != null)
+                  IconButton(
+                    onPressed: _linkCloudConversation,
+                    tooltip: 'เชื่อมแชท Cloud',
+                    icon: const Icon(Icons.cloud_sync_outlined),
+                  ),
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: Chip(label: Text(isDemo ? 'DEMO' : 'REAL')),

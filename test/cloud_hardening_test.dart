@@ -88,7 +88,13 @@ void main() {
     final cloud = FakeCloudDataSource();
     addTearDown(cloud.dispose);
     await cloud.register(email: 'a@example.com', password: 'password');
-    await cloud.upsertMessage(_message(senderId: 'fake-1'));
+    final peer = cloud.createTestIdentity(email: 'peer@example.com');
+    final conversation = await cloud.createOrGetDirectConversation(
+      peerUserId: peer.userId,
+    );
+    await cloud.upsertMessage(
+      _message(senderId: 'fake-1', conversationId: conversation.id),
+    );
     await cloud.signOut();
     await cloud.register(email: 'b@example.com', password: 'password');
 
@@ -103,7 +109,9 @@ void main() {
       ),
     );
     await expectLater(
-      cloud.upsertMessage(_message(senderId: 'fake-1')),
+      cloud.upsertMessage(
+        _message(senderId: 'fake-1', conversationId: conversation.id),
+      ),
       throwsA(isA<CloudException>()),
     );
   });
@@ -153,9 +161,12 @@ void main() {
   );
 }
 
-CloudMessageDto _message({required String senderId}) => CloudMessageDto(
+CloudMessageDto _message({
+  required String senderId,
+  String conversationId = 'conversation-a',
+}) => CloudMessageDto(
   id: 'message-a',
-  conversationId: 'conversation-a',
+  conversationId: conversationId,
   senderId: senderId,
   senderDeviceId: 'device-a',
   messageType: 'text',

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/database/app_database.dart';
@@ -290,4 +293,41 @@ void main() {
       isNotEmpty,
     );
   });
+
+  test(
+    'schema v6 upgrades to cloud links without losing conversations',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'relio-schema-v6',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}${Platform.pathSeparator}relio.db');
+      final previous = AppDatabase.withExecutor(NativeDatabase(file));
+      final previousRepositories = RelioRepositories(previous);
+      await previousRepositories.conversations.ensureConversation(
+        id: 'preserved-local-chat',
+        participantId: 'peer-device',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      await previous.customStatement('PRAGMA user_version = 6');
+      await previous.customStatement('DROP TABLE cloud_conversation_links');
+      await previous.close();
+
+      final upgraded = AppDatabase.withExecutor(NativeDatabase(file));
+      final upgradedRepositories = RelioRepositories(upgraded);
+      expect(
+        await upgradedRepositories.conversations.getConversation(
+          'preserved-local-chat',
+        ),
+        isNotNull,
+      );
+      expect(
+        await upgradedRepositories.cloudLinks.listForOwner('account-a'),
+        isEmpty,
+      );
+      expect(upgraded.schemaVersion, 7);
+      await upgraded.close();
+    },
+  );
 }

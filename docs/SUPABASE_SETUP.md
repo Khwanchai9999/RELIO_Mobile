@@ -46,8 +46,11 @@ checks are covered by fake/in-memory tests before any live project is used.
 `0005_communication_platform.sql` adds read receipts, owner-scoped push tokens,
 narrowly scoped Admin metadata operations, and server-only push deduplication.
 `0006_admin_sos_rpc_only.sql` removes direct Admin SOS table updates so state
-changes use the audited RPC. The migrations were source-audited but not applied
-or SQL-executed; do not infer a Supabase project from Firebase `relio-17dc0`.
+changes use the audited RPC. `0007_cloud_direct_chat.sql` adds idempotent direct
+conversation creation, server-managed membership, membership-only Cloud
+message authorization, server-owned message timestamps, and paged receipt
+reconciliation. Migration 0007 is source-reviewed but not applied or SQL-
+executed; do not infer a Supabase project from Firebase `relio-17dc0`.
 Never apply them to production as part of local validation.
 The matching `send-message-push` Edge Function requires a service account and
 webhook secret stored only in Supabase's server-side secret store. It has not
@@ -60,3 +63,9 @@ reviewed `supabase/qa-project-allowlist.json`. `.env.qa.local` is ignored and
 is never read automatically. No QA Supabase ref, CLI, URL/key, or service-role
 credential is configured in this workspace, so no seeding or remote mutation
 was performed.
+
+Build 26 Cloud sync is covered locally by shared-backend FakeCloud integration
+tests, including account isolation, page cursors, new-device import, Nearby/
+Cloud dedupe, unread counts, and read receipts. This does not replace applying
+the migration and validating RLS with two QA accounts and an unauthorized
+third account.

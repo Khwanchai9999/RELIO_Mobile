@@ -318,3 +318,28 @@ this software pass.
 
 All items in this section remain **DEFERRED — NOT YET PERFORMED** until a
 human-run two-phone test is completed.
+
+## P. Build 26 Cloud communication acceptance — DEFERRED
+
+Build 26 (`0.9.0+26`) is local-only. Its cross-account path is automated-tested
+with shared-backend FakeCloud clients, but migration `0007_cloud_direct_chat.sql`
+has not been applied to a live QA backend. Before any real-account/device
+acceptance, apply the reviewed migrations only to an independently verified
+disposable QA Supabase project and seed two QA users plus an unauthorized third
+user. Verify:
+
+1. A and B independently create/get the same direct conversation and see one
+   canonical Cloud ID; C cannot list, read, insert, or receipt messages in it.
+2. A sends while online; B restores the conversation into SQLite, receives the
+   stable message UUID once, and sees unread state. Then repeat Nearby-first
+   followed by Cloud pull and confirm one local message row.
+3. Mark the message read on B and confirm the receipt updates A's outgoing
+   message without changing its content or regressing delivery state.
+4. Restart both apps and confirm mappings/cursors persist. Interrupt the
+   network during pagination, restore it, and confirm no gaps or duplicates.
+5. Verify notification privacy and generic FCM delivery only after the Edge
+   Function, QA secrets, database webhook, and a consented QA device token are
+   configured. No message content belongs in the push body.
+
+These backend/device checks remain **DEFERRED — NOT YET PERFORMED**. FakeCloud
+coverage is not proof of live RLS enforcement or FCM delivery.
