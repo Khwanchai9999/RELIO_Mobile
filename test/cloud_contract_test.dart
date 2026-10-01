@@ -68,6 +68,108 @@ void main() {
     await cloud.dispose();
   });
 
+  test(
+    'read receipt pagination rejects partial cursors and unsafe limits',
+    () async {
+      final cloud = FakeCloudDataSource();
+      final identity = await cloud.register(
+        email: 'tester@example.com',
+        password: 'password123',
+      );
+      final peer = cloud.createTestIdentity(email: 'peer@example.com');
+      final conversation = await cloud.createOrGetDirectConversation(
+        peerUserId: peer.userId,
+      );
+
+      await expectLater(
+        cloud.fetchReadReceipts(
+          conversationId: conversation.id,
+          afterReadAt: DateTime.utc(2026),
+          afterMessageId: null,
+          afterReaderId: identity.userId,
+        ),
+        throwsA(isA<CloudException>()),
+      );
+      await expectLater(
+        cloud.fetchReadReceipts(
+          conversationId: conversation.id,
+          afterReadAt: null,
+          limit: 0,
+        ),
+        throwsA(isA<CloudException>()),
+      );
+      await expectLater(
+        cloud.fetchReadReceipts(
+          conversationId: conversation.id,
+          afterReadAt: null,
+          limit: 251,
+        ),
+        throwsA(isA<CloudException>()),
+      );
+      await cloud.dispose();
+    },
+  );
+
+  test(
+    'read receipt cursor pages remain ordered for tied client timestamps',
+    () async {
+      final cloud = FakeCloudDataSource();
+      final identity = await cloud.register(
+        email: 'cursor@example.com',
+        password: 'password123',
+      );
+      final peer = cloud.createTestIdentity(email: 'cursor-peer@example.com');
+      final conversation = await cloud.createOrGetDirectConversation(
+        peerUserId: peer.userId,
+      );
+      final sameClientTime = DateTime.utc(2026, 10, 1, 10);
+
+      for (var index = 0; index < 3; index++) {
+        final id = 'receipt-message-$index';
+        await cloud.upsertMessage(
+          CloudMessageDto(
+            id: id,
+            conversationId: conversation.id,
+            senderId: identity.userId,
+            senderDeviceId: 'cursor-device',
+            messageType: 'text',
+            content: 'receipt $index',
+            createdAt: sameClientTime,
+            updatedAt: sameClientTime,
+            deliveryStatus: 'pending',
+            isOutgoing: true,
+          ),
+        );
+        await cloud.upsertReadReceipt(
+          CloudReadReceipt(
+            messageId: id,
+            readerId: identity.userId,
+            readAt: sameClientTime,
+          ),
+        );
+      }
+
+      final firstPage = await cloud.fetchReadReceipts(
+        conversationId: conversation.id,
+        afterReadAt: null,
+        limit: 2,
+      );
+      expect(firstPage, hasLength(2));
+      expect(firstPage[1].readAt.isAfter(firstPage[0].readAt), isTrue);
+      final last = firstPage.last;
+      final secondPage = await cloud.fetchReadReceipts(
+        conversationId: conversation.id,
+        afterReadAt: last.readAt,
+        afterMessageId: last.messageId,
+        afterReaderId: last.readerId,
+        limit: 2,
+      );
+      expect(secondPage, hasLength(1));
+      expect(secondPage.single.messageId, 'receipt-message-2');
+      await cloud.dispose();
+    },
+  );
+
   test('DTO preserves stable message fields and UTC timestamps', () {
     final original = _message();
     final decoded = CloudMessageDto.fromJson(original.toJson());

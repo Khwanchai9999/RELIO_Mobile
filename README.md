@@ -195,6 +195,9 @@ a fresh APK by default; `-ReuseExistingArtifact` is explicit. See
 The QA variant contains the full Firebase App Distribution Android SDK for the
 internal/fallback channel. DEV and PROD contain only the safe API-only stub;
 public QA installation permission and update behavior are excluded from PROD.
+The isolation verifier checks Gradle runtime dependencies and available flavor
+APK permissions; the signed QA release pipeline also asserts the installer
+permission is present in its final artifact.
 The real QA Firebase config is
 `android/app/src/qa/google-services.json` and targets
 `com.relio.relio_mobile.test`; the Google Services Gradle plugin processes it

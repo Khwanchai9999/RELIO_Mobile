@@ -42,6 +42,14 @@ For a previously built artifact, explicitly opt in:
 .\scripts\publish-qa.ps1 -ReuseExistingArtifact
 ```
 
+Before considering a release ready, run
+`.\scripts\final-qa-preflight.ps1` from the clean, pushed Mobile `main` root.
+It is a read-only external preflight (it does not upload, deploy, seed, or
+install), but it requires verified QA Supabase identities, an authenticated
+GitHub CLI, and the deployed QA Admin URL/anon key in the process environment.
+Do not run it as a substitute for `publish-qa.ps1` or bypass its identity
+checks.
+
 To bind that run to a previously recorded digest, pass `-ExpectedSha256`.
 Normal future releases build fresh; the publisher never selects an arbitrary
 file from `dist`.

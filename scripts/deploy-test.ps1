@@ -142,6 +142,11 @@ if (-not $packageLine -or $packageLine.Line -notmatch "name='com\.relio\.relio_m
     throw "QA APK metadata did not match package com.relio.relio_mobile.test version $version."
 }
 Write-Host "Verified QA package, versionName, and versionCode: com.relio.relio_mobile.test $version"
+$qaPermissions = (& $aapt2Path dump permissions $builtApk 2>&1) -join "`n"
+if ($LASTEXITCODE -ne 0 -or $qaPermissions -notmatch 'android\.permission\.REQUEST_INSTALL_PACKAGES') {
+    throw 'Signed QA release APK is missing its QA-only REQUEST_INSTALL_PACKAGES permission.'
+}
+Write-Host 'Verified signed QA release includes REQUEST_INSTALL_PACKAGES for the QA-only public update flow.'
 
 $apksignerPath = $null
 $apksignerCommand = Get-Command apksigner -ErrorAction SilentlyContinue

@@ -429,9 +429,33 @@ class FakeCloudDataSource implements CloudDataSource {
         code: 'permissionDenied',
       );
     }
+    final lastConversationReadAt = readReceipts.values
+        .where((existing) {
+          return messages[existing.messageId]?.conversationId ==
+              message.conversationId;
+        })
+        .fold<DateTime?>(
+          null,
+          (latest, existing) =>
+              latest == null || existing.readAt.isAfter(latest)
+              ? existing.readAt
+              : latest,
+        );
+    var orderedReadAt = receipt.readAt;
+    if (lastConversationReadAt != null &&
+        !orderedReadAt.isAfter(lastConversationReadAt)) {
+      orderedReadAt = lastConversationReadAt.add(
+        const Duration(microseconds: 1),
+      );
+    }
+    final orderedReceipt = CloudReadReceipt(
+      messageId: receipt.messageId,
+      readerId: receipt.readerId,
+      readAt: orderedReadAt,
+    );
     readReceipts.putIfAbsent(
       '${receipt.messageId}:${receipt.readerId}',
-      () => receipt,
+      () => orderedReceipt,
     );
   }
 
@@ -445,6 +469,23 @@ class FakeCloudDataSource implements CloudDataSource {
   }) async {
     _requireAuth();
     _requireConversationMember(conversationId);
+    if (limit < 1 || limit > 250) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    final cursorParts = [
+      afterReadAt,
+      afterMessageId,
+      afterReaderId,
+    ].where((part) => part != null).length;
+    if (cursorParts != 0 && cursorParts != 3) {
+      throw const CloudException(
+        'ตำแหน่งอ่านข้อมูลไม่ครบ',
+        code: 'invalidInput',
+      );
+    }
     final rows =
         readReceipts.values.where((receipt) {
           final message = messages[receipt.messageId];

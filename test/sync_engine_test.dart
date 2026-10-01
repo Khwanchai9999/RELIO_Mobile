@@ -7,6 +7,7 @@ import 'package:relio_mobile/core/cloud/cloud_models.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
 import 'package:relio_mobile/core/media/media_storage_service.dart';
+import 'package:relio_mobile/core/notifications/local_notification_service.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/core/sync/sync_engine.dart';
 import 'package:relio_mobile/core/sync/sync_types.dart';
@@ -48,9 +49,11 @@ void main() {
       );
       expect(secondLink.id, linked.cloudConversationId);
       String? activeConversationId;
+      final notificationSink = RecordingNotificationSink();
       final harnessB = await SyncHarness.create(
         cloud: cloudB,
         isConversationActive: (id) => id == activeConversationId,
+        localNotifications: notificationSink,
       );
       addTearDown(harnessB.dispose);
 
@@ -77,6 +80,7 @@ void main() {
       expect(received?.text, 'ข้อความทดสอบ Cloud');
       expect(received?.outgoing, isFalse);
       expect(imported?.unreadCount, 1);
+      expect(notificationSink.showCount, 1);
       expect(
         (await harnessB.repositories.cloudLinks.get(
           localConversationId: linked.cloudConversationId,
@@ -84,6 +88,8 @@ void main() {
         ))?.messageCursor?.id,
         sent.id,
       );
+      await harnessB.engine.run();
+      expect(notificationSink.showCount, 1);
 
       await harnessB.repositories.messages.createIncomingText(
         conversationId: linked.cloudConversationId,
@@ -134,6 +140,7 @@ void main() {
         ))?.unreadCount,
         0,
       );
+      expect(notificationSink.showCount, 1);
       await harnessA.engine.run();
       expect(
         (await harnessA.repositories.messages.getMessage(second.id))?.readAt,
@@ -521,6 +528,7 @@ class SyncHarness {
     SyncClock? clock,
     FakeCloudDataSource? cloud,
     bool Function(String conversationId)? isConversationActive,
+    LocalNotificationSink? localNotifications,
   }) async {
     final database = AppDatabase.memory();
     final activeCloud = cloud ?? FakeCloudDataSource();
@@ -535,6 +543,7 @@ class SyncHarness {
       identity: RelioDeviceIdentityRepository(database),
       mediaStorage: MediaStorageService(rootDirectory: tempDirectory),
       isConversationActive: isConversationActive,
+      localNotifications: localNotifications,
       clock: clock,
     );
     return SyncHarness._(
@@ -578,6 +587,36 @@ class SyncHarness {
     if (ownsCloud) await cloud.dispose();
     await database.close();
     await tempDirectory.delete(recursive: true);
+  }
+}
+
+class RecordingNotificationSink implements LocalNotificationSink {
+  int showCount = 0;
+
+  @override
+  Stream<String> get tappedRoutes => const Stream<String>.empty();
+
+  @override
+  Future<String?> consumeInitialRoute() async => null;
+
+  @override
+  Future<bool> requestPermission() async => true;
+
+  @override
+  Future<bool> get notificationsAllowed async => true;
+
+  @override
+  Future<String?> getFcmToken() async => null;
+
+  @override
+  Future<void> show({
+    required String id,
+    required String title,
+    required String body,
+    required String route,
+    required bool urgent,
+  }) async {
+    showCount++;
   }
 }
 

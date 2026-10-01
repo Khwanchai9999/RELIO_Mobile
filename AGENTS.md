@@ -206,6 +206,10 @@ remote policy enforcement.
   managed local-media boundaries. Cloud text/receipt pull merges by stable
   identity and must not overwrite immutable message content or newer local
   state.
+- Supabase schema changes are forward-only migrations. Read-receipt cursor
+  tuples must be complete, page sizes bounded, and server ordering independent
+  of client clocks. Report-state changes must use an audited admin RPC rather
+  than direct client table updates.
 - Relay is limited to the `relay-v1` store-and-forward envelope. It supports
   bounded text, location, and SOS hops with persistent deduplication and
   forward history; it does not flood, relay media, or run as a background

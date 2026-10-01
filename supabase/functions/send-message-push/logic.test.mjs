@@ -81,19 +81,38 @@ test('duplicate recipient claim suppresses duplicate push', async () => {
   assert.equal(sends, 0)
 })
 
-test('missing tokens is a safe no-op; invalid tokens are removed', async () => {
+test('no registered tokens is a safe no-op without exposing event data', async () => {
+  const result = await dispatchMessagePush({
+    message,
+    recipients: [peer],
+    claimRecipient: async () => true,
+    listTokens: async () => [],
+    releaseRecipient: async () => {},
+    removeToken: async () => {},
+    sendToDevice: async () => assert.fail('there are no registered tokens'),
+  })
+  assert.equal(result.status, 200)
+  assert.equal(result.body.includes(eventId), false)
+  assert.equal(result.body.includes(peer), false)
+})
+
+test('invalid device tokens are removed without logging token values', async () => {
   const removed = []
   const result = await dispatchMessagePush({
     message,
     recipients: [peer],
     claimRecipient: async () => true,
-    listTokens: async () => [{ id: 'stale', token: 'invalid' }],
+    listTokens: async () => [{ id: 'stale', token: 'private-device-token' }],
     releaseRecipient: async () => {},
     removeToken: async (id) => removed.push(id),
-    sendToDevice: async () => ({ ok: false, invalidToken: true }),
+    sendToDevice: async (token) => {
+      assert.equal(token, 'private-device-token')
+      return { ok: false, invalidToken: true }
+    },
   })
   assert.equal(result.status, 200)
   assert.deepEqual(removed, ['stale'])
+  assert.equal(result.body.includes('private-device-token'), false)
 })
 
 test('transient FCM failure releases dedupe claim for a safe retry', async () => {

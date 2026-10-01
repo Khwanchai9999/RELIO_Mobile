@@ -20,6 +20,14 @@ account A → account B restore, authorization denial, pagination, dedupe,
 unread behavior, and receipts. Cloud attachments remain outside this direct
 chat path; private Storage paths are still account-scoped.
 
+The forward migrations `0008`–`0010` harden read-receipt pagination: cursors
+must be complete, page sizes are bounded, and the database assigns a strictly
+increasing server timestamp per conversation so client clock ties cannot skip
+new receipts. Migration `0009` routes report-state changes through an audited
+admin RPC and removes direct client table updates. These migrations remain
+source-reviewed only until an explicitly verified QA Supabase environment is
+available; they have not been applied remotely.
+
 The SQL migration is source-reviewed but has not been executed locally or
 against QA. Thus these behaviors are IMPLEMENTED and AUTOMATED-TESTED against
 FakeCloud, not LOCAL-BACKEND-VERIFIED or QA-BACKEND-VERIFIED. Physical Nearby,
@@ -71,8 +79,9 @@ this workspace. Do not infer the QA Supabase project from Firebase project
 `relio-17dc0`; they are separate systems. Before enabling remote services:
 
 1. An operator verifies the exact disposable QA Supabase project ref and URL.
-2. Apply migrations `0001` through `0007` in order only to that QA project,
-   after reviewing RLS and grants. Do not run them on production.
+2. Apply migrations `0001` through `0010` in order only to that QA project,
+   after reviewing RLS, grants, cursor behavior, and audit RPCs. Do not run
+   them on production.
 3. Provision the initial Admin role out-of-band for the explicitly approved QA
    account. Ordinary client sessions cannot promote themselves.
 4. Deploy `send-message-push` to that verified QA project. Set
@@ -87,6 +96,10 @@ this workspace. Do not infer the QA Supabase project from Firebase project
    deployment. Apply the same migration before exposing the site.
 
 These operations are intentionally not executed by local build/test commands.
+After local checks and required sign-ins are complete, the read-only
+`scripts/final-qa-preflight.ps1` checks the approved backend identities,
+migration/schema presence, Admin deployment, current public metadata, and the
+local release candidate before any publication command is considered.
 `scripts/seed-qa-users.ps1` also requires the QA ref to match the reviewed
 `supabase/qa-project-allowlist.json`; it fails closed while the allowlist is
 blank. The Supabase CLI is not installed/configured here, and the Admin site is not

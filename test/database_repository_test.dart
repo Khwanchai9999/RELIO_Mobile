@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:relio_mobile/core/cloud/cloud_models.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
@@ -113,6 +114,96 @@ void main() {
       expect(
         (await repositories.messages.getMessage('incoming-1'))?.readAt,
         isNotNull,
+      );
+    },
+  );
+
+  test(
+    'Cloud read receipt merge keeps read state and earliest timestamp',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'cloud-read-merge',
+        participantId: 'cloud-peer',
+        displayName: 'Cloud Peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      final message = await repositories.messages.createOutgoingText(
+        conversationId: 'cloud-read-merge',
+        senderId: 'account-a',
+        senderDeviceId: 'device-a',
+        text: 'receipt test',
+      );
+      final firstReadAt = DateTime.utc(2026, 10, 1, 10);
+
+      await repositories.messages.mergeCloudReadReceipt(
+        messageId: message.id,
+        readAt: firstReadAt,
+      );
+      await repositories.messages.mergeCloudReadReceipt(
+        messageId: message.id,
+        readAt: firstReadAt.add(const Duration(minutes: 5)),
+      );
+
+      expect(
+        (await repositories.messages.getMessage(message.id))?.readAt?.toUtc(),
+        firstReadAt,
+      );
+    },
+  );
+
+  test(
+    'Nearby and Cloud copies merge by UUID and reject mismatched content',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'nearby-cloud-merge',
+        participantId: 'peer-device',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      final createdAt = DateTime.utc(2026, 10, 1, 9);
+      await repositories.messages.createIncomingText(
+        conversationId: 'nearby-cloud-merge',
+        senderId: 'peer-account',
+        senderDeviceId: 'peer-device',
+        messageId: 'shared-message-uuid',
+        text: 'same payload',
+        createdAt: createdAt,
+      );
+
+      final inserted = await repositories.messages.mergeCloudText(
+        conversationId: 'nearby-cloud-merge',
+        messageId: 'shared-message-uuid',
+        senderUserId: 'peer-account',
+        senderDeviceId: 'peer-device',
+        text: 'same payload',
+        createdAt: createdAt,
+        updatedAt: createdAt,
+        currentUserId: 'local-account',
+      );
+      expect(inserted, isFalse);
+      expect(
+        (await repositories.conversations.getConversation(
+          'nearby-cloud-merge',
+        ))?.unreadCount,
+        1,
+      );
+
+      await expectLater(
+        repositories.messages.mergeCloudText(
+          conversationId: 'nearby-cloud-merge',
+          messageId: 'shared-message-uuid',
+          senderUserId: 'peer-account',
+          senderDeviceId: 'peer-device',
+          text: 'different payload',
+          createdAt: createdAt,
+          updatedAt: createdAt,
+          currentUserId: 'local-account',
+        ),
+        throwsA(isA<CloudException>()),
+      );
+      expect(
+        (await repositories.messages.getMessage('shared-message-uuid'))?.text,
+        'same payload',
       );
     },
   );
