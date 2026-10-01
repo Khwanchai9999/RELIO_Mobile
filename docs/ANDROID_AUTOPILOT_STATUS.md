@@ -4,7 +4,8 @@
 
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
-- Previous release: `0.8.5+11` through Firebase App Distribution
+- Previous Firebase App Distribution release: `0.8.5+11`
+- Current public QA release: `0.8.6+21`
 - Previous source baseline: `0.8.6+20`
 - Compatibility release target: `0.8.6+21`
 - Drift schema: v4
@@ -20,8 +21,9 @@
 - Hosting site: `relio-17dc0`
 - Public QA URL: `https://relio-17dc0.web.app/qa/`
 - Public manifest: `https://relio-17dc0.web.app/qa/latest.json`
-- Build 21 target tag: `qa-v0.8.6-b21` in the public
-  `RELIO-Android-Updates` repository; publication is not verified
+- Build 21 release: [qa-v0.8.6-b21](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.8.6-b21)
+- Public QA page: [relio-17dc0.web.app/qa](https://relio-17dc0.web.app/qa/)
+- Public manifest: [latest.json](https://relio-17dc0.web.app/qa/latest.json)
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
 - Supabase remains the RELIO application cloud backend
 
@@ -60,8 +62,7 @@
   radio changes, and periodic foreground checks. No background radio service
   is added.
 - Local release validation passed. Automated tests cannot prove physical radio
-  interoperability across devices; public upload/Hosting checks remain
-  unverified until CLI credentials and remote checks succeed.
+  interoperability across devices.
 
 ## Public update implementation
 
@@ -90,8 +91,9 @@
   `dist/relio-test-0.8.6+21.apk`; package `com.relio.relio_mobile.test`;
   signing identity matches the preserved TEST keystore.
 - `scripts/deploy-test.ps1 -NoUpload`: passed; no Firebase upload was made.
-- Public Build 21 release and Hosting deployment: not verified in this status
-  snapshot. Do not report it as publicly available without remote verification.
+- Public Build 21 GitHub asset and Hosting page/manifest: deployed and remotely
+  verified by the canonical publisher. Hosting contains metadata/page only; the
+  APK is hosted as a GitHub release asset.
 - `scripts/release-public-qa.ps1` is the only public release entrypoint; it
   verifies the signed APK, creates/verifies the GitHub release asset, deploys
   Hosting metadata only, and verifies both remote origins.

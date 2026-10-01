@@ -156,9 +156,11 @@ package identity is finalized.
 The current source version is `0.8.6+21`. Build 21 hardens Android Nearby
 permission, radio-readiness, and lifecycle handling for API 24+. Format,
 analysis, all 123 automated tests, DEV/QA/PROD verification builds, QA
-signing, and QA/PROD Firebase SDK isolation have passed locally. Physical
-cross-version/OEM Nearby verification remains deferred; local build success
-does not establish device interoperability. PROD remains
+signing, and QA/PROD Firebase SDK isolation have passed. Build 21 is publicly
+available through the verified [QA download page](https://relio-17dc0.web.app/qa/)
+and [GitHub release](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.8.6-b21).
+Physical cross-version/OEM Nearby verification remains deferred; release
+publication does not establish device interoperability. PROD remains
 `com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.8.6)
@@ -202,8 +204,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13 and Build 16 are immutable historical releases.
-Build 21 is the current local candidate; do not infer its publication or
-physical-device status from local validation.
+Build 21 is the current verified public QA release; physical-device acceptance
+remains pending.
 
 ## Architecture
 
