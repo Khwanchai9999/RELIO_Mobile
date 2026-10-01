@@ -222,8 +222,8 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 22 (`0.9.0+22`) is the current QA candidate; its
-software validation is covered in the status report, but no physical-device
+current install recipe. Build 22 (`0.9.0+22`) is the current public QA release;
+its software validation is covered in the status report, but no physical-device
 Nearby test has been performed for it. Do not install or update a phone unless
 the user explicitly authorizes the physical test and the exact release
 artifact, device serial, package, version, and signing identity are verified.

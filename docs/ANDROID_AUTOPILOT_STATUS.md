@@ -5,9 +5,9 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Current public QA release: `0.8.6+21`
-- Previous source baseline: `0.8.6+20`
-- Compatibility release target: `0.8.6+21`
+- Current public QA release: `0.9.0+22`
+- Previous public QA release: `0.8.6+21`
+- Current release tag: `qa-v0.9.0-b22`
 - Drift schema: v4
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
@@ -21,7 +21,7 @@
 - Hosting site: `relio-17dc0`
 - Public QA URL: `https://relio-17dc0.web.app/qa/`
 - Public manifest: `https://relio-17dc0.web.app/qa/latest.json`
-- Build 21 release: [qa-v0.8.6-b21](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.8.6-b21)
+- Build 22 release: [qa-v0.9.0-b22](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.9.0-b22)
 - Public QA page: [relio-17dc0.web.app/qa](https://relio-17dc0.web.app/qa/)
 - Public manifest: [latest.json](https://relio-17dc0.web.app/qa/latest.json)
 - Firebase App Distribution group: `relio-testers` (internal/fallback)
@@ -84,14 +84,14 @@
 
 - `dart format`: passed
 - `flutter analyze`: passed
-- `flutter test`: 123 passed for Build 21
+- `flutter test`: 125 passed for Build 22
 - QA/PROD App Distribution SDK isolation: passed
 - DEV debug, QA debug, QA signed release, and PROD debug verification builds:
-  passed for Build 21. QA signed artifact:
-  `dist/relio-test-0.8.6+21.apk`; package `com.relio.relio_mobile.test`;
+  passed for Build 22. QA signed artifact:
+  `dist/relio-test-0.9.0+22.apk`; package `com.relio.relio_mobile.test`;
   signing identity matches the preserved TEST keystore.
 - `scripts/deploy-test.ps1 -NoUpload`: passed; no Firebase upload was made.
-- Public Build 21 GitHub asset and Hosting page/manifest: deployed and remotely
+- Public Build 22 GitHub asset and Hosting page/manifest: deployed and remotely
   verified by the canonical publisher. Hosting contains metadata/page only; the
   APK is hosted as a GitHub release asset.
 - `scripts/release-public-qa.ps1` is the only public release entrypoint; it
@@ -109,14 +109,22 @@ Firebase Storage fallback is used.
 ## Physical boundary
 
 Previous Build 12 → Build 16 updater verification remains historical and is
-not evidence of Build 21 installation. No phone was modified during Build 21
-preparation. Physical acceptance for Build 21—including API-level permission
-prompts, OEM radios, discovery/reconnect, and cross-version transfer—remains
+not evidence of Build 22 installation. No phone was modified during Build 22
+preparation or publication. Physical acceptance for Build 22—including
+API-level permission prompts, OEM radios, discovery/reconnect, and
+cross-version transfer—remains
 **PENDING PHYSICAL TEST**.
 
-## Build 22 — final development candidate
+## Build 22 — public QA release
 
-- Candidate: `0.9.0+22`, QA package `com.relio.relio_mobile.test`.
+- Release: `0.9.0+22`, QA package `com.relio.relio_mobile.test`.
+- QA page: https://relio-17dc0.web.app/qa/
+- Manifest: https://relio-17dc0.web.app/qa/latest.json
+- GitHub release: https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.9.0-b22
+- APK: https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/download/qa-v0.9.0-b22/relio-test-0.9.0+22.apk
+- APK SHA-256: `a71728c11a2006ec370b2951a929cd2f3829aebc1ce5bf5df4742b375b3ed112`
+- APK size: `66,280,606` bytes; QA signing certificate SHA-256:
+  `a5b3b13122d6a8cdbef9f933b4c6fdcc292ba7345649f9f5fe8632deaff62b1d`.
 - Applied the supplied master logo to Flutter onboarding/About and generated
   Android legacy/adaptive launcher assets and splash resources from that same
   source. All flavors use the visible label `RELIO`.
@@ -126,6 +134,8 @@ prompts, OEM radios, discovery/reconnect, and cross-version transfer—remains
 - Outgoing chat identity uses the current Cloud account when signed in and the
   stable device ID for guest/offline use; user-facing chat failures no longer
   expose raw exception strings. Unsupported call/menu actions were removed.
-- Build 22 remains unpublished until the current candidate passes all
-  automated, signed-build, isolation, and remote release gates. No physical
-  device has been modified; Nearby radio/OEM behavior remains deferred.
+- All automated tests (125), four Android verification builds, QA/PROD SDK
+  isolation, and remote GitHub/Hosting artifact checks passed before publish.
+  The source release commit is `770788e`; no Firebase App Distribution or
+  Play Store upload was made. No physical device has been modified; Nearby
+  radio/OEM behavior remains deferred.

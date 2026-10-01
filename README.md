@@ -152,13 +152,15 @@ flutter build apk --release
 The PROD Android application ID is `com.relio.relio_mobile`; DEV and QA have
 separate flavor IDs. These IDs and the QA signing identity are preserved.
 
-The current source version is `0.9.0+22` (QA versionCode 22). This candidate
+The current source version is `0.9.0+22` (QA versionCode 22). This release
 applies the supplied RELIO artwork to Android branding, standardizes the
 launcher label, and keeps guest SOS records local instead of assigning them
-to a Cloud account. Build 21 remains the latest published QA release until
-the Build 22 validation and publication gates complete. Physical cross-version
-and OEM Nearby verification remains deferred; release publication alone does
-not establish device interoperability. PROD remains `com.relio.relio_mobile`.
+to a Cloud account. Build 22 passed the software release gates and is publicly
+available at [the RELIO QA page](https://relio-17dc0.web.app/qa/) and [GitHub
+release](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.9.0-b22).
+Physical cross-version and OEM Nearby verification remains deferred; release
+publication alone does not establish device interoperability. PROD remains
+`com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.9.0)
 
@@ -201,8 +203,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13 and Build 16 are immutable historical releases.
-Build 21 is the current verified public QA release until Build 22 completes
-the release gates; physical-device acceptance remains pending.
+Build 22 (`0.9.0+22`) is the current verified public QA release. Physical
+device acceptance remains pending and no phone was modified during its release.
 
 ## Architecture
 
@@ -261,8 +263,8 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
 - **v0.6:** ownership-gated queue-driven cloud synchronization
 - **v0.7:** live Supabase integration preparation and Cloud hardening
 - **v0.8:** bounded Nearby relay/store-and-forward foundation
-- **v0.9.0+22:** Android branding and guest SOS account-isolation candidate;
-  QA release remains gated on automated and remote verification.
+- **v0.9.0+22:** Android branding and guest SOS account-isolation public QA
+  release; physical device acceptance remains pending.
 - **v0.9:** routing/receipt and ecosystem evaluation (not implemented)
 - **v1.0:** production security review, observability, accessibility audit,
   signed Android release, and end-to-end field testing

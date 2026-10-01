@@ -144,9 +144,10 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. The current candidate is 0.9.0+22; do not
-install it on phones during the software release workflow. Public QA release
-requires all automated, signing, and OTA verification gates to pass.
+`scripts/public-qa-config.ps1`. Build 22 (`0.9.0+22`) is the current public QA
+release; do not install it on phones without explicit physical-test
+authorization. Future public releases require all automated, signing, and OTA
+verification gates to pass.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
