@@ -82,17 +82,55 @@ class NearbyConnectionEvent {
   final String? error;
 }
 
+const relioNearbyServiceId = 'com.relio.relio_mobile';
+const relioNearbyStrategyName = 'P2P_CLUSTER';
+
 class NearbyTransportException implements Exception {
-  const NearbyTransportException(this.message, {this.code = 'transport_error'});
+  const NearbyTransportException(
+    this.message, {
+    this.code = 'transport_error',
+    this.operation,
+    this.exceptionType,
+    this.platformCode,
+    this.platformMessage,
+    this.platformDetails,
+    this.apiStatusCode,
+    this.apiStatusName,
+    this.returnedFalse = false,
+  });
+
   final String message;
   final String code;
+  final String? operation;
+  final String? exceptionType;
+  final String? platformCode;
+  final String? platformMessage;
+  final Object? platformDetails;
+  final int? apiStatusCode;
+  final String? apiStatusName;
+  final bool returnedFalse;
 
   @override
-  String toString() => 'NearbyTransportException: $message';
+  String toString() {
+    final fields = [
+      if (operation != null) 'operation=$operation',
+      if (exceptionType != null) 'exceptionType=$exceptionType',
+      if (platformCode != null) 'platformCode=$platformCode',
+      if (platformMessage != null) 'platformMessage=$platformMessage',
+      if (platformDetails != null) 'platformDetails=$platformDetails',
+      if (apiStatusCode != null) 'apiStatusCode=$apiStatusCode',
+      if (apiStatusName != null) 'apiStatusName=$apiStatusName',
+      if (returnedFalse) 'result=false',
+    ];
+    return 'NearbyTransportException: $message'
+        '${fields.isEmpty ? '' : ' (${fields.join(', ')})'}';
+  }
 }
 
 abstract interface class NearbyTransport {
   String get implementationName;
+  String get serviceId;
+  String get strategyName;
   Stream<NearbyPeer> get discoveredPeers;
   Stream<NearbyPayloadEvent> get incomingPayloads;
   Stream<NearbyFilePayloadEvent> get incomingFilePayloads;
@@ -102,6 +140,7 @@ abstract interface class NearbyTransport {
   Future<void> stopAdvertising();
   Future<void> startDiscovery();
   Future<void> stopDiscovery();
+  Future<void> resetSessionOperations();
   Future<void> requestConnection(String peerId);
   Future<void> disconnect(String peerId);
   Future<void> sendBytes(Uint8List bytes, {String? peerId});
@@ -128,12 +167,24 @@ class MockNearbyTransport implements NearbyTransport {
   final List<Uint8List> sentPayloads = [];
   final List<String> sentFiles = [];
   final Map<String, NearbyPeer> peers = {};
+  Duration startDelay = Duration.zero;
+  NearbyTransportException? advertisingStartFailure;
+  NearbyTransportException? discoveryStartFailure;
+  int advertisingStartCount = 0;
+  int discoveryStartCount = 0;
+  int resetSessionOperationsCount = 0;
   bool isAdvertising = false;
   bool isDiscovering = false;
   bool isDisposed = false;
 
   @override
   String get implementationName => 'MockNearbyTransport';
+
+  @override
+  String get serviceId => relioNearbyServiceId;
+
+  @override
+  String get strategyName => relioNearbyStrategyName;
 
   @override
   Stream<NearbyPeer> get discoveredPeers => _peers.stream;
@@ -152,6 +203,9 @@ class MockNearbyTransport implements NearbyTransport {
 
   @override
   Future<void> startAdvertising({required String displayName}) async {
+    advertisingStartCount++;
+    if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
+    if (advertisingStartFailure case final failure?) throw failure;
     isAdvertising = true;
   }
 
@@ -162,11 +216,21 @@ class MockNearbyTransport implements NearbyTransport {
 
   @override
   Future<void> startDiscovery() async {
+    discoveryStartCount++;
+    if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
+    if (discoveryStartFailure case final failure?) throw failure;
     isDiscovering = true;
   }
 
   @override
   Future<void> stopDiscovery() async {
+    isDiscovering = false;
+  }
+
+  @override
+  Future<void> resetSessionOperations() async {
+    resetSessionOperationsCount++;
+    isAdvertising = false;
     isDiscovering = false;
   }
 

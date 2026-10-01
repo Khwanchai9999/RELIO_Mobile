@@ -20,6 +20,7 @@ class RuntimeConnectivitySnapshot {
     this.bluetoothAvailable,
     this.wifiAvailable,
     this.playServicesStatus = 'unknown',
+    this.deviceModel,
   });
 
   final bool? hasInternetRoute;
@@ -34,6 +35,7 @@ class RuntimeConnectivitySnapshot {
   final bool? bluetoothAvailable;
   final bool? wifiAvailable;
   final String playServicesStatus;
+  final String? deviceModel;
 
   NearbyReadiness get nearbyReadiness => NearbyReadiness(
     policy: NearbyPermissionPolicy(androidSdk, targetSdk: targetSdk),
@@ -62,6 +64,7 @@ class RuntimeConnectivitySnapshot {
       bluetoothAvailable: value['bluetoothAvailable'] as bool?,
       wifiAvailable: value['wifiAvailable'] as bool?,
       playServicesStatus: value['playServicesStatus'] as String? ?? 'unknown',
+      deviceModel: value['deviceModel'] as String?,
     );
   }
 
@@ -79,6 +82,7 @@ class RuntimeConnectivitySnapshot {
       other.bluetoothAvailable == bluetoothAvailable &&
       other.wifiAvailable == wifiAvailable &&
       other.playServicesStatus == playServicesStatus &&
+      other.deviceModel == deviceModel &&
       other.androidSdk == androidSdk;
 
   @override
@@ -95,6 +99,7 @@ class RuntimeConnectivitySnapshot {
     bluetoothAvailable,
     wifiAvailable,
     playServicesStatus,
+    deviceModel,
   );
 }
 

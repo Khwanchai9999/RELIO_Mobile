@@ -217,6 +217,11 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                     ),
                     Chip(
                       label: Text(
+                        'Missing manifest: ${readiness.missingManifestPermissions.join(', ')}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
                         'Bluetooth ${runtime.bluetoothEnabled == true
                             ? 'ON'
                             : runtime.bluetoothEnabled == false
@@ -245,6 +250,13 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                     Chip(
                       label: Text(
                         'Permissions ${readiness.missingPermissions.isEmpty ? 'granted' : 'needed'}',
+                      ),
+                    ),
+                    if (runtime.deviceModel != null)
+                      Chip(label: Text('Device: ${runtime.deviceModel}')),
+                    Chip(
+                      label: Text(
+                        'Nearby retry #${_dependencies.nearbyRetryAttempt}',
                       ),
                     ),
                   ],
@@ -379,6 +391,13 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                   title: Text(
                     '${nearby.lastError!} • ${nearby.lastErrorCode ?? 'unknown'}',
                   ),
+                ),
+              ),
+            if (nearby.lastDiagnostic case final diagnostic?)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: SelectableText('Native start diagnostic\n$diagnostic'),
                 ),
               ),
             if (nearby.eventLog.isEmpty)

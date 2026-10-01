@@ -22,14 +22,13 @@ void main() {
       ),
       (
         32,
-        'android12L-bluetooth-location',
+        'android12L-nearby-wifi',
         [
-          NearbyPermissionPolicy.fine,
           NearbyPermissionPolicy.scan,
           NearbyPermissionPolicy.connect,
           NearbyPermissionPolicy.advertise,
         ],
-        true,
+        false,
       ),
       (
         33,
@@ -145,6 +144,81 @@ void main() {
     expect(readiness.ready, isFalse);
     expect(readiness.blockers, contains(NearbyBlocker.locationRequiredButOff));
   });
+
+  test('API 29 is ready when fine location and Location service are ready', () {
+    final readiness = RuntimeConnectivitySnapshot(
+      androidSdk: 29,
+      permissions: const {
+        NearbyPermissionPolicy.fine: true,
+        NearbyPermissionPolicy.accessWifiState: true,
+        NearbyPermissionPolicy.changeWifiState: true,
+      },
+      bluetoothAvailable: true,
+      bluetoothEnabled: true,
+      wifiAvailable: true,
+      wifiEnabled: true,
+      locationEnabled: true,
+      playServicesStatus: 'available',
+    ).nearbyReadiness;
+
+    expect(readiness.ready, isTrue);
+    expect(readiness.missingPermissions, isEmpty);
+  });
+
+  test('API 32 modern Nearby tier does not require Location', () {
+    final readiness = NearbyReadiness(
+      policy: const NearbyPermissionPolicy(32),
+      permissions: const {
+        NearbyPermissionPolicy.scan: true,
+        NearbyPermissionPolicy.connect: true,
+        NearbyPermissionPolicy.advertise: true,
+        NearbyPermissionPolicy.wifi: true,
+        NearbyPermissionPolicy.accessWifiState: true,
+        NearbyPermissionPolicy.changeWifiState: true,
+      },
+      bluetoothAvailable: true,
+      bluetoothEnabled: true,
+      locationEnabled: false,
+      playServicesStatus: 'available',
+    );
+
+    expect(readiness.ready, isTrue);
+    expect(readiness.policy.locationRequired, isFalse);
+  });
+
+  test(
+    'API 35 needs no Location but reports missing manifest Wi-Fi permission',
+    () {
+      final permissions = {
+        for (final permission in const NearbyPermissionPolicy(
+          35,
+        ).requiredPermissions)
+          permission: true,
+        NearbyPermissionPolicy.accessWifiState: true,
+        NearbyPermissionPolicy.changeWifiState: false,
+      };
+      final readiness = NearbyReadiness(
+        policy: const NearbyPermissionPolicy(35),
+        permissions: permissions,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        locationEnabled: false,
+        playServicesStatus: 'available',
+      );
+
+      expect(readiness.policy.locationRequired, isFalse);
+      expect(readiness.missingPermissions, isEmpty);
+      expect(readiness.missingManifestPermissions, [
+        NearbyPermissionPolicy.changeWifiState,
+      ]);
+      expect(
+        readiness.blockers,
+        contains(NearbyBlocker.transportPermissionMissing),
+      );
+    },
+  );
 
   test('API 37 local network permission is isolated behind target 37', () {
     const currentTarget = NearbyPermissionPolicy(37, targetSdk: 36);

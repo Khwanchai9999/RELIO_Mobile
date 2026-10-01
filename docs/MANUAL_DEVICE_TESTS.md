@@ -222,11 +222,11 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 22 (`0.9.0+22`) is the current public QA release;
-its software validation is covered in the status report, but no physical-device
-Nearby test has been performed for it. Do not install or update a phone unless
-the user explicitly authorizes the physical test and the exact release
-artifact, device serial, package, version, and signing identity are verified.
+current install recipe. Build 22 (`0.9.0+22`) remains the latest public QA
+release; Build 23 (`0.9.0+23`) is the Nearby-fix candidate awaiting public
+publication. Do not install or update a phone unless the user explicitly
+authorizes the physical test and the exact release artifact, device serial,
+package, version, and signing identity are verified.
 Never uninstall the app or clear its data.
 
 The acceptance steps below remain applicable only after that authorization.
@@ -258,7 +258,7 @@ The acceptance steps below remain applicable only after that authorization.
 ## N. Android Nearby compatibility matrix — DEFERRED
 
 Build 21 introduced SDK-driven permission selection and runtime readiness;
-Build 22 retains it. Test real phones before describing OEM compatibility as
+Build 23 extends the permission tiers and recovery diagnostics. Test real phones before describing OEM compatibility as
 physically verified. Do not clear app data or uninstall during OTA tests.
 
 | Android API | Expected Nearby permissions | Location toggle | Result to verify |
@@ -266,7 +266,7 @@ physically verified. Do not clear app data or uninstall during OTA tests.
 | 24–28 | `ACCESS_COARSE_LOCATION` | Required for legacy discovery | Discovery starts after permission and Location are ready |
 | 29–30 | `ACCESS_FINE_LOCATION` | Required | Location off shows a blocker; on starts the session |
 | 31 | Fine Location plus Bluetooth Scan/Connect/Advertise | Required by this tier | Grant prompt and discovery on/off behavior |
-| 32 | Fine Location plus Bluetooth Scan/Connect/Advertise | Required by compatibility policy | Validate Android 12L independently |
+| 32 | Bluetooth Scan/Connect/Advertise; Nearby Wi-Fi declared, no runtime prompt yet | Not required for Nearby | GPS off does not block; validate Android 12L independently |
 | 33–36 | Bluetooth Scan/Connect/Advertise and Nearby Wi-Fi | Not required for Nearby | GPS off does not block; each missing permission does |
 | 37+ | Above plus `ACCESS_LOCAL_NETWORK` when target is 37+ | API/feature dependent | Current target-36 build reports upgrade path when required |
 

@@ -13,7 +13,9 @@ import 'cloud/supabase_cloud_data_source.dart';
 import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
 import 'nearby/android_nearby_transport.dart';
+import 'nearby/nearby_readiness.dart';
 import 'nearby/nearby_service.dart';
+import 'nearby/nearby_retry_backoff.dart';
 import 'nearby/nearby_transport.dart';
 import 'permissions/permission_service.dart';
 import 'repositories/local_repositories.dart';
@@ -119,22 +121,23 @@ class RelioDependencies {
   Future<void>? _initialization;
   StreamSubscription<InternetStatus>? _readinessSubscription;
   Future<bool>? _nearbySyncOperation;
-  bool _nearbySyncAgain = false;
   bool _nearbyForeground = true;
   bool _nearbyRestart = false;
   bool _disposed = false;
   Timer? _nearbyHealthCheck;
+  Timer? _nearbyRetryTimer;
+  final NearbyRetryBackoff _nearbyRetryBackoff = NearbyRetryBackoff();
+  String? _lastNearbyReadinessSignature;
+
+  int get nearbyRetryAttempt => _nearbyRetryBackoff.attempt;
 
   Future<void> initialize() => _initialization ??= _initialize();
 
-  Future<bool> startNearbySessionIfPermitted() {
+  Future<bool> startNearbySessionIfPermitted({bool force = false}) {
     if (_disposed || !nearbyService.initialized) return Future.value(false);
     final active = _nearbySyncOperation;
-    if (active != null) {
-      _nearbySyncAgain = true;
-      return active;
-    }
-    final operation = _drainNearbySession();
+    if (active != null) return active;
+    final operation = _syncNearbySession(force: force);
     _nearbySyncOperation = operation;
     return operation.whenComplete(() {
       if (identical(_nearbySyncOperation, operation)) {
@@ -143,37 +146,88 @@ class RelioDependencies {
     });
   }
 
-  Future<bool> _drainNearbySession() async {
-    var ready = false;
-    do {
-      _nearbySyncAgain = false;
-      ready = await _syncNearbySession();
-    } while (_nearbySyncAgain && !_disposed);
-    return ready;
-  }
-
   Future<bool> setNearbyForeground(bool foreground) {
-    if (_nearbyForeground != foreground && foreground) _nearbyRestart = true;
+    final changed = _nearbyForeground != foreground;
+    if (changed && foreground) _nearbyRestart = true;
     _nearbyForeground = foreground;
+    final active = _nearbySyncOperation;
+    if (active != null && changed) {
+      return active.then((_) => startNearbySessionIfPermitted());
+    }
     return startNearbySessionIfPermitted();
   }
 
-  Future<bool> _syncNearbySession() async {
+  Future<bool> _syncNearbySession({required bool force}) async {
     final runtime = await connectivityStatus.readRuntimeSnapshot();
     if (_disposed) return false;
-    nearbyService.updateReadiness(runtime.nearbyReadiness);
-    final ready = useMockTransport || runtime.nearbyReadiness.ready;
+    final readiness = runtime.nearbyReadiness;
+    final signature = _readinessSignature(readiness);
+    final readinessChanged = _lastNearbyReadinessSignature != signature;
+    _lastNearbyReadinessSignature = signature;
+    nearbyService.updateDeviceModel(runtime.deviceModel);
+    nearbyService.updateReadiness(readiness);
+    final ready = useMockTransport || readiness.ready;
     if (!ready || !_nearbyForeground) {
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = null;
+      _nearbyRetryBackoff.reset();
       await nearbyService.stopSession();
       return false;
+    }
+    if (readinessChanged && readiness.ready) {
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = null;
+      _nearbyRetryBackoff.reset();
+    }
+    if (_nearbyRetryTimer?.isActive == true && !force) return false;
+    if (force) {
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = null;
+    }
+    if (nearbyService.isAdvertising && nearbyService.isDiscovering) {
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = null;
+      _nearbyRetryBackoff.reset();
+      return true;
     }
     if (_nearbyRestart) {
       _nearbyRestart = false;
       await nearbyService.stopSession();
     }
+    nearbyService.startRetryAttempt = _nearbyRetryBackoff.attempt + 1;
     await nearbyService.startSession();
-    return nearbyService.isAdvertising && nearbyService.isDiscovering;
+    final started = nearbyService.isAdvertising && nearbyService.isDiscovering;
+    if (started) {
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = null;
+      _nearbyRetryBackoff.reset();
+    } else {
+      final delay = _nearbyRetryBackoff.registerFailure();
+      nearbyService.logRetryScheduled(_nearbyRetryBackoff.attempt, delay);
+      _nearbyRetryTimer?.cancel();
+      _nearbyRetryTimer = Timer(delay, () {
+        if (!_disposed && _nearbyForeground) {
+          unawaited(startNearbySessionIfPermitted(force: true));
+        }
+      });
+    }
+    return started;
   }
+
+  String _readinessSignature(NearbyReadiness readiness) => [
+    readiness.policy.sdkInt,
+    readiness.policy.targetSdk,
+    readiness.playServicesStatus,
+    readiness.transportAvailable,
+    readiness.bluetoothAvailable,
+    readiness.bluetoothEnabled,
+    readiness.wifiAvailable,
+    readiness.wifiEnabled,
+    readiness.locationEnabled,
+    ...readiness.missingPermissions,
+    ...readiness.missingManifestPermissions,
+    ...readiness.blockers.map((blocker) => blocker.name),
+  ].join('/');
 
   Future<void> _initialize() async {
     if (_isAndroid && !useMockTransport) {
@@ -189,7 +243,7 @@ class RelioDependencies {
     if (_isAndroid && !useMockTransport) {
       await startNearbySessionIfPermitted();
       // ตรวจซ้ำเฉพาะ foreground เพื่อจับสิทธิ์/GMS ที่ไม่ส่ง radio broadcast
-      _nearbyHealthCheck = Timer.periodic(const Duration(seconds: 10), (_) {
+      _nearbyHealthCheck = Timer.periodic(const Duration(seconds: 60), (_) {
         if (_nearbyForeground) unawaited(startNearbySessionIfPermitted());
       });
     }
@@ -213,6 +267,7 @@ class RelioDependencies {
   Future<void> dispose() async {
     _disposed = true;
     _nearbyHealthCheck?.cancel();
+    _nearbyRetryTimer?.cancel();
     await _readinessSubscription?.cancel();
     await _nearbySyncOperation;
     await connectivityStatus.dispose();

@@ -5,7 +5,6 @@ import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/cloud/cloud_models.dart';
 import '../../core/connectivity/runtime_connectivity.dart';
-import '../../core/permissions/permission_service.dart';
 import '../../core/relio_dependencies.dart';
 import '../../core/sync/sync_engine.dart';
 
@@ -21,7 +20,6 @@ class _ConnectivityDiagnosticsCardState
     extends State<ConnectivityDiagnosticsCard> {
   late RelioDependencies _dependencies;
   late Future<String> _deviceId;
-  late Future<NearbyPermissionSnapshot> _permissions;
   bool _loaded = false;
 
   @override
@@ -31,16 +29,12 @@ class _ConnectivityDiagnosticsCardState
     _loaded = true;
     _dependencies = RelioDependencyScope.of(context);
     _deviceId = _dependencies.identity.getDeviceId();
-    _permissions = _dependencies.permissionService.readNearbyPermissions();
   }
 
   Future<void> _requestPermissions() async {
     await _dependencies.permissionService.requestNearbyPermissions();
     if (!mounted) return;
-    setState(() {
-      _permissions = _dependencies.permissionService.readNearbyPermissions();
-    });
-    await _dependencies.startNearbySessionIfPermitted();
+    await _dependencies.startNearbySessionIfPermitted(force: true);
   }
 
   @override
@@ -115,32 +109,43 @@ class _ConnectivityDiagnosticsCardState
                     value: '${nearby.connectedPeerCount}',
                   ),
                   _StatusRow(label: 'Cloud', value: _cloudLabel(cloud)),
-                  FutureBuilder<NearbyPermissionSnapshot>(
-                    future: _permissions,
-                    builder: (context, snapshot) {
-                      if (snapshot.data?.allGranted ?? true) {
-                        return const SizedBox.shrink();
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'อนุญาตอุปกรณ์ใกล้เคียงเพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว',
-                            ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: _requestPermissions,
-                                child: const Text('ตรวจสอบสิทธิ์ Nearby'),
+                  if (runtime.androidSdk != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        runtime
+                                .nearbyReadiness
+                                .missingManifestPermissions
+                                .isNotEmpty
+                            ? 'ต้องอัปเดตแอป'
+                            : runtime.nearbyReadiness.missingPermissions.isEmpty
+                            ? 'สิทธิ์พร้อมใช้งาน'
+                            : 'ต้องตรวจสอบสิทธิ์ Nearby',
+                      ),
+                      subtitle: Text(
+                        runtime
+                                .nearbyReadiness
+                                .missingManifestPermissions
+                                .isNotEmpty
+                            ? runtime.nearbyReadiness.summary
+                            : runtime.nearbyReadiness.missingPermissions.isEmpty
+                            ? 'ไม่ต้องเปิด Location เพื่อใช้ Nearby บน Android รุ่นนี้'
+                            : runtime.nearbyReadiness.missingPermissions.join(
+                                ', ',
                               ),
+                      ),
+                      trailing:
+                          runtime.nearbyReadiness.missingPermissions.isEmpty ||
+                              runtime
+                                  .nearbyReadiness
+                                  .missingManifestPermissions
+                                  .isNotEmpty
+                          ? null
+                          : TextButton(
+                              onPressed: _requestPermissions,
+                              child: const Text('ตรวจสอบสิทธิ์'),
                             ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                    ),
                 ],
               ),
             ),

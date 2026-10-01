@@ -3,10 +3,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- อ่านสถานะ Wi-Fi ได้ทุก API โดยไม่สแกน access point หรืออนุมานพิกัด -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" android:maxSdkVersion="31" />
+    <!-- Nearby Connections API 35 ตอบ 8033 หาก permission นี้ถูกตัดออกจาก manifest -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- คงสิทธิ์พิกัดทุก API สำหรับ SOS/Send Location; Nearby ขอเฉพาะ API 24–32 -->
+    <!-- คงสิทธิ์พิกัดสำหรับ SOS/Send Location; Nearby ใช้ Location ถึง API 31 -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" android:minSdkVersion="31" />

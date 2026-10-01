@@ -61,6 +61,9 @@ class NearbyService extends ChangeNotifier {
   NearbyApplicationState? _transition;
   bool _sessionFailed = false;
   String? _readinessSignature;
+  Future<void>? _startSessionOperation;
+  String? lastDiagnostic;
+  int startRetryAttempt = 1;
 
   void updateReadiness(NearbyReadiness next) {
     readiness = next;
@@ -81,6 +84,13 @@ class NearbyService extends ChangeNotifier {
   String get statusLabel {
     if (readiness case final current? when !current.ready) {
       return current.summary;
+    }
+    if (lastErrorCode == '8033' ||
+        lastErrorCode == 'MISSING_PERMISSION_CHANGE_WIFI_STATE') {
+      return 'สิทธิ์ระบบ Nearby ในแอปไม่ครบ กรุณาอัปเดต RELIO';
+    }
+    if (lastErrorCode == '8007' || lastErrorCode == 'STATUS_RADIO_ERROR') {
+      return 'วิทยุ Bluetooth/Wi-Fi ยังเริ่ม Nearby ไม่สำเร็จ';
     }
     return switch (applicationState) {
       NearbyApplicationState.initializing => 'กำลังตรวจสอบ Nearby',
@@ -190,21 +200,50 @@ class NearbyService extends ChangeNotifier {
       _log('advertising started');
       notifyListeners();
     } on Object catch (error) {
+      if (_isAlreadyActive(error, operation: 'advertising')) {
+        isAdvertising = true;
+        _log('advertising already active; local state reconciled');
+        notifyListeners();
+        return;
+      }
+      await _recoverOutOfOrder(error);
       _sessionFailed = true;
       transportErrorCount++;
-      _fail('เริ่ม Advertising ไม่สำเร็จ: $error', code: _errorCode(error));
+      _recordStartFailure('startAdvertising', error);
+      _fail('เริ่ม Advertising ไม่สำเร็จ', code: _errorCode(error));
     }
   }
 
-  Future<void> startSession() async {
-    if (_closed || (isAdvertising && isDiscovering)) return;
+  Future<void> startSession() {
+    if (_closed || (isAdvertising && isDiscovering)) return Future.value();
+    final current = _startSessionOperation;
+    if (current != null) return current;
+    final operation = _startSession();
+    _startSessionOperation = operation;
+    return operation.whenComplete(() {
+      if (identical(_startSessionOperation, operation)) {
+        _startSessionOperation = null;
+      }
+    });
+  }
+
+  Future<void> _startSession() async {
     _transition = NearbyApplicationState.starting;
     _sessionFailed = false;
     notifyListeners();
     await startAdvertising();
-    await startDiscovery();
+    if (isAdvertising) {
+      await startDiscovery();
+    } else {
+      _log('discovery skipped because advertising did not start');
+    }
     _transition = null;
-    if (isAdvertising && isDiscovering) lastError = null;
+    if (isAdvertising && isDiscovering) {
+      lastError = null;
+      lastErrorCode = null;
+      lastDiagnostic = null;
+      _sessionFailed = false;
+    }
     notifyListeners();
   }
 
@@ -262,10 +301,82 @@ class NearbyService extends ChangeNotifier {
       _log('discovery started');
       notifyListeners();
     } on Object catch (error) {
+      if (_isAlreadyActive(error, operation: 'discovery')) {
+        isDiscovering = true;
+        _log('discovery already active; local state reconciled');
+        notifyListeners();
+        return;
+      }
+      await _recoverOutOfOrder(error);
       _sessionFailed = true;
       transportErrorCount++;
-      _fail('เริ่ม Discovery ไม่สำเร็จ: $error', code: _errorCode(error));
+      _recordStartFailure('startDiscovery', error);
+      _fail('เริ่ม Discovery ไม่สำเร็จ', code: _errorCode(error));
     }
+  }
+
+  bool _isAlreadyActive(Object error, {required String operation}) {
+    if (error is! NearbyTransportException) return false;
+    final status = error.apiStatusCode ?? int.tryParse(error.code);
+    final name = error.apiStatusName ?? error.code;
+    return operation == 'advertising'
+        ? status == 8001 || name.contains('ALREADY_ADVERTISING')
+        : status == 8002 || name.contains('ALREADY_DISCOVERING');
+  }
+
+  Future<void> _recoverOutOfOrder(Object error) async {
+    if (error is! NearbyTransportException) return;
+    final status = error.apiStatusCode ?? int.tryParse(error.code);
+    final name = error.apiStatusName ?? error.code;
+    if (status != 8009 && !name.contains('OUT_OF_ORDER')) return;
+    try {
+      await transport.resetSessionOperations();
+      isAdvertising = false;
+      isDiscovering = false;
+      _log(
+        'out-of-order start; advertising/discovery stopped for backoff retry',
+      );
+    } on Object catch (recoveryError) {
+      _log('out-of-order recovery failed: ${_diagnosticError(recoveryError)}');
+    }
+  }
+
+  void _recordStartFailure(String operation, Object error) {
+    final current = readiness;
+    final native = _diagnosticError(error);
+    final snapshot = current == null
+        ? 'unknown'
+        : 'sdk=${current.policy.sdkInt} model=${_deviceModel ?? 'unknown'} '
+              'tier=${current.policy.tier} ready=${current.ready} '
+              'blockers=${current.blockers.map((item) => item.name).join(',')} '
+              'missingRuntime=${current.missingPermissions.join(',')} '
+              'missingManifest=${current.missingManifestPermissions.join(',')} '
+              'bluetooth=${current.bluetoothEnabled} wifi=${current.wifiEnabled} '
+              'location=${current.locationEnabled} gms=${current.playServicesStatus}';
+    lastDiagnostic =
+        'operation=$operation api=${current?.policy.sdkInt ?? 'unknown'} '
+        'model=${_deviceModel ?? 'unknown'} serviceId=$relioNearbyServiceId '
+        'strategy=$relioNearbyStrategyName readiness={$snapshot} '
+        'advertisingActive=$isAdvertising discoveryActive=$isDiscovering '
+        'retryAttempt=$startRetryAttempt $native';
+    _log('START_FAILURE $lastDiagnostic');
+  }
+
+  String? get _deviceModel => _runtimeDeviceModel;
+
+  String? _runtimeDeviceModel;
+
+  void updateDeviceModel(String? model) {
+    if (model == null || model.isEmpty) return;
+    _runtimeDeviceModel = model;
+  }
+
+  String _diagnosticError(Object error) => error is NearbyTransportException
+      ? error.toString()
+      : 'exceptionType=${error.runtimeType} message=$error';
+
+  void logRetryScheduled(int attempt, Duration delay) {
+    _log('retry scheduled attempt=$attempt delayMs=${delay.inMilliseconds}');
   }
 
   Future<void> stopDiscovery() async {
@@ -1245,7 +1356,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   String _errorCode(Object error) => error is NearbyTransportException
-      ? error.code
+      ? '${error.apiStatusCode ?? error.apiStatusName ?? error.code}'
       : error.runtimeType.toString();
 
   @override

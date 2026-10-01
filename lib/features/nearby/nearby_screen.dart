@@ -65,7 +65,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
   }
 
   Future<void> _startSearching() async {
-    final started = await _dependencies.startNearbySessionIfPermitted();
+    final started = await _dependencies.startNearbySessionIfPermitted(
+      force: true,
+    );
     if (!mounted) return;
     if (!started) {
       ScaffoldMessenger.of(
@@ -280,10 +282,15 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 leading: const Icon(Icons.admin_panel_settings_outlined),
                 title: const Text('Nearby ยังไม่พร้อม'),
                 subtitle: Text(readiness.summary),
-                trailing: TextButton(
-                  onPressed: _resolveBlocker,
-                  child: const Text('ตรวจสอบ'),
-                ),
+                trailing:
+                    readiness.blockers.contains(
+                      NearbyBlocker.transportPermissionMissing,
+                    )
+                    ? null
+                    : TextButton(
+                        onPressed: _resolveBlocker,
+                        child: const Text('ตรวจสอบ'),
+                      ),
               ),
             ),
           const SizedBox(height: 8),

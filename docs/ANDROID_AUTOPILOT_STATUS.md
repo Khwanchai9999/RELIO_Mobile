@@ -5,7 +5,8 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Current public QA release: `0.9.0+22`
+- Latest public QA release: `0.9.0+22`
+- Current QA candidate: `0.9.0+23` (Build 23 Nearby fix; publication pending)
 - Previous public QA release: `0.8.6+21`
 - Current release tag: `qa-v0.9.0-b22`
 - Drift schema: v4
@@ -51,10 +52,11 @@
   API 37; the configured target remains API 36.
 - Google Nearby's manifest sample declares `NEARBY_WIFI_DEVICES` from API 32,
   while Android's permission guide says the runtime permission is for apps on
-  API 33+. RELIO requests it only on API 33+ and keeps the API 32 fine-location
-  tier because older Wi-Fi discovery paths can require Location. Plugin 4.3.0
-  also contributes permission declarations; the merged manifest is verified by
-  the Android builds.
+  API 33+. RELIO requests it only on API 33+. The current official Nearby
+  manifest requires fine Location through API 31; API 32 uses the modern
+  Nearby Wi-Fi permission tier. SOS/Send Location permission remains separate.
+  Plugin 4.3.0 also contributes permission declarations; the merged manifest
+  is verified by the Android builds.
 - SOS/location coordinates use `LocationService` separately. RELIO does not
   infer physical location from Nearby radio information.
 - Wi-Fi is a capability/degradation for `P2P_CLUSTER`; Bluetooth remains the

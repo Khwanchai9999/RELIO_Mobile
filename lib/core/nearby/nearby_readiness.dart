@@ -7,6 +7,7 @@ enum NearbyBlocker {
   playServicesUnavailable,
   transportUnavailable,
   localNetworkUpgradeRequired,
+  transportPermissionMissing,
 }
 
 /// นโยบายเดียวสำหรับ Nearby; สิทธิ์พิกัด SOS อยู่ใน LocationService แยกต่างหาก
@@ -22,9 +23,11 @@ class NearbyPermissionPolicy {
   static const advertise = 'android.permission.BLUETOOTH_ADVERTISE';
   static const wifi = 'android.permission.NEARBY_WIFI_DEVICES';
   static const localNetwork = 'android.permission.ACCESS_LOCAL_NETWORK';
+  static const accessWifiState = 'android.permission.ACCESS_WIFI_STATE';
+  static const changeWifiState = 'android.permission.CHANGE_WIFI_STATE';
 
   bool get supported => sdkInt != null && sdkInt! >= 24;
-  bool get locationRequired => supported && sdkInt! <= 32;
+  bool get locationRequired => supported && sdkInt! <= 31;
   bool get localNetworkRequired => (sdkInt ?? 0) >= 37 && targetSdk >= 37;
 
   String get tier => switch (sdkInt) {
@@ -33,7 +36,7 @@ class NearbyPermissionPolicy {
     <= 28 => 'legacy-coarse',
     <= 30 => 'legacy-fine',
     31 => 'android12-bluetooth-location',
-    32 => 'android12L-bluetooth-location',
+    32 => 'android12L-nearby-wifi',
     <= 36 => 'modern-nearby',
     _ => 'future-local-network',
   };
@@ -42,7 +45,7 @@ class NearbyPermissionPolicy {
     if (!supported) return const [];
     return [
       if (sdkInt! <= 28) coarse,
-      if (sdkInt! >= 29 && sdkInt! <= 32) fine,
+      if (sdkInt! >= 29 && sdkInt! <= 31) fine,
       if (sdkInt! >= 31) ...[scan, connect, advertise],
       if (sdkInt! >= 33) wifi,
       if (localNetworkRequired) localNetwork,
@@ -51,7 +54,7 @@ class NearbyPermissionPolicy {
 
   List<String> get requestPermissions => [
     // Android 12 ต้องส่ง COARSE คู่กับ FINE จึงขอ precise location ได้
-    if (sdkInt == 31 || sdkInt == 32) coarse,
+    if (sdkInt == 31) coarse,
     ...requiredPermissions.where((name) => name != localNetwork),
   ];
 }
@@ -90,12 +93,26 @@ class NearbyReadiness {
       )
       .toList(growable: false);
 
+  // สิทธิ์ Wi-Fi เป็น normal permission จาก manifest ไม่ใช่ runtime prompt
+  List<String> get missingManifestPermissions => [
+    for (final name in const [
+      NearbyPermissionPolicy.accessWifiState,
+      NearbyPermissionPolicy.changeWifiState,
+    ])
+      if (policy.supported &&
+          permissions.containsKey(name) &&
+          permissions[name] != true)
+        name,
+  ];
+
   List<NearbyBlocker> get blockers => [
     if (!policy.supported) NearbyBlocker.platformUnsupported,
     if (!transportAvailable) NearbyBlocker.transportUnavailable,
     if (playServicesStatus != 'available' && playServicesStatus != 'unknown')
       NearbyBlocker.playServicesUnavailable,
     if (policy.localNetworkRequired) NearbyBlocker.localNetworkUpgradeRequired,
+    if (missingManifestPermissions.isNotEmpty)
+      NearbyBlocker.transportPermissionMissing,
     if (missingPermissions.isNotEmpty) NearbyBlocker.permissionMissing,
     if (bluetoothAvailable == false) NearbyBlocker.bluetoothUnavailable,
     if (bluetoothEnabled == false) NearbyBlocker.bluetoothOff,
@@ -128,5 +145,7 @@ class NearbyReadiness {
             'ไม่สามารถเริ่มระบบ Nearby ได้ กรุณาลองอีกครั้ง',
           NearbyBlocker.localNetworkUpgradeRequired =>
             'ต้องอัปเดต RELIO เพื่อรองรับสิทธิ์เครือข่ายของ Android รุ่นนี้',
+          NearbyBlocker.transportPermissionMissing =>
+            'RELIO ขาดสิทธิ์ระบบสำหรับ Nearby; โปรดติดตั้งแอปเวอร์ชันล่าสุด',
         };
 }

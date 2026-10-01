@@ -374,4 +374,117 @@ void main() {
       expect(transport.isDiscovering, isFalse);
     },
   );
+
+  test(
+    'concurrent Nearby screen and resume triggers share one start',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 35,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        locationEnabled: false,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+          'android.permission.ACCESS_WIFI_STATE': true,
+          'android.permission.CHANGE_WIFI_STATE': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport()
+        ..startDelay = const Duration(milliseconds: 40);
+      final connectivity = ConnectivityStatusService(
+        source: source,
+        probe: _FakeProbe(0),
+      );
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: connectivity,
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      final initializing = dependencies.initialize();
+      while (transport.advertisingStartCount == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+      await Future.wait([
+        dependencies.startNearbySessionIfPermitted(),
+        dependencies.startNearbySessionIfPermitted(force: true),
+        dependencies.setNearbyForeground(true),
+      ]);
+      await initializing;
+
+      expect(transport.advertisingStartCount, 1);
+      expect(transport.discoveryStartCount, 1);
+    },
+  );
+
+  test(
+    'automatic readiness events respect retry backoff after native failure',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 35,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        locationEnabled: false,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+          'android.permission.ACCESS_WIFI_STATE': true,
+          'android.permission.CHANGE_WIFI_STATE': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport()
+        ..advertisingStartFailure = const NearbyTransportException(
+          'Nearby radio failure',
+          code: 'STATUS_RADIO_ERROR',
+          apiStatusCode: 8007,
+          apiStatusName: 'STATUS_RADIO_ERROR',
+        );
+      final connectivity = ConnectivityStatusService(
+        source: source,
+        probe: _FakeProbe(0),
+      );
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: connectivity,
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      source.emit(ready);
+      source.emit(ready);
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(transport.advertisingStartCount, 1);
+      expect(dependencies.nearbyRetryAttempt, 1);
+    },
+  );
 }

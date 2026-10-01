@@ -143,6 +143,8 @@ class RuntimeConnectivityChannels(private val context: Activity) : EventChannel.
     private fun readablePermissions(): List<String> = buildList {
         add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.ACCESS_FINE_LOCATION)
+        add(Manifest.permission.ACCESS_WIFI_STATE)
+        add(Manifest.permission.CHANGE_WIFI_STATE)
         if (Build.VERSION.SDK_INT >= 31) {
             add(Manifest.permission.BLUETOOTH_SCAN)
             add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -175,6 +177,7 @@ class RuntimeConnectivityChannels(private val context: Activity) : EventChannel.
 
         return mapOf(
             "androidSdk" to Build.VERSION.SDK_INT,
+            "deviceModel" to Build.MODEL,
             "targetSdk" to context.applicationInfo.targetSdkVersion,
             "hasInternetRoute" to (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ?: false),
             "internetValidated" to (capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) ?: false),

@@ -10,8 +10,9 @@ import 'package:uuid/uuid.dart';
 import 'nearby_transport.dart';
 
 class AndroidNearbyTransport implements NearbyTransport {
-  AndroidNearbyTransport({this.serviceId = 'com.relio.relio_mobile'});
+  AndroidNearbyTransport({this.serviceId = relioNearbyServiceId});
 
+  @override
   final String serviceId;
   final Nearby _nearby = Nearby();
   final _peers = StreamController<NearbyPeer>.broadcast();
@@ -25,6 +26,9 @@ class AndroidNearbyTransport implements NearbyTransport {
   bool _advertising = false;
   bool _discovering = false;
   bool _disposed = false;
+
+  @override
+  String get strategyName => relioNearbyStrategyName;
 
   @override
   String get implementationName =>
@@ -59,16 +63,24 @@ class AndroidNearbyTransport implements NearbyTransport {
       );
       if (!started) {
         throw const NearbyTransportException(
-          'Android advertising was rejected.',
+          'Android startAdvertising returned false.',
+          code: 'start_returned_false',
+          operation: 'startAdvertising',
+          exceptionType: 'bool',
+          returnedFalse: true,
         );
       }
       _advertising = true;
     } on NearbyTransportException {
       rethrow;
+    } on PlatformException catch (error) {
+      throw _platformFailure('startAdvertising', error);
     } on Object catch (error) {
       throw NearbyTransportException(
         'Unable to start advertising: $error',
         code: _failureCode(error),
+        operation: 'startAdvertising',
+        exceptionType: error.runtimeType.toString(),
       );
     }
   }
@@ -100,15 +112,25 @@ class AndroidNearbyTransport implements NearbyTransport {
         },
       );
       if (!started) {
-        throw const NearbyTransportException('Android discovery was rejected.');
+        throw const NearbyTransportException(
+          'Android startDiscovery returned false.',
+          code: 'start_returned_false',
+          operation: 'startDiscovery',
+          exceptionType: 'bool',
+          returnedFalse: true,
+        );
       }
       _discovering = true;
     } on NearbyTransportException {
       rethrow;
+    } on PlatformException catch (error) {
+      throw _platformFailure('startDiscovery', error);
     } on Object catch (error) {
       throw NearbyTransportException(
         'Unable to start discovery: $error',
         code: _failureCode(error),
+        operation: 'startDiscovery',
+        exceptionType: error.runtimeType.toString(),
       );
     }
   }
@@ -118,6 +140,15 @@ class AndroidNearbyTransport implements NearbyTransport {
     if (!_discovering) return;
     await _nearby.stopDiscovery();
     _discovering = false;
+  }
+
+  @override
+  Future<void> resetSessionOperations() async {
+    // หยุดเฉพาะ advertise/discovery ที่อาจค้าง; ไม่ตัด endpoint ที่เชื่อมต่อแล้ว
+    await _nearby.stopDiscovery();
+    await _nearby.stopAdvertising();
+    _discovering = false;
+    _advertising = false;
   }
 
   @override
@@ -313,6 +344,55 @@ class AndroidNearbyTransport implements NearbyTransport {
     }
     return 'transport_error';
   }
+
+  NearbyTransportException _platformFailure(
+    String operation,
+    PlatformException error,
+  ) {
+    final nativeText = '${error.message ?? ''} ${error.details ?? ''}';
+    final status = RegExp(
+      r'(?<!\d)(\d{3,5})\s*:\s*([A-Z][A-Z0-9_]+)',
+    ).firstMatch(nativeText);
+    final detailsStatus = error.details is Map
+        ? (error.details! as Map)['statusCode']
+        : null;
+    final statusCode =
+        int.tryParse(status?.group(1) ?? '') ??
+        int.tryParse('$detailsStatus') ??
+        int.tryParse(
+          RegExp(
+                r'statusCode\s*[=:]\s*(\d+)',
+              ).firstMatch(nativeText)?.group(1) ??
+              '',
+        );
+    final statusName = status?.group(2) ?? _statusName(statusCode);
+    return NearbyTransportException(
+      'PlatformException while starting $operation.',
+      code: statusName ?? error.code,
+      operation: operation,
+      exceptionType: error.runtimeType.toString(),
+      platformCode: error.code,
+      platformMessage: error.message,
+      platformDetails: error.details,
+      apiStatusCode: statusCode,
+      apiStatusName: statusName,
+    );
+  }
+
+  String? _statusName(int? statusCode) => switch (statusCode) {
+    8001 => 'STATUS_ALREADY_ADVERTISING',
+    8002 => 'STATUS_ALREADY_DISCOVERING',
+    8007 => 'STATUS_RADIO_ERROR',
+    8008 => 'STATUS_ALREADY_HAVE_ACTIVE_STRATEGY',
+    8009 => 'STATUS_OUT_OF_ORDER_API_CALL',
+    8029 => 'MISSING_PERMISSION_NEARBY_WIFI_DEVICES',
+    8032 => 'MISSING_PERMISSION_ACCESS_WIFI_STATE',
+    8033 => 'MISSING_PERMISSION_CHANGE_WIFI_STATE',
+    8034 => 'MISSING_PERMISSION_ACCESS_COARSE_LOCATION',
+    8036 => 'MISSING_PERMISSION_ACCESS_FINE_LOCATION',
+    8050 => 'API_CONNECTION_FAILED_ALREADY_IN_USE',
+    _ => null,
+  };
 
   @override
   Future<void> dispose() async {
