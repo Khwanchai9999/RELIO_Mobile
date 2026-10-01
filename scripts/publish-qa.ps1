@@ -43,7 +43,8 @@ try {
     }
     $env:RELIO_QA_PUBLISH_INTERNAL = '1'
     & (Join-Path $PSScriptRoot 'release-public-qa.ps1') @arguments
-    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "QA publish failed with exit code $LASTEXITCODE." }
+    $releaseInvocationSucceeded = $?
+    if (-not $releaseInvocationSucceeded) { throw 'QA publish pipeline failed; see the validation error above.' }
 } finally {
     foreach ($name in $proxyNames) { [Environment]::SetEnvironmentVariable($name, $savedProxyValues[$name], 'Process') }
     [Environment]::SetEnvironmentVariable('RELIO_QA_PUBLISH_INTERNAL', $savedInternalFlag, 'Process')
