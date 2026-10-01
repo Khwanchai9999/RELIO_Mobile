@@ -5,8 +5,8 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Latest public QA release: `0.9.0+22`
-- Current QA candidate: `0.9.0+23` (Build 23 Nearby fix; publication pending)
+- Latest public QA release: `0.9.0+23`
+- Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current release tag: `qa-v0.9.0-b22`
 - Drift schema: v4
@@ -117,7 +117,27 @@ API-level permission prompts, OEM radios, discovery/reconnect, and
 cross-version transfer—remains
 **PENDING PHYSICAL TEST**.
 
-## Build 22 — public QA release
+## Build 23 — public QA release and Nearby fix
+
+- Release: `0.9.0+23`, QA package `com.relio.relio_mobile.test`.
+- QA page: https://relio-17dc0.web.app/qa/
+- Manifest: https://relio-17dc0.web.app/qa/latest.json
+- GitHub release: https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.9.0-b23
+- APK: https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/download/qa-v0.9.0-b23/relio-test-0.9.0+23.apk
+- APK SHA-256: `b3eecc672f3cfdc83672a5078e90a2f892835dd748e2ef2f1629206c9fa8b540`
+- APK size: `66,313,370` bytes; QA signing certificate SHA-256:
+  `a5b3b13122d6a8cdbef9f933b4c6fdcc292ba7345649f9f5fe8632deaff62b1d`.
+- `flutter test`: 142 passed. Format, analyze, QA/PROD isolation, DEV debug,
+  QA debug, QA signed release, and PROD debug verification all passed.
+- `scripts/publish-qa.ps1 -ReuseExistingArtifact`: passed. The immutable GitHub
+  asset was not replaced; remote hash, package, version, and signer were
+  verified. Firebase Hosting deployed only `/qa/index.html` and
+  `/qa/latest.json`, with zero APK files, and both public origins were checked.
+- Firebase App Distribution was not used. Public install remains independent
+  of Firebase tester enrollment or Google login. No phone was modified;
+  two-device Nearby acceptance is still pending.
+
+## Build 22 — previous public QA release
 
 - Release: `0.9.0+22`, QA package `com.relio.relio_mobile.test`.
 - QA page: https://relio-17dc0.web.app/qa/

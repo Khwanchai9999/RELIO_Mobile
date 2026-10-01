@@ -144,10 +144,10 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Build 22 (`0.9.0+22`) is the latest public QA
-release. Build 23 (`0.9.0+23`) is the current Nearby-fix candidate and must not
-be installed or published unless the active release request explicitly
-authorizes it. Future public releases require all automated, signing, and OTA
+`scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the current public QA
+release and contains the Nearby permission/recovery fix. Do not install it on
+phones or claim physical Nearby verification without explicit physical-test
+authorization. Future public releases require all automated, signing, and OTA
 verification gates to pass.
 
 The Google Services Gradle plugin is configured for the QA-only config with a

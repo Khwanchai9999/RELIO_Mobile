@@ -222,9 +222,8 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 22 (`0.9.0+22`) remains the latest public QA
-release; Build 23 (`0.9.0+23`) is the Nearby-fix candidate awaiting public
-publication. Do not install or update a phone unless the user explicitly
+current install recipe. Build 23 (`0.9.0+23`) is the current public QA release
+and contains the Nearby fix. Do not install or update a phone unless the user explicitly
 authorizes the physical test and the exact release artifact, device serial,
 package, version, and signing identity are verified.
 Never uninstall the app or clear its data.
