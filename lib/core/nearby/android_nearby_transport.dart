@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:nearby_connections/nearby_connections.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -66,7 +66,10 @@ class AndroidNearbyTransport implements NearbyTransport {
     } on NearbyTransportException {
       rethrow;
     } on Object catch (error) {
-      throw NearbyTransportException('Unable to start advertising: $error');
+      throw NearbyTransportException(
+        'Unable to start advertising: $error',
+        code: _failureCode(error),
+      );
     }
   }
 
@@ -103,7 +106,10 @@ class AndroidNearbyTransport implements NearbyTransport {
     } on NearbyTransportException {
       rethrow;
     } on Object catch (error) {
-      throw NearbyTransportException('Unable to start discovery: $error');
+      throw NearbyTransportException(
+        'Unable to start discovery: $error',
+        code: _failureCode(error),
+      );
     }
   }
 
@@ -142,7 +148,10 @@ class AndroidNearbyTransport implements NearbyTransport {
       rethrow;
     } on Object catch (error) {
       _connectionRequests.remove(peerId);
-      throw NearbyTransportException('Unable to request connection: $error');
+      throw NearbyTransportException(
+        'Unable to request connection: $error',
+        code: _failureCode(error),
+      );
     }
   }
 
@@ -291,6 +300,18 @@ class AndroidNearbyTransport implements NearbyTransport {
         state: NearbyConnectionState.disconnected,
       ),
     );
+  }
+
+  String _failureCode(Object error) {
+    if (error is PlatformException) {
+      final status = RegExp(
+        r'STATUS_[A-Z_]+',
+      ).firstMatch('${error.message ?? ''} ${error.details ?? ''}');
+      if (status != null) return status.group(0)!;
+      final safeCode = error.code.replaceAll(RegExp(r'[^A-Za-z0-9_.-]'), '_');
+      return safeCode.isEmpty ? 'platform_error' : safeCode;
+    }
+    return 'transport_error';
   }
 
   @override

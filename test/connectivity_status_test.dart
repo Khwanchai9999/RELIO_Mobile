@@ -50,6 +50,12 @@ void main() {
       'bluetoothEnabled': true,
       'nearbyPermissionsGranted': true,
       'androidSdk': 35,
+      'permissions': {
+        'android.permission.BLUETOOTH_SCAN': true,
+        'android.permission.BLUETOOTH_CONNECT': true,
+        'android.permission.BLUETOOTH_ADVERTISE': true,
+        'android.permission.NEARBY_WIFI_DEVICES': true,
+      },
     });
 
     expect(snapshot.hasInternetRoute, isFalse);
@@ -65,6 +71,13 @@ void main() {
         wifiEnabled: true,
         bluetoothEnabled: true,
         nearbyPermissionsGranted: true,
+        androidSdk: 35,
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+        },
       ),
     );
     final probe = _FakeProbe(0);
@@ -132,6 +145,13 @@ void main() {
           wifiEnabled: true,
           bluetoothEnabled: true,
           nearbyPermissionsGranted: true,
+          androidSdk: 35,
+          permissions: {
+            'android.permission.BLUETOOTH_SCAN': true,
+            'android.permission.BLUETOOTH_CONNECT': true,
+            'android.permission.BLUETOOTH_ADVERTISE': true,
+            'android.permission.NEARBY_WIFI_DEVICES': true,
+          },
         ),
       );
       final probe = _FakeProbe(2);
@@ -157,6 +177,13 @@ void main() {
           wifiEnabled: false,
           bluetoothEnabled: true,
           nearbyPermissionsGranted: true,
+          androidSdk: 35,
+          permissions: {
+            'android.permission.BLUETOOTH_SCAN': true,
+            'android.permission.BLUETOOTH_CONNECT': true,
+            'android.permission.BLUETOOTH_ADVERTISE': true,
+            'android.permission.NEARBY_WIFI_DEVICES': true,
+          },
         ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -176,7 +203,7 @@ void main() {
       bluetoothConnect: permission.PermissionStatus.granted,
       bluetoothAdvertise: permission.PermissionStatus.granted,
       nearbyWifiDevices: permission.PermissionStatus.granted,
-      locationWhenInUse: permission.PermissionStatus.denied,
+      locationWhenInUse: permission.PermissionStatus.granted,
     );
     const android12 = NearbyPermissionSnapshot(
       androidSdk: 31,
@@ -184,7 +211,7 @@ void main() {
       bluetoothConnect: permission.PermissionStatus.granted,
       bluetoothAdvertise: permission.PermissionStatus.granted,
       nearbyWifiDevices: permission.PermissionStatus.denied,
-      locationWhenInUse: permission.PermissionStatus.denied,
+      locationWhenInUse: permission.PermissionStatus.granted,
     );
     const android11 = NearbyPermissionSnapshot(
       androidSdk: 30,
@@ -269,6 +296,80 @@ void main() {
 
       source.emit(locationOff);
       await Future<void>.delayed(const Duration(milliseconds: 40));
+      expect(transport.isAdvertising, isFalse);
+      expect(transport.isDiscovering, isFalse);
+    },
+  );
+
+  test(
+    'API 35 starts with GPS off and serializes foreground recovery',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 35,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        locationEnabled: false,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport();
+      final connectivity = ConnectivityStatusService(
+        source: source,
+        probe: _FakeProbe(0),
+      );
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: connectivity,
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+      expect(dependencies.connectivityStatus.status.nearbyReady, isTrue);
+
+      await dependencies.setNearbyForeground(false);
+      expect(transport.isAdvertising, isFalse);
+      expect(transport.isDiscovering, isFalse);
+      await dependencies.setNearbyForeground(true);
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+
+      source.emit(
+        const RuntimeConnectivitySnapshot(
+          hasInternetRoute: false,
+          androidSdk: 35,
+          bluetoothAvailable: true,
+          bluetoothEnabled: false,
+          wifiAvailable: true,
+          wifiEnabled: true,
+          locationEnabled: false,
+          playServicesStatus: 'available',
+          permissions: {
+            'android.permission.BLUETOOTH_SCAN': true,
+            'android.permission.BLUETOOTH_CONNECT': true,
+            'android.permission.BLUETOOTH_ADVERTISE': true,
+            'android.permission.NEARBY_WIFI_DEVICES': true,
+          },
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(transport.isAdvertising, isFalse);
       expect(transport.isDiscovering, isFalse);
     },

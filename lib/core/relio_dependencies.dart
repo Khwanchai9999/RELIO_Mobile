@@ -119,47 +119,56 @@ class RelioDependencies {
   StreamSubscription<InternetStatus>? _readinessSubscription;
   Future<bool>? _nearbySyncOperation;
   bool _nearbySyncAgain = false;
+  bool _nearbyForeground = true;
+  bool _nearbyRestart = false;
+  bool _disposed = false;
+  Timer? _nearbyHealthCheck;
 
   Future<void> initialize() => _initialization ??= _initialize();
 
   Future<bool> startNearbySessionIfPermitted() {
-    if (!nearbyService.initialized) return Future.value(false);
+    if (_disposed || !nearbyService.initialized) return Future.value(false);
     final active = _nearbySyncOperation;
     if (active != null) {
       _nearbySyncAgain = true;
       return active;
     }
-    final operation = _syncNearbySession();
+    final operation = _drainNearbySession();
     _nearbySyncOperation = operation;
     return operation.whenComplete(() {
       if (identical(_nearbySyncOperation, operation)) {
         _nearbySyncOperation = null;
       }
-      if (_nearbySyncAgain) {
-        _nearbySyncAgain = false;
-        unawaited(startNearbySessionIfPermitted());
-      }
     });
   }
 
+  Future<bool> _drainNearbySession() async {
+    var ready = false;
+    do {
+      _nearbySyncAgain = false;
+      ready = await _syncNearbySession();
+    } while (_nearbySyncAgain && !_disposed);
+    return ready;
+  }
+
+  Future<bool> setNearbyForeground(bool foreground) {
+    if (_nearbyForeground != foreground && foreground) _nearbyRestart = true;
+    _nearbyForeground = foreground;
+    return startNearbySessionIfPermitted();
+  }
+
   Future<bool> _syncNearbySession() async {
-    final snapshot = await permissionService.readNearbyPermissions();
-    var ready = snapshot.allGranted || useMockTransport;
-    if (!useMockTransport) {
-      final runtime = await connectivityStatus.readRuntimeSnapshot();
-      if (runtime.bluetoothEnabled != true ||
-          runtime.nearbyPermissionsGranted != true) {
-        ready = false;
-      }
-      if (runtime.androidSdk != null &&
-          runtime.androidSdk! <= 30 &&
-          runtime.locationEnabled != true) {
-        ready = false;
-      }
-    }
-    if (!ready) {
+    final runtime = await connectivityStatus.readRuntimeSnapshot();
+    if (_disposed) return false;
+    nearbyService.updateReadiness(runtime.nearbyReadiness);
+    final ready = useMockTransport || runtime.nearbyReadiness.ready;
+    if (!ready || !_nearbyForeground) {
       await nearbyService.stopSession();
       return false;
+    }
+    if (_nearbyRestart) {
+      _nearbyRestart = false;
+      await nearbyService.stopSession();
     }
     await nearbyService.startSession();
     return nearbyService.isAdvertising && nearbyService.isDiscovering;
@@ -175,16 +184,20 @@ class RelioDependencies {
     await identity.getDeviceId();
     await identity.getDisplayName();
     await repositories.seedPrototypeData();
+    await nearbyService.initialize();
+    if (_isAndroid && !useMockTransport) {
+      await startNearbySessionIfPermitted();
+      // ตรวจซ้ำเฉพาะ foreground เพื่อจับสิทธิ์/GMS ที่ไม่ส่ง radio broadcast
+      _nearbyHealthCheck = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (_nearbyForeground) unawaited(startNearbySessionIfPermitted());
+      });
+    }
     try {
       await cloudDataSource.initialize();
       await authService.restoreSession();
     } on Object {
       // Cloud is an optional v0.5 destination. Local startup must remain
       // healthy when credentials are absent or the network is unavailable.
-    }
-    await nearbyService.initialize();
-    if (_isAndroid && !useMockTransport) {
-      await startNearbySessionIfPermitted();
     }
     await relayEngine.initialize();
     await syncEngine.initialize();
@@ -197,7 +210,10 @@ class RelioDependencies {
   }
 
   Future<void> dispose() async {
+    _disposed = true;
+    _nearbyHealthCheck?.cancel();
     await _readinessSubscription?.cancel();
+    await _nearbySyncOperation;
     await connectivityStatus.dispose();
     await relayEngine.dispose();
     await nearbyService.close();

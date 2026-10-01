@@ -10,9 +10,16 @@ import '../media/media_storage_service.dart';
 import '../repositories/local_repositories.dart';
 import '../relay/relay_engine.dart';
 import 'nearby_transport.dart';
+import 'nearby_readiness.dart';
 import 'relio_packet.dart';
 
 enum NearbyApplicationState {
+  initializing,
+  blocked,
+  ready,
+  starting,
+  active,
+  stopping,
   idle,
   advertising,
   discovering,
@@ -34,6 +41,7 @@ class NearbyService extends ChangeNotifier {
     this.attachments,
     this.mediaStorage,
     this.relayEngine,
+    this.handshakeTimeout = const Duration(seconds: 8),
   });
 
   final NearbyTransport transport;
@@ -46,6 +54,47 @@ class NearbyService extends ChangeNotifier {
   final AttachmentRepository? attachments;
   final MediaStorageService? mediaStorage;
   final RelayEngine? relayEngine;
+  final Duration handshakeTimeout;
+  NearbyReadiness? readiness;
+  NearbyApplicationState? _transition;
+  bool _sessionFailed = false;
+  String? _readinessSignature;
+
+  void updateReadiness(NearbyReadiness next) {
+    readiness = next;
+    final signature =
+        '${next.policy.sdkInt}/${next.policy.tier}/${next.playServicesStatus}/'
+        '${next.bluetoothEnabled}/${next.wifiEnabled}/${next.locationEnabled}/'
+        '${next.missingPermissions.join(',')}/${next.blockers.map((b) => b.name).join(',')}';
+    if (signature == _readinessSignature) return;
+    _readinessSignature = signature;
+    _log(
+      'readiness sdk=${next.policy.sdkInt} tier=${next.policy.tier} '
+      'ready=${next.ready} blockers=${next.blockers.map((b) => b.name).join(',')} '
+      'gms=${next.playServicesStatus}',
+    );
+    notifyListeners();
+  }
+
+  String get statusLabel {
+    if (readiness case final current? when !current.ready) {
+      return current.summary;
+    }
+    return switch (applicationState) {
+      NearbyApplicationState.initializing => 'กำลังตรวจสอบ Nearby',
+      NearbyApplicationState.starting => 'กำลังเริ่มค้นหา',
+      NearbyApplicationState.stopping => 'กำลังหยุดค้นหา',
+      NearbyApplicationState.active ||
+      NearbyApplicationState.discovering => 'กำลังค้นหาอุปกรณ์',
+      NearbyApplicationState.advertising => 'กำลังประกาศอุปกรณ์',
+      NearbyApplicationState.connecting => 'กำลังเชื่อมต่อ',
+      NearbyApplicationState.connected => 'เชื่อมต่อแล้ว',
+      NearbyApplicationState.failed =>
+        'เริ่ม Nearby ไม่สำเร็จ กรุณาตรวจสอบสิทธิ์และลองอีกครั้ง',
+      _ => 'พร้อมค้นหาอุปกรณ์ใกล้เคียง',
+    };
+  }
+
   final List<NearbyPeer> discoveredPeers = [];
   final List<String> eventLog = [];
   final Map<String, String> _packetMessageIds = {};
@@ -66,6 +115,7 @@ class NearbyService extends ChangeNotifier {
   String? lastSentPacket;
   String? lastReceivedPacket;
   String? lastError;
+  String? lastErrorCode;
   bool isAdvertising = false;
   bool isDiscovering = false;
   bool initialized = false;
@@ -74,21 +124,26 @@ class NearbyService extends ChangeNotifier {
   int transportErrorCount = 0;
 
   NearbyApplicationState get applicationState {
-    if (lastError != null && transportErrorCount > 0) {
+    if (!initialized) return NearbyApplicationState.initializing;
+    if (_transition != null) return _transition!;
+    if (readiness?.ready == false) return NearbyApplicationState.blocked;
+    if (_sessionFailed) {
       return NearbyApplicationState.failed;
     }
     if (peerStates.values.contains(NearbyConnectionState.connecting)) {
       return NearbyApplicationState.connecting;
     }
-    if (peerStates.values.contains(NearbyConnectionState.connected)) {
+    if (connectedPeers.any((peer) => peer.deviceId != null)) {
       return NearbyApplicationState.connected;
     }
+    if (connectedPeers.isNotEmpty) return NearbyApplicationState.connecting;
+    if (isAdvertising && isDiscovering) return NearbyApplicationState.active;
     if (isDiscovering) return NearbyApplicationState.discovering;
     if (isAdvertising) return NearbyApplicationState.advertising;
     if (peerStates.values.contains(NearbyConnectionState.disconnected)) {
       return NearbyApplicationState.disconnected;
     }
-    return NearbyApplicationState.idle;
+    return NearbyApplicationState.ready;
   }
 
   List<NearbyPeer> get connectedPeers => discoveredPeers
@@ -118,32 +173,70 @@ class NearbyService extends ChangeNotifier {
     _subscriptions.add(transport.incomingFilePayloads.listen(_onFilePayload));
     _subscriptions.add(transport.transferEvents.listen(_onTransfer));
     _subscriptions.add(transport.connectionEvents.listen(_onConnection));
-    _log('ใช้ transport: ${transport.implementationName}');
+    _log('transport initialize name=${transport.implementationName}');
     notifyListeners();
   }
 
   Future<void> startAdvertising() async {
     if (isAdvertising) return;
     try {
+      _log('advertising start');
       await transport.startAdvertising(
         displayName: await identity.getDisplayName(),
       );
       isAdvertising = true;
-      _log('เริ่ม Advertising แล้ว');
+      _log('advertising started');
       notifyListeners();
     } on Object catch (error) {
-      _fail('เริ่ม Advertising ไม่สำเร็จ: $error');
+      _sessionFailed = true;
+      transportErrorCount++;
+      _fail('เริ่ม Advertising ไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
   Future<void> startSession() async {
+    if (_closed || (isAdvertising && isDiscovering)) return;
+    _transition = NearbyApplicationState.starting;
+    _sessionFailed = false;
+    notifyListeners();
     await startAdvertising();
     await startDiscovery();
+    _transition = null;
+    if (isAdvertising && isDiscovering) lastError = null;
+    notifyListeners();
   }
 
   Future<void> stopSession() async {
+    if (_closed) return;
+    if (!isDiscovering &&
+        !isAdvertising &&
+        !discoveredPeers.any(
+          (peer) =>
+              peerStates[peer.endpointId] == NearbyConnectionState.connected ||
+              peerStates[peer.endpointId] == NearbyConnectionState.connecting,
+        )) {
+      return;
+    }
+    _transition = NearbyApplicationState.stopping;
+    notifyListeners();
     await stopDiscovery();
     await stopAdvertising();
+    for (final peer in discoveredPeers.toList()) {
+      if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
+          peerStates[peer.endpointId] == NearbyConnectionState.connecting) {
+        await disconnect(peer.endpointId);
+      }
+    }
+    for (final timer in _helloTimeouts.values) {
+      timer.cancel();
+    }
+    _helloTimeouts.clear();
+    discoveredPeers.clear();
+    peerStates.clear();
+    endpointToDeviceId.clear();
+    deviceToEndpointId.clear();
+    _transition = null;
+    notifyListeners();
   }
 
   Future<void> stopAdvertising() async {
@@ -151,22 +244,25 @@ class NearbyService extends ChangeNotifier {
     try {
       await transport.stopAdvertising();
       isAdvertising = false;
-      _log('หยุด Advertising แล้ว');
+      _log('advertising stopped');
       notifyListeners();
     } on Object catch (error) {
-      _fail('หยุด Advertising ไม่สำเร็จ: $error');
+      _fail('หยุด Advertising ไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
   Future<void> startDiscovery() async {
     if (isDiscovering) return;
     try {
+      _log('discovery start');
       await transport.startDiscovery();
       isDiscovering = true;
-      _log('เริ่ม Discovery แล้ว');
+      _log('discovery started');
       notifyListeners();
     } on Object catch (error) {
-      _fail('เริ่ม Discovery ไม่สำเร็จ: $error');
+      _sessionFailed = true;
+      transportErrorCount++;
+      _fail('เริ่ม Discovery ไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
@@ -178,7 +274,7 @@ class NearbyService extends ChangeNotifier {
       _log('หยุด Discovery แล้ว');
       notifyListeners();
     } on Object catch (error) {
-      _fail('หยุด Discovery ไม่สำเร็จ: $error');
+      _fail('หยุด Discovery ไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
@@ -196,7 +292,7 @@ class NearbyService extends ChangeNotifier {
     } on Object catch (error) {
       peerStates[peerId] = NearbyConnectionState.failed;
       peerErrors[peerId] = _safeError(error);
-      _fail('เชื่อมต่อไม่สำเร็จ: $error');
+      _fail('เชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
@@ -206,7 +302,7 @@ class NearbyService extends ChangeNotifier {
       peerStates[peerId] = NearbyConnectionState.disconnected;
       _log('ตัดการเชื่อมต่อ $peerId');
     } on Object catch (error) {
-      _fail('ตัดการเชื่อมต่อไม่สำเร็จ: $error');
+      _fail('ตัดการเชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
 
@@ -525,6 +621,7 @@ class NearbyService extends ChangeNotifier {
   void clearLog() {
     eventLog.clear();
     lastError = null;
+    lastErrorCode = null;
     notifyListeners();
   }
 
@@ -539,7 +636,7 @@ class NearbyService extends ChangeNotifier {
         final deviceId = endpointToDeviceId.remove(peer.endpointId);
         if (deviceId != null) deviceToEndpointId.remove(deviceId);
       }
-      _log('peer หายจากระยะ discovery: ${peer.name}');
+      _log('endpoint lost id=${peer.endpointId}');
       notifyListeners();
       return;
     }
@@ -555,7 +652,7 @@ class NearbyService extends ChangeNotifier {
           ? NearbyConnectionState.connected
           : NearbyConnectionState.disconnected,
     );
-    _log('พบ peer ${peer.name} (${peer.endpointId})');
+    _log('endpoint found id=${peer.endpointId}');
     notifyListeners();
   }
 
@@ -565,11 +662,12 @@ class NearbyService extends ChangeNotifier {
     if (event.state == NearbyConnectionState.connected) {
       peerErrors.remove(endpointId);
       _helloTimeouts.remove(endpointId)?.cancel();
-      _helloTimeouts[endpointId] = Timer(const Duration(seconds: 8), () {
+      _helloTimeouts[endpointId] = Timer(handshakeTimeout, () {
         if (peerStates[endpointId] == NearbyConnectionState.connected &&
             !endpointToDeviceId.containsKey(endpointId)) {
           peerErrors[endpointId] = 'hello_timeout';
           _log('ERROR: RELIO hello timeout for endpoint $endpointId');
+          _track(_expireHandshake(endpointId));
           notifyListeners();
         }
       });
@@ -596,17 +694,28 @@ class NearbyService extends ChangeNotifier {
       peerErrors[endpointId] = event.error ?? 'connection failed';
     }
     if (event.error != null) peerErrors[endpointId] = event.error!;
-    _log('${event.peer.name}: ${event.state.name}');
+    _log(
+      'connection state=${event.state.name} endpoint=$endpointId'
+      '${event.error == null ? '' : ' code=${_errorCode(event.error!)}'}',
+    );
     notifyListeners();
   }
 
   Future<void> _handshakeAndShareActiveSos(String endpointId) async {
-    _log('connection success: endpoint $endpointId');
-    _log('hello send: endpoint $endpointId');
+    _log('connection result=connected endpoint=$endpointId');
+    _log('hello send endpoint=$endpointId');
     await sendHello(peerId: endpointId);
     final deviceId = await identity.getDeviceId();
     final active = await sos?.readActive(ownerDeviceId: deviceId);
     if (active != null) await sendSos(active, peerId: endpointId);
+  }
+
+  Future<void> _expireHandshake(String endpointId) async {
+    await disconnect(endpointId);
+    endpointToDeviceId.remove(endpointId);
+    peerStates[endpointId] = NearbyConnectionState.failed;
+    peerErrors[endpointId] = 'hello_timeout';
+    notifyListeners();
   }
 
   void _onPayload(NearbyPayloadEvent event) {
@@ -791,6 +900,7 @@ class NearbyService extends ChangeNotifier {
         DeliveryStatus.delivered,
       );
       acknowledgementCount += 1;
+      _log('ACK media received status=completed');
     } else if (status == 'failed') {
       await attachments?.markFailed(
         attachment.id,
@@ -847,6 +957,7 @@ class NearbyService extends ChangeNotifier {
     await transport.sendBytes(ack.toBytes(), peerId: endpointId);
     lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
+    _log('ACK media sent status=$status');
   }
 
   Future<void> _handleHello(String endpointId, RelioPacket packet) async {
@@ -966,6 +1077,7 @@ class NearbyService extends ChangeNotifier {
     if (message == null || message.status == DeliveryStatus.delivered) return;
     await messages.updateDeliveryStatus(messageId, DeliveryStatus.delivered);
     acknowledgementCount += 1;
+    _log('ACK message delivered');
     _log('รับ ACK ของข้อความ $messageId');
   }
 
@@ -1030,6 +1142,7 @@ class NearbyService extends ChangeNotifier {
     await transport.sendBytes(ack.toBytes(), peerId: endpointId);
     lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
+    _log('ACK sent packet=${packet.type.name}');
   }
 
   Future<String> _conversationIdForDevice(
@@ -1068,6 +1181,7 @@ class NearbyService extends ChangeNotifier {
       deviceId: deviceId,
       capabilities: capabilities ?? peer.capabilities,
     );
+    _log('identity established endpoint=$endpointId');
   }
 
   List<String> _capabilitiesFrom(Object? value) => value is List
@@ -1111,12 +1225,17 @@ class NearbyService extends ChangeNotifier {
     _inFlightOperations.add(tracked);
   }
 
-  void _fail(String message) {
+  void _fail(String message, {String code = 'application_error'}) {
     final safeMessage = message.split(':').first;
     lastError = safeMessage;
-    _log('ERROR: $safeMessage');
+    lastErrorCode = code;
+    _log('ERROR code=$code category=$safeMessage');
     notifyListeners();
   }
+
+  String _errorCode(Object error) => error is NearbyTransportException
+      ? error.code
+      : error.runtimeType.toString();
 
   @override
   void dispose() {

@@ -1,20 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Google Nearby Connections compatibility declarations. Runtime requests
-         are isolated behind PermissionService in the Flutter layer. -->
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" android:maxSdkVersion="31" />
+    <!-- อ่านสถานะ Wi-Fi ได้ทุก API โดยไม่สแกน access point หรืออนุมานพิกัด -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" android:maxSdkVersion="31" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- Foreground location is requested only for Send Location / SOS. There
-         is intentionally no ACCESS_BACKGROUND_LOCATION in v0.4. -->
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- คงสิทธิ์พิกัดทุก API สำหรับ SOS/Send Location; Nearby ขอเฉพาะ API 24–32 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" android:minSdkVersion="31" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" android:minSdkVersion="31" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:minSdkVersion="31" android:usesPermissionFlags="neverForLocation" />
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:minSdkVersion="32" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
     <application
         android:label="${appLabel}"
         android:name="${applicationName}"

@@ -18,6 +18,11 @@ class MainActivity : FlutterActivity() {
     private val updateChannel = "relio/app_update"
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        runtimeConnectivityChannels?.onRequestPermissionsResult(requestCode)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannel)

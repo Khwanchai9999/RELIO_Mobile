@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../nearby/nearby_readiness.dart';
+
 class RuntimeConnectivitySnapshot {
   const RuntimeConnectivitySnapshot({
     this.hasInternetRoute,
@@ -13,6 +15,11 @@ class RuntimeConnectivitySnapshot {
     this.nearbyPermissionsGranted,
     this.locationEnabled,
     this.androidSdk,
+    this.targetSdk = 36,
+    this.permissions = const {},
+    this.bluetoothAvailable,
+    this.wifiAvailable,
+    this.playServicesStatus = 'unknown',
   });
 
   final bool? hasInternetRoute;
@@ -22,6 +29,23 @@ class RuntimeConnectivitySnapshot {
   final bool? nearbyPermissionsGranted;
   final bool? locationEnabled;
   final int? androidSdk;
+  final int targetSdk;
+  final Map<String, bool> permissions;
+  final bool? bluetoothAvailable;
+  final bool? wifiAvailable;
+  final String playServicesStatus;
+
+  NearbyReadiness get nearbyReadiness => NearbyReadiness(
+    policy: NearbyPermissionPolicy(androidSdk, targetSdk: targetSdk),
+    permissions: permissions,
+    legacyPermissionsGranted: nearbyPermissionsGranted,
+    bluetoothAvailable: bluetoothAvailable,
+    bluetoothEnabled: bluetoothEnabled,
+    wifiAvailable: wifiAvailable,
+    wifiEnabled: wifiEnabled,
+    locationEnabled: locationEnabled,
+    playServicesStatus: playServicesStatus,
+  );
 
   factory RuntimeConnectivitySnapshot.fromPlatform(Object? value) {
     if (value is! Map) return const RuntimeConnectivitySnapshot();
@@ -33,6 +57,11 @@ class RuntimeConnectivitySnapshot {
       nearbyPermissionsGranted: value['nearbyPermissionsGranted'] as bool?,
       locationEnabled: value['locationEnabled'] as bool?,
       androidSdk: (value['androidSdk'] as num?)?.toInt(),
+      targetSdk: (value['targetSdk'] as num?)?.toInt() ?? 36,
+      permissions: Map<String, bool>.from(value['permissions'] as Map? ?? {}),
+      bluetoothAvailable: value['bluetoothAvailable'] as bool?,
+      wifiAvailable: value['wifiAvailable'] as bool?,
+      playServicesStatus: value['playServicesStatus'] as String? ?? 'unknown',
     );
   }
 
@@ -45,6 +74,11 @@ class RuntimeConnectivitySnapshot {
       other.bluetoothEnabled == bluetoothEnabled &&
       other.nearbyPermissionsGranted == nearbyPermissionsGranted &&
       other.locationEnabled == locationEnabled &&
+      other.targetSdk == targetSdk &&
+      mapEquals(other.permissions, permissions) &&
+      other.bluetoothAvailable == bluetoothAvailable &&
+      other.wifiAvailable == wifiAvailable &&
+      other.playServicesStatus == playServicesStatus &&
       other.androidSdk == androidSdk;
 
   @override
@@ -56,6 +90,11 @@ class RuntimeConnectivitySnapshot {
     nearbyPermissionsGranted,
     locationEnabled,
     androidSdk,
+    targetSdk,
+    Object.hashAll(permissions.entries.map((e) => Object.hash(e.key, e.value))),
+    bluetoothAvailable,
+    wifiAvailable,
+    playServicesStatus,
   );
 }
 
@@ -118,12 +157,7 @@ class InternetStatus {
   final RuntimeConnectivitySnapshot runtime;
   final DateTime? lastCheckedAt;
 
-  bool get nearbyReady =>
-      runtime.bluetoothEnabled == true &&
-      runtime.nearbyPermissionsGranted == true &&
-      (runtime.androidSdk == null ||
-          runtime.androidSdk! > 30 ||
-          runtime.locationEnabled == true);
+  bool get nearbyReady => runtime.nearbyReadiness.ready;
 }
 
 abstract interface class InternetReachabilityProbe {

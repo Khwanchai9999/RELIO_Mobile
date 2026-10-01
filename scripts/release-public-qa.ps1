@@ -370,10 +370,10 @@ if ($DryRun) {
         if ($dryAsset) {
             Test-RemoteApk -Url $dryAsset.browser_download_url -ExpectedOwner $publicQaUpdateConfig.Owner -ExpectedHash $sourceHash -ExpectedSize (Get-Item -LiteralPath $builtApk).Length -ExpectedPackage $expectedPackage -ExpectedVersionName $versionName -ExpectedVersionCode $buildNumber -ExpectedSigner $metadata.SigningFingerprint -Aapt2Path $aapt2 -ApkSignerPath $apksigner
         } elseif ([int]$liveManifest.versionCode -eq $buildNumber) {
-            throw 'Build 17 is live but its GitHub release APK asset is missing.'
+            throw "Build $buildNumber is live but its GitHub release APK asset is missing."
         }
     } elseif ([int]$liveManifest.versionCode -eq $buildNumber) {
-        throw 'The live version has no corresponding GitHub release; dry-run cannot verify the published state.'
+        throw "Build $buildNumber is live without a matching GitHub release; dry-run cannot verify the published state."
     }
 
     Write-Host "DRY RUN VERIFIED: source=$sourceCommit live=$($liveManifest.versionName)+$($liveManifest.versionCode) planned=$version tag=$releaseTag APK=$artifactName SHA-256=$sourceHash"

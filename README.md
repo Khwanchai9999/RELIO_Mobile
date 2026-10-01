@@ -41,8 +41,14 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - Welcome, login/register prototype, offline entry, and permission explainer
 - Home dashboard with separate Internet and Nearby connectivity status
 - Runtime connectivity distinguishes Internet reachability, Wi-Fi radio,
-  Bluetooth, Nearby permission readiness, connected peers, and optional Cloud
-  state instead of presenting demo toggles as actual system status
+  Bluetooth, SDK-specific Nearby permissions, Google Play Services status,
+  legacy Location requirements, connected peers, and optional Cloud state
+- Nearby readiness is capability driven on API 24–36, with a guarded API 37
+  local-network upgrade path. SOS/location coordinates remain separate; modern
+  Nearby is not blocked by GPS being off.
+- Foreground Nearby starts advertising and discovery when readiness is met,
+  retries after resume/radio changes, and shows Thai blockers. Wi-Fi off is
+  reported as reduced capability while P2P_CLUSTER can continue over Bluetooth.
 - Nearby device list with All, SOS, Rescue, and Normal filters
 - Seeded peers are marked and grouped as `DEMO`; actual peers use transport
   discovery and a hello handshake before stable device identity is accepted
@@ -93,8 +99,9 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Two-phone radio behavior remains
-`DEFERRED MANUAL VERIFICATION`.
+overrides use Mock transport. Build 21 updates Nearby compatibility and still
+requires physical testing across Android versions before claiming device-level
+compatibility; see `docs/MANUAL_DEVICE_TESTS.md`.
 
 ## Active workspace
 
@@ -146,11 +153,13 @@ The default Android application id is `com.relio.relio_mobile`. It is a safe
 temporary identifier for this foundation and can be replaced when the product
 package identity is finalized.
 
-The current source version is `0.8.6+17`. Build 17 is a local-only QA
-verification artifact for real offline two-device demo hardening; it has not
-been published, uploaded, or installed on a phone. The latest public QA build
-remains Build 16 for the pending Build 12 → Build 16 physical OTA check. PROD
-remains reserved as `com.relio.relio_mobile`.
+The current source version is `0.8.6+21`. Build 21 hardens Android Nearby
+permission, radio-readiness, and lifecycle handling for API 24+. Format,
+analysis, all 123 automated tests, DEV/QA/PROD verification builds, QA
+signing, and QA/PROD Firebase SDK isolation have passed locally. Physical
+cross-version/OEM Nearby verification remains deferred; local build success
+does not establish device interoperability. PROD remains
+`com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.8.6)
 
@@ -192,9 +201,9 @@ account or Google sign-in. Android still requires the user to approve unknown-
 app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
-use Firebase Storage. Build 13 is immutable history; Build 16 is the current
-public QA release, while Build 17 remains local-only pending physical
-verification.
+use Firebase Storage. Build 13 and Build 16 are immutable historical releases.
+Build 21 is the current local candidate; do not infer its publication or
+physical-device status from local validation.
 
 ## Architecture
 

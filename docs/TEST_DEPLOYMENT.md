@@ -27,10 +27,10 @@ mandatory. Firebase App Distribution Build 11 (`0.8.5+11`) remains intact as
 an internal/fallback channel. This script never deploys App Distribution,
 Functions, Firestore, Realtime Database, Storage, or Supabase resources.
 
-Build 17 (`0.8.6+17`) is local-only and must not be sent through this public
-release script. Its QA release build is produced with
-`scripts/deploy-test.ps1 -NoUpload`; physical two-device checks and a separate
-explicit publication request are required before any public release action.
+Build 21 (`0.8.6+21`) has passed local validation and was built with
+`scripts/deploy-test.ps1 -NoUpload`. This command does not publish anything.
+Use the public publisher only when a release is explicitly authorized and its
+GitHub/Firebase identity, artifact, and remote verification gates all pass.
 
 เอกสารนี้อธิบายทั้ง public Firebase Hosting QA channel และ Firebase App
 Distribution fallback ของ RELIO Test โดย Supabase ยังคงเป็น cloud backend ของ

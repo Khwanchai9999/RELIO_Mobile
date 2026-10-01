@@ -149,15 +149,13 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
       unawaited(_dependencies.syncEngine.run());
       unawaited(_dependencies.appUpdateService.checkForUpdate());
       unawaited(_dependencies.connectivityStatus.refresh());
-      unawaited(_dependencies.startNearbySessionIfPermitted());
+      unawaited(_dependencies.setNearbyForeground(true));
     }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
-      // v0.3 does not claim background Nearby support. Stop active radio
-      // sessions deliberately; local database state remains intact.
-      unawaited(_dependencies.nearbyService.stopDiscovery());
-      unawaited(_dependencies.nearbyService.stopAdvertising());
+      // รวม start/stop ในคิวเดียว ป้องกัน resume ชนกับการหยุด session
+      unawaited(_dependencies.setNearbyForeground(false));
     }
   }
 

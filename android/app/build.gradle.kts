@@ -84,6 +84,8 @@ googleServices {
 }
 
 dependencies {
+    // ใช้ตรวจสถานะ Google Play Services โดยไม่เพิ่ม Firebase service
+    implementation("com.google.android.gms:play-services-base:18.3.0")
     // API-only is safe in every variant. It is a no-op when the full SDK is
     // absent, which keeps DEV and PROD free of self-update implementation.
     implementation("com.google.firebase:firebase-appdistribution-api:16.0.0-beta20")

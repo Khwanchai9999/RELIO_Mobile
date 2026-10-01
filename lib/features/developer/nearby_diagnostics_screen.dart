@@ -184,10 +184,37 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
             Builder(
               builder: (context) {
                 final runtime = _dependencies.connectivityStatus.status.runtime;
+                final readiness = nearby.readiness ?? runtime.nearbyReadiness;
                 return Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
+                    Chip(
+                      label: Text(
+                        'Android API ${readiness.policy.sdkInt ?? 'unknown'}',
+                      ),
+                    ),
+                    Chip(label: Text('Tier: ${readiness.policy.tier}')),
+                    Chip(
+                      label: Text(
+                        'Google Play Services: ${readiness.playServicesStatus}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Location for Nearby: ${readiness.policy.locationRequired ? 'Required' : 'Not required'}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Blockers: ${readiness.blockers.map((b) => b.name).join(', ')}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Missing: ${readiness.missingPermissions.join(', ')}',
+                      ),
+                    ),
                     Chip(
                       label: Text(
                         'Bluetooth ${runtime.bluetoothEnabled == true
@@ -206,24 +233,18 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                             : 'unknown'}',
                       ),
                     ),
-                    if ((runtime.androidSdk ?? 0) <= 30 &&
-                        runtime.androidSdk != null)
-                      Chip(
-                        label: Text(
-                          'Location ${runtime.locationEnabled == true
-                              ? 'ON'
-                              : runtime.locationEnabled == false
-                              ? 'OFF'
-                              : 'unknown'}',
-                        ),
-                      ),
                     Chip(
                       label: Text(
-                        'Permissions ${runtime.nearbyPermissionsGranted == true
-                            ? 'granted'
-                            : runtime.nearbyPermissionsGranted == false
-                            ? 'needed'
+                        'Location ${runtime.locationEnabled == true
+                            ? 'ON'
+                            : runtime.locationEnabled == false
+                            ? 'OFF'
                             : 'unknown'}',
+                      ),
+                    ),
+                    Chip(
+                      label: Text(
+                        'Permissions ${readiness.missingPermissions.isEmpty ? 'granted' : 'needed'}',
                       ),
                     ),
                   ],
@@ -355,7 +376,9 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
                 color: Theme.of(context).colorScheme.errorContainer,
                 child: ListTile(
                   leading: const Icon(Icons.error_outline),
-                  title: Text(nearby.lastError!),
+                  title: Text(
+                    '${nearby.lastError!} • ${nearby.lastErrorCode ?? 'unknown'}',
+                  ),
                 ),
               ),
             if (nearby.eventLog.isEmpty)

@@ -8,8 +8,8 @@ import '../../app/theme/relio_spacing.dart';
 import '../../core/connectivity/runtime_connectivity.dart';
 import '../../core/domain/relio_entities.dart';
 import '../../core/nearby/nearby_service.dart';
+import '../../core/nearby/nearby_readiness.dart';
 import '../../core/nearby/nearby_transport.dart';
-import '../../core/permissions/permission_service.dart';
 import '../../core/relio_dependencies.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
@@ -29,7 +29,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
   bool _loaded = false;
   late RelioDependencies _dependencies;
   late NearbyService _nearby;
-  late Future<NearbyPermissionSnapshot> _permissions;
   List<RelioNearbyDevice> _savedDevices = const [];
 
   @override
@@ -41,7 +40,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
     _nearby = _dependencies.nearbyService;
     _nearby.addListener(_onNearbyChanged);
     _dependencies.connectivityStatus.addListener(_onNearbyChanged);
-    _permissions = _dependencies.permissionService.readNearbyPermissions();
     unawaited(_dependencies.startNearbySessionIfPermitted());
     unawaited(_loadSavedDevices());
   }
@@ -69,36 +67,36 @@ class _NearbyScreenState extends State<NearbyScreen> {
   Future<void> _startSearching() async {
     final started = await _dependencies.startNearbySessionIfPermitted();
     if (!mounted) return;
-    setState(() {
-      _permissions = _dependencies.permissionService.readNearbyPermissions();
-    });
     if (!started) {
-      final runtime = await _dependencies.connectivityStatus
-          .readRuntimeSnapshot();
-      if (!mounted) return;
-      final locationRequired =
-          runtime.androidSdk != null &&
-          runtime.androidSdk! <= 30 &&
-          runtime.locationEnabled != true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            locationRequired
-                ? 'เปิด Location ของโทรศัพท์เพื่อค้นหา Nearby บน Android รุ่นนี้'
-                : 'ต้องอนุญาต Nearby ก่อนเริ่มค้นหา',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_nearby.statusLabel)));
     }
   }
 
   Future<void> _requestPermissions() async {
-    await _dependencies.permissionService.requestNearbyPermissions();
-    if (!mounted) return;
-    setState(() {
-      _permissions = _dependencies.permissionService.readNearbyPermissions();
-    });
+    final result = await _dependencies.permissionService
+        .requestNearbyPermissions();
+    if (!result.allGranted) {
+      await _dependencies.permissionService.openAppSettings();
+    }
     await _startSearching();
+  }
+
+  Future<void> _resolveBlocker() async {
+    final blockers = _nearby.readiness?.blockers ?? const <NearbyBlocker>[];
+    if (blockers.contains(NearbyBlocker.permissionMissing)) {
+      await _requestPermissions();
+      return;
+    }
+    final action = blockers.contains(NearbyBlocker.bluetoothOff)
+        ? 'bluetooth'
+        : blockers.contains(NearbyBlocker.locationRequiredButOff)
+        ? 'location'
+        : blockers.contains(NearbyBlocker.playServicesUnavailable)
+        ? 'playServices'
+        : 'app';
+    await _dependencies.permissionService.openNearbySettings(action);
   }
 
   Future<void> _openRealPeer(NearbyPeer peer) async {
@@ -217,6 +215,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   Widget build(BuildContext context) {
     final status = _dependencies.connectivityStatus.status;
+    final readiness = _nearby.readiness ?? status.runtime.nearbyReadiness;
     final livePeers = _livePeers;
     final realDevices = [
       ...livePeers
@@ -260,39 +259,33 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   Text(
                     'Bluetooth • ${_radioLabel(status.runtime.bluetoothEnabled)}',
                   ),
-                  if ((status.runtime.androidSdk ?? 0) <= 30)
+                  if (readiness.policy.locationRequired)
                     Text(
                       'Location • ${_radioLabel(status.runtime.locationEnabled)}',
                     ),
-                  Text('Nearby • ${_nearbyLabel(status.nearbyReady)}'),
+                  Text('Nearby • ${_nearby.statusLabel}'),
+                  if (readiness.wifiDegraded)
+                    const Text(
+                      'Wi-Fi ไม่พร้อม: ใช้ Bluetooth โดยความเร็วอาจลดลง',
+                    ),
                   Text('เชื่อมต่อแล้ว • ${_nearby.connectedPeerCount} เครื่อง'),
                 ],
               ),
             ),
           ),
-          FutureBuilder<NearbyPermissionSnapshot>(
-            future: _permissions,
-            builder: (context, snapshot) {
-              final permissions = snapshot.data;
-              if (permissions == null || permissions.allGranted) {
-                return const SizedBox.shrink();
-              }
-              return Card(
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: ListTile(
-                  leading: const Icon(Icons.admin_panel_settings_outlined),
-                  title: const Text('ต้องอนุญาตเพื่อค้นหาอุปกรณ์ใกล้เคียง'),
-                  subtitle: Text(
-                    _permissionExplanation(permissions.androidSdk),
-                  ),
-                  trailing: TextButton(
-                    onPressed: _requestPermissions,
-                    child: const Text('อนุญาต'),
-                  ),
+          if (!readiness.ready)
+            Card(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: ListTile(
+                leading: const Icon(Icons.admin_panel_settings_outlined),
+                title: const Text('Nearby ยังไม่พร้อม'),
+                subtitle: Text(readiness.summary),
+                trailing: TextButton(
+                  onPressed: _resolveBlocker,
+                  child: const Text('ตรวจสอบ'),
                 ),
-              );
-            },
-          ),
+              ),
+            ),
           const SizedBox(height: 8),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -328,14 +321,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   label: const Text('ค้นหาอุปกรณ์จริง'),
                 ),
               ),
-              if (_nearby.isDiscovering) ...[
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  tooltip: 'หยุดค้นหา',
-                  onPressed: _nearby.stopSession,
-                  icon: const Icon(Icons.stop_rounded),
-                ),
-              ],
             ],
           ),
           const SizedBox(height: 18),
@@ -433,11 +418,3 @@ String _radioLabel(bool? enabled) => switch (enabled) {
   false => 'ปิด',
   null => 'ไม่ทราบ',
 };
-
-String _nearbyLabel(bool ready) => ready ? 'พร้อมใช้งาน' : 'ยังไม่พร้อม';
-
-String _permissionExplanation(int? sdk) => sdk != null && sdk >= 33
-    ? 'RELIO ต้องใช้สิทธิ์อุปกรณ์ใกล้เคียงและ Bluetooth เพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว โดยไม่ต้องเปิด Internet'
-    : sdk != null && sdk >= 31
-    ? 'RELIO ต้องใช้สิทธิ์ Bluetooth เพื่อค้นหาและเชื่อมต่อโทรศัพท์รอบตัว โดยไม่ต้องเปิด Internet'
-    : 'RELIO ต้องใช้สิทธิ์ตำแหน่งขณะใช้งานเพื่อให้ Android อนุญาตการค้นหา Bluetooth Nearby โดยไม่ต้องส่งตำแหน่ง';

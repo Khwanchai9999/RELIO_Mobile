@@ -142,8 +142,10 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Build 17 is local-only: do not install it on a
-phone or publish/upload it without a new explicit request.
+`scripts/public-qa-config.ps1`. Nearby compatibility hardening is Build 21
+(0.8.6+21); the release brief explicitly authorizes publishing this build
+after all requested tests, signing checks, and OTA validation pass. Do not
+install it on phones during this software release workflow.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -165,8 +167,10 @@ the normal AOT build cannot write its snapshot.
 Physical-radio, runtime-permission, GPS, Supabase live, sync account-switch,
 and two-phone relay checks are `DEFERRED MANUAL VERIFICATION` for v0.8. Keep
 them in `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success
-without performing them. A local Build 17 QA artifact is not permission to
-install it on a phone, publish it, or upload it to Firebase/GitHub/Hosting.
+without performing them. Unit tests, emulator checks, and successful signed
+builds do not prove physical Nearby compatibility across OEMs. Build 21's
+public release still requires two-phone acceptance before declaring the
+compatibility milestone physically verified.
 
 ## Change boundaries
 

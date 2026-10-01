@@ -83,8 +83,9 @@ class NearbyConnectionEvent {
 }
 
 class NearbyTransportException implements Exception {
-  const NearbyTransportException(this.message);
+  const NearbyTransportException(this.message, {this.code = 'transport_error'});
   final String message;
+  final String code;
 
   @override
   String toString() => 'NearbyTransportException: $message';

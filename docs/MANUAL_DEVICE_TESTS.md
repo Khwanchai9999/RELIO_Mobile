@@ -219,35 +219,19 @@ Internet/mobile data disabled:
 These checks are **DEFERRED — NOT YET PERFORMED**. `MockNearbyTransport` and
 automated tests cover the deterministic path.
 
-## M. Build 17 offline two-device demo hardening — DEFERRED
+## M. Historical Build 17 two-device test notes — INACTIVE
 
-Build 17 is a local-only QA artifact at
-`D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk`. It has not been uploaded,
-published, or installed. No device result is implied by the automated checks.
-Use two non-production test phones; do not use a phone whose installed Build 12
-must be preserved as the OTA baseline. Do not uninstall the app or clear its
-data.
+Build 17's device-test instructions are historical and must not be used as a
+current install recipe. Build 21 (`0.8.6+21`) is the current compatibility
+candidate; its local automated/build checks passed, but no physical-device
+Nearby test has been performed for it. Do not install or update a phone unless
+the user explicitly authorizes the physical test and the exact release
+artifact, device serial, package, version, and signing identity are verified.
+Never uninstall the app or clear its data.
 
-The following ADB commands are prepared for a later, explicitly authorized
-physical test. None of them was run during Build 17 preparation:
+The acceptance steps below remain applicable only after that authorization.
 
-```powershell
-adb devices -l
-adb -s <PHONE_A_SERIAL> install -r D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk
-adb -s <PHONE_B_SERIAL> install -r D:\RELIO_Mobile\dist\relio-test-0.8.6+17.apk
-adb -s <PHONE_A_SERIAL> shell dumpsys package com.relio.relio_mobile.test
-adb -s <PHONE_B_SERIAL> shell dumpsys package com.relio.relio_mobile.test
-adb -s <PHONE_A_SERIAL> shell monkey -p com.relio.relio_mobile.test 1
-adb -s <PHONE_B_SERIAL> shell monkey -p com.relio.relio_mobile.test 1
-adb -s <PHONE_A_SERIAL> logcat -d -v time | findstr /i "nearby relio"
-adb -s <PHONE_B_SERIAL> logcat -d -v time | findstr /i "nearby relio"
-```
-
-Before any install command, confirm the exact serials with the user and verify
-the artifact package, version, and signing certificate. Never run `adb
-uninstall`, clear app data, or target a device implicitly.
-
-1. Record phone models, Android versions, Build 17 package/version, and
+1. Record phone models, Android API levels, tested package/version, and
    permission choices. Grant only the foreground Nearby permissions the app
    explains; do not grant location unless explicitly testing Send Location or
    SOS location capture.
@@ -270,6 +254,32 @@ uninstall`, clear app data, or target a device implicitly.
    direct conversation. Clear SOS on A and verify B returns the peer to Normal.
    Enable Rescue and verify Rescue propagates to Normal when disabled, while
    SOS remains higher priority than Rescue.
+
+## N. Build 21 Android Nearby compatibility matrix — DEFERRED
+
+Build 21 (`0.8.6+21`) adds SDK-driven permission selection and runtime
+readiness. Test real phones before describing OEM compatibility as physically
+verified. Do not clear app data or uninstall during OTA tests.
+
+| Android API | Expected Nearby permissions | Location toggle | Result to verify |
+| --- | --- | --- | --- |
+| 24–28 | `ACCESS_COARSE_LOCATION` | Required for legacy discovery | Discovery starts after permission and Location are ready |
+| 29–30 | `ACCESS_FINE_LOCATION` | Required | Location off shows a blocker; on starts the session |
+| 31 | Fine Location plus Bluetooth Scan/Connect/Advertise | Required by this tier | Grant prompt and discovery on/off behavior |
+| 32 | Fine Location plus Bluetooth Scan/Connect/Advertise | Required by compatibility policy | Validate Android 12L independently |
+| 33–36 | Bluetooth Scan/Connect/Advertise and Nearby Wi-Fi | Not required for Nearby | GPS off does not block; each missing permission does |
+| 37+ | Above plus `ACCESS_LOCAL_NETWORK` when target is 37+ | API/feature dependent | Current target-36 build reports upgrade path when required |
+
+For each tested SDK, record Bluetooth/Wi-Fi capability and state, Google Play
+Services availability, permission decisions, advertising/discovery, peer found,
+connect, automatic hello, offline chat/ACK, SOS, and Rescue. Also test readiness
+false→true, true→false, resume, connection loss, and hello timeout/retry. Keep
+the app foregrounded; background discovery is not promised.
+
+`scripts/start-two-device-nearby-test.ps1` discovers authorized ADB devices,
+prints their runtime facts, and captures filtered logs without clearing existing
+logcat. One connected device is reported and left untouched until another
+device is connected.
 7. Toggle Bluetooth/Wi-Fi and deny then grant Nearby permissions. Confirm the
    UI reflects the actual state and gives a clear recovery action without
    claiming background discovery or Internet connectivity.

@@ -107,11 +107,7 @@ class _ConnectivityDiagnosticsCardState
                   ),
                   _StatusRow(
                     label: 'Nearby readiness',
-                    value: nearby.connectedPeerCount > 0
-                        ? 'เชื่อมต่อแล้ว'
-                        : status.nearbyReady
-                        ? 'พร้อมค้นหา'
-                        : 'ยังไม่พร้อม',
+                    value: nearby.statusLabel,
                     color: RelioColors.primary,
                   ),
                   _StatusRow(

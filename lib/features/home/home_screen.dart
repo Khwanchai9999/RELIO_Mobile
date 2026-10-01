@@ -400,11 +400,7 @@ class _LiveConnectivityPanel extends StatelessWidget {
                       ),
                       _LiveStatusLine(
                         label: 'Nearby',
-                        value: nearby.connectedPeerCount > 0
-                            ? 'เชื่อมต่อแล้ว'
-                            : internet.nearbyReady
-                            ? 'พร้อมค้นหา'
-                            : 'ยังไม่พร้อม',
+                        value: nearby.statusLabel,
                         color: RelioColors.primary,
                       ),
                       _LiveStatusLine(

@@ -11,16 +11,16 @@ and signing certificate.
 DEVELOPMENT → TEST → VERSION → BUILD → GITHUB RELEASE → MANIFEST → FIREBASE
 HOSTING → PHONE OTA
 
-Every new installable QA application change needs a new build number. After
-finishing changes based on `0.8.6+17`, bump the project version to
-`0.8.6+18` before the final quality gates and build. Later changes use
-`0.8.6+19`, and so on. Do not publish different application binaries with the
-same version code.
+Every new installable QA application change needs a new build number. Use the
+version recorded in `pubspec.yaml`; never infer or bump a build number as part
+of publication. A version change requires an explicitly authorized release
+task and fresh quality, build, and signing verification. Do not publish
+different application binaries with the same version code.
 
 From the project root, the normal future publication command is:
 
 ```powershell
-cd "D:\RELIO_Mobile"
+Set-Location 'D:\RELIO_Mobile'
 .\scripts\publish-qa.ps1
 ```
 
