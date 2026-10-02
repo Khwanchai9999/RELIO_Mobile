@@ -53,6 +53,7 @@ android/app/google-services.json
 .env.*
 !.env.example
 !.env.qa.example
+.qa-local/
 
 # Symbolication related
 app.*.symbols

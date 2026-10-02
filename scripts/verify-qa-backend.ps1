@@ -3,6 +3,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+$envLoader = Join-Path $PSScriptRoot 'import-qa-local-env.ps1'
+if (Test-Path -LiteralPath $envLoader) { . $envLoader }
 $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the project root: $projectRoot"
@@ -10,63 +12,88 @@ if ($currentRoot -ne $projectRoot) {
 
 $qaRef = $env:RELIO_SUPABASE_QA_PROJECT_REF
 $prodRef = $env:RELIO_SUPABASE_PROD_PROJECT_REF
-$accessToken = $env:SUPABASE_ACCESS_TOKEN
+$anonKey = $env:RELIO_SUPABASE_QA_ANON_KEY
+$qaBaseUrl = $env:RELIO_SUPABASE_QA_URL.TrimEnd('/')
 $allowlistPath = Join-Path $projectRoot 'supabase\qa-project-allowlist.json'
 if (-not (Test-Path -LiteralPath $allowlistPath)) {
     throw 'The reviewed QA project allowlist is missing; no network request was made.'
 }
 $allowlist = Get-Content -Raw -LiteralPath $allowlistPath | ConvertFrom-Json
-if ([string]::IsNullOrWhiteSpace($qaRef) -or [string]::IsNullOrWhiteSpace($prodRef)) {
-    throw 'Set both verified RELIO_SUPABASE_QA_PROJECT_REF and RELIO_SUPABASE_PROD_PROJECT_REF; no network request was made.'
+if ([string]::IsNullOrWhiteSpace($qaRef)) {
+    throw 'Set the verified RELIO_SUPABASE_QA_PROJECT_REF; no network request was made.'
 }
-if ($qaRef -notmatch '^[a-z0-9-]{10,40}$' -or $prodRef -notmatch '^[a-z0-9-]{10,40}$' -or $qaRef -eq $prodRef) {
-    throw 'QA/PROD project refs are malformed or identical; refusing all checks.'
+if ($qaRef -notmatch '^[a-z0-9-]{10,40}$' -or
+    (-not [string]::IsNullOrWhiteSpace($prodRef) -and
+        ($prodRef -notmatch '^[a-z0-9-]{10,40}$' -or $qaRef -eq $prodRef))) {
+    throw 'Configured QA/PROD project refs are malformed or identical; refusing all checks.'
 }
 if ([string]::IsNullOrWhiteSpace([string]$allowlist.qaProjectRef) -or $qaRef -ne [string]$allowlist.qaProjectRef) {
     throw 'Configured QA ref does not match the independently reviewed allowlist; refusing all checks.'
 }
-if ([string]::IsNullOrWhiteSpace($accessToken)) {
-    throw 'SUPABASE_ACCESS_TOKEN is required for read-only Management API checks; no credential was read from disk.'
+if ($qaBaseUrl -ne "https://$qaRef.supabase.co" -or [string]::IsNullOrWhiteSpace($anonKey)) {
+    throw 'The local QA URL or public key does not match the allowlisted QA project.'
 }
-
-# ส่ง Management API token ไป Supabase เท่านั้น และไม่แสดงหรือบันทึกค่าลง output
-$headers = @{ Authorization = "Bearer $accessToken"; Accept = 'application/json' }
-function Invoke-ManagementGet {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    try {
-        return Invoke-RestMethod -Method Get -Uri "https://api.supabase.com/v1$Path" -Headers $headers -TimeoutSec 30
-    } catch {
-        throw "Supabase read-only request failed for $Path (response details suppressed). Check token scope and network access."
-    }
+if ((Get-Content -Raw (Join-Path $projectRoot 'supabase\.temp\project-ref')).Trim() -ne $qaRef) {
+    throw 'The linked Supabase project does not match the allowlisted QA project.'
 }
-
-Write-Host "Checking verified QA Supabase project $qaRef (PROD ref is distinct)."
-$projects = @(Invoke-ManagementGet -Path '/projects')
-$qaProject = @($projects | Where-Object { $_.ref -eq $qaRef -or $_.id -eq $qaRef } | Select-Object -First 1)[0]
-$prodProject = @($projects | Where-Object { $_.ref -eq $prodRef -or $_.id -eq $prodRef } | Select-Object -First 1)[0]
-if ($null -eq $qaProject) { throw 'The allowlisted QA ref is not visible to this Supabase account.' }
-if ($null -eq $prodProject) { throw 'The configured PROD ref is not visible; refusing to claim QA/PROD separation.' }
-if ($qaProject.status -and $qaProject.status -notin @('ACTIVE_HEALTHY', 'ACTIVE')) {
-    throw "QA Supabase project is not active (status $($qaProject.status))."
+function ConvertFrom-CliJson {
+    param([object[]]$OutputLines)
+    $text = $OutputLines -join "`n"
+    $start = $text.IndexOf([char]'{')
+    $end = $text.LastIndexOf([char]'}')
+    if ($start -lt 0 -or $end -lt $start) { throw 'Supabase CLI did not return JSON data.' }
+    return $text.Substring($start, $end - $start + 1) | ConvertFrom-Json
 }
-Write-Host "Verified Supabase account identity: QA=$qaRef; PROD=$prodRef; QA status=$($qaProject.status)."
+$projectOutput = & npx --yes supabase projects list --output-format json
+if ($LASTEXITCODE -ne 0) { throw 'Authenticated Supabase project listing failed.' }
+$projectListing = ConvertFrom-CliJson -OutputLines $projectOutput
+$qaProject = @($projectListing.projects | Where-Object {
+    $_.ref -eq $qaRef -and $_.name -eq 'RELIO-QA' -and $_.region -eq 'ap-southeast-1'
+} | Select-Object -First 1)[0]
+if ($null -eq $qaProject -or $qaProject.status -notin @('ACTIVE_HEALTHY', 'ACTIVE')) {
+    throw 'The allowlisted RELIO-QA project is not visible and healthy in this Supabase account.'
+}
+$prodProject = $null
+if (-not [string]::IsNullOrWhiteSpace($prodRef)) {
+    if ($prodRef -eq $qaRef) { throw 'QA and PROD refs must differ.' }
+    $prodProject = @($projectListing.projects | Where-Object { $_.ref -eq $prodRef } | Select-Object -First 1)[0]
+    if ($null -eq $prodProject) { throw 'The configured PROD ref is not visible; refusing to claim separation.' }
+    Write-Host "Verified Supabase account identity: QA=$qaRef; PROD=$prodRef; QA status=$($qaProject.status)."
+} else {
+    Write-Host "Verified Supabase account identity: QA=$qaRef; PROD=NOT PROVISIONED; QA status=$($qaProject.status)."
+}
 
 $localVersions = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'supabase\migrations') -Filter '*.sql' -File |
     ForEach-Object { [regex]::Match($_.Name, '^(\d+)_').Groups[1].Value } |
     Where-Object { $_ } | Sort-Object -Unique)
 if ($localVersions.Count -eq 0) { throw 'No local SQL migrations were found.' }
-$remoteMigrations = Invoke-ManagementGet -Path "/projects/$qaRef/database/migrations"
-if ($remoteMigrations -is [System.Collections.IDictionary] -and $remoteMigrations.Contains('migrations')) {
-    $remoteMigrations = $remoteMigrations.migrations
-}
-$remoteVersions = @($remoteMigrations | ForEach-Object { [string]$_.version } | Where-Object { $_ } | Sort-Object -Unique)
+$migrationOutput = & npx --yes supabase migration list --linked --project-ref $qaRef --output-format json
+if ($LASTEXITCODE -ne 0) { throw 'Read-only RELIO-QA migration history query failed.' }
+$remoteMigrations = (ConvertFrom-CliJson -OutputLines $migrationOutput).migrations
+$remoteVersions = @($remoteMigrations | ForEach-Object { [string]$_.remote } | Where-Object { $_ } | Sort-Object -Unique)
 $missingVersions = @($localVersions | Where-Object { $remoteVersions -notcontains $_ })
 if ($missingVersions.Count -gt 0) {
     throw "QA migration history is incomplete. Missing local versions: $($missingVersions -join ', '). No migration was applied."
 }
 Write-Host "Verified all $($localVersions.Count) local migration versions are recorded on QA."
 
-$openApi = Invoke-ManagementGet -Path "/projects/$qaRef/database/openapi?schema=public"
+$rlsSql = "select c.relname as table_name, c.relrowsecurity as rls_enabled from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' order by c.relname"
+$rlsOutput = & npx --yes supabase db query --linked --project-ref $qaRef --output-format json $rlsSql
+if ($LASTEXITCODE -ne 0) { throw 'Read-only QA RLS catalog query failed.' }
+$rlsRows = (ConvertFrom-CliJson -OutputLines $rlsOutput).rows
+$requiredTables = @('profiles','devices','conversations','conversation_members','messages','message_receipts','attachments','sos_events','rescue_status','device_push_tokens','user_reports','admin_audit_logs','push_delivery_dedup')
+$missingRlsTables = @()
+foreach ($tableName in $requiredTables) {
+    if (@($rlsRows | Where-Object { $_.table_name -eq $tableName -and $_.rls_enabled }).Count -ne 1) {
+        $missingRlsTables += $tableName
+    }
+}
+if ($missingRlsTables.Count -gt 0) {
+    throw "Missing public QA tables or RLS: $($missingRlsTables -join ', ')."
+}
+Write-Host "Verified RLS enabled on $($rlsRows.Count) expected public QA tables."
+
+$openApi = Invoke-RestMethod -Method Get -Uri "$qaBaseUrl/rest/v1/" -Headers @{ apikey = $anonKey; Accept = 'application/openapi+json' } -TimeoutSec 30
 $paths = @($openApi.paths.PSObject.Properties.Name)
 $requiredPaths = @(
     '/profiles', '/devices', '/conversations', '/conversation_members', '/messages',
@@ -82,7 +109,6 @@ if ($missingPaths.Count -gt 0) {
 }
 Write-Host "Verified required QA REST tables and RPCs ($($requiredPaths.Count) paths)."
 
-$qaBaseUrl = "https://$qaRef.supabase.co"
 try {
     $health = Invoke-WebRequest -UseBasicParsing -Uri "$qaBaseUrl/auth/v1/health" -TimeoutSec 20
 } catch {
@@ -201,10 +227,17 @@ try {
 if ([int]$manifestResponse.StatusCode -ne 200 -or
     $manifest.channel -ne 'qa-public' -or
     $manifest.packageName -ne 'com.relio.relio_mobile.test' -or
-    $manifest.versionName -ne '0.9.0' -or
-    [int]$manifest.versionCode -ne 23 -or
-    $manifest.apkUrl -notmatch '^https://github\.com/Khwanchai9999/RELIO-Android-Updates/releases/download/') {
-    throw 'Public QA manifest failed the expected Build 23, channel, package, or approved-origin validation.'
+    $manifest.apkUrl -notmatch '^https://github\.com/Khwanchai9999/RELIO-Android-Updates/releases/download/' -or
+    $manifest.sha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+    $manifest.signingCertSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
+    [long]$manifest.sizeBytes -le 0) {
+    throw 'Public QA manifest failed its channel, package, approved-origin, or artifact-integrity metadata checks.'
 }
-Write-Host "Public QA manifest is valid and currently advertises $($manifest.versionName)+$($manifest.versionCode)."
+$pubspec = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'pubspec.yaml')
+$versionMatch = [regex]::Match($pubspec, '(?m)^version:\s+([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)')
+if (-not $versionMatch.Success -or $manifest.versionName -ne $versionMatch.Groups[1].Value -or
+    [int]$manifest.versionCode -ne [int]$versionMatch.Groups[2].Value) {
+    throw 'Public QA manifest does not match the current Mobile candidate version.'
+}
+Write-Host "Public QA manifest is valid and matches candidate $($manifest.versionName)+$($manifest.versionCode)."
 Write-Warning 'This read-only health check does not prove user-level RLS behavior, push delivery, or physical-device receipt; those require their dedicated QA checks.'

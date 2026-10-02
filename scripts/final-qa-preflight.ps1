@@ -3,6 +3,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+$qaEnvLoader = Join-Path $PSScriptRoot 'import-qa-local-env.ps1'
+if (Test-Path -LiteralPath $qaEnvLoader) { . $qaEnvLoader }
 $adminRoot = Join-Path (Split-Path -Parent $projectRoot) 'RELIO_Admin'
 if ([IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\') -ne $projectRoot) {
     throw "Run this command from the project root: $projectRoot"

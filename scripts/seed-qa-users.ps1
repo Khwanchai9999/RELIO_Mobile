@@ -3,18 +3,24 @@ param([switch]$DryRun)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
+if ([IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\') -ne $projectRoot) {
+    throw "Run this command from the project root: $projectRoot"
+}
+$envLoader = Join-Path $PSScriptRoot 'import-qa-local-env.ps1'
+if (Test-Path -LiteralPath $envLoader) { . $envLoader }
 $qaRef = $env:RELIO_SUPABASE_QA_PROJECT_REF
 $prodRef = $env:RELIO_SUPABASE_PROD_PROJECT_REF
 $serviceKey = $env:RELIO_SUPABASE_QA_SERVICE_ROLE_KEY
 $allowlistPath = Join-Path $projectRoot 'supabase\qa-project-allowlist.json'
 
-if ([string]::IsNullOrWhiteSpace($qaRef) -or [string]::IsNullOrWhiteSpace($prodRef)) {
-    throw 'Set both verified RELIO_SUPABASE_QA_PROJECT_REF and RELIO_SUPABASE_PROD_PROJECT_REF before seeding.'
+if ([string]::IsNullOrWhiteSpace($qaRef)) {
+    throw 'Set the verified RELIO_SUPABASE_QA_PROJECT_REF before seeding.'
 }
-if ($qaRef -notmatch '^[a-z0-9-]{10,40}$' -or $prodRef -notmatch '^[a-z0-9-]{10,40}$') {
-    throw 'Supabase project refs have an invalid format; refusing to select a backend.'
+if ($qaRef -notmatch '^[a-z0-9-]{10,40}$' -or
+    (-not [string]::IsNullOrWhiteSpace($prodRef) -and $prodRef -notmatch '^[a-z0-9-]{10,40}$')) {
+    throw 'A configured Supabase project ref has an invalid format; refusing to select a backend.'
 }
-if ($qaRef -eq $prodRef) {
+if (-not [string]::IsNullOrWhiteSpace($prodRef) -and $qaRef -eq $prodRef) {
     throw 'QA and PROD Supabase project refs must differ; refusing any mutation.'
 }
 if (-not (Test-Path -LiteralPath $allowlistPath)) {
@@ -25,6 +31,20 @@ if ([string]::IsNullOrWhiteSpace([string]$allowlist.qaProjectRef) -or
     $qaRef -ne [string]$allowlist.qaProjectRef) {
     throw 'Configured QA ref does not match the reviewed project allowlist; no request was made.'
 }
+$projectOutput = & npx --yes supabase projects list --output-format json
+if ($LASTEXITCODE -ne 0) { throw 'Authenticated Supabase project verification failed; no seed request was made.' }
+$projectListing = ($projectOutput -join "`n") | ConvertFrom-Json
+$matchingProjects = @($projectListing.projects | Where-Object {
+    $_.ref -eq $qaRef -and $_.name -eq 'RELIO-QA' -and
+    $_.region -eq 'ap-southeast-1' -and $_.status -eq 'ACTIVE_HEALTHY'
+})
+if ($matchingProjects.Count -ne 1) {
+    throw 'Exact RELIO-QA identity/status verification failed; no seed request was made.'
+}
+$forbiddenTarget = @($projectListing.projects | Where-Object {
+    $_.ref -eq $qaRef -and $_.name -in @('fortune-booking', 'Movie-booking', 'it69', 'civic-lens-ai')
+})
+if ($forbiddenTarget.Count -gt 0) { throw 'The selected ref is an unrelated protected project; no seed request was made.' }
 if ($DryRun) {
     Write-Output "QA seed guard passed for configured QA ref '$qaRef'; no network request was made."
     return
@@ -48,9 +68,9 @@ foreach ($name in $requiredNames) {
 $baseUrl = "https://$qaRef.supabase.co"
 $headers = @{ apikey = $serviceKey; Authorization = "Bearer $serviceKey" }
 $users = @(
-    @{ email = $env:RELIO_QA_USER_EMAIL; password = $env:RELIO_QA_USER_PASSWORD; role = 'user'; name = 'RELIO QA User' },
-    @{ email = $env:RELIO_QA_USER_B_EMAIL; password = $env:RELIO_QA_USER_B_PASSWORD; role = 'user'; name = 'RELIO QA User B' },
-    @{ email = $env:RELIO_QA_RESCUER_EMAIL; password = $env:RELIO_QA_RESCUER_PASSWORD; role = 'rescuer'; name = 'RELIO QA Rescuer' },
+    @{ email = $env:RELIO_QA_USER_EMAIL; password = $env:RELIO_QA_USER_PASSWORD; role = 'user'; name = 'RELIO Test User A' },
+    @{ email = $env:RELIO_QA_USER_B_EMAIL; password = $env:RELIO_QA_USER_B_PASSWORD; role = 'user'; name = 'RELIO Test User B' },
+    @{ email = $env:RELIO_QA_RESCUER_EMAIL; password = $env:RELIO_QA_RESCUER_PASSWORD; role = 'rescuer'; name = 'RELIO Test Rescuer' },
     @{ email = $env:RELIO_QA_ADMIN_EMAIL; password = $env:RELIO_QA_ADMIN_PASSWORD; role = 'admin'; name = 'RELIO QA Admin' }
 )
 if (($users.email | Sort-Object -Unique).Count -ne 4) {
