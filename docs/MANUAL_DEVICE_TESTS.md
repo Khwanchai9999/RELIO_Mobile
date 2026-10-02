@@ -319,14 +319,20 @@ this software pass.
 All items in this section remain **DEFERRED — NOT YET PERFORMED** until a
 human-run two-phone test is completed.
 
-## P. Build 26 Cloud communication acceptance — DEFERRED
+## P. Build 26 Cloud communication acceptance — BACKEND VERIFIED; APP/DEVICE DEFERRED
 
-Build 26 (`0.9.0+26`) is local-only. Its cross-account path is automated-tested
-with shared-backend FakeCloud clients, but migration `0007_cloud_direct_chat.sql`
-has not been applied to a live QA backend. Before any real-account/device
-acceptance, apply the reviewed migrations only to an independently verified
-disposable QA Supabase project and seed two QA users plus an unauthorized third
-user. Verify:
+Build 26 (`0.9.0+26`) is the public QA release. The separate disposable
+RELIO-QA project has migrations through `0012`, live RLS tests, real QA account
+authorization, A↔B direct Cloud messages, read receipts, deduplication,
+pagination/cursors, Storage isolation, audited Admin RPC, and FCM webhook
+authorization/idempotency verified. These backend checks used real QA sessions
+and do not prove that the production Dart SyncEngine merged the data through
+each account's local SQLite database. That app-level Cloud path and all physical
+device checks remain deferred.
+
+When preparing the next authorized live app integration test, use only the
+verified disposable RELIO-QA project and its existing QA users. Do not use
+production accounts or infer phone delivery from backend acceptance. Verify:
 
 1. A and B independently create/get the same direct conversation and see one
    canonical Cloud ID; C cannot list, read, insert, or receipt messages in it.
@@ -337,9 +343,13 @@ user. Verify:
    message without changing its content or regressing delivery state.
 4. Restart both apps and confirm mappings/cursors persist. Interrupt the
    network during pagination, restore it, and confirm no gaps or duplicates.
-5. Verify notification privacy and generic FCM delivery only after the Edge
-   Function, QA secrets, database webhook, and a consented QA device token are
-   configured. No message content belongs in the push body.
+5. Verify notification privacy and generic FCM delivery only after a real,
+   consented QA device token is available. The Edge Function, QA secrets, and
+   database webhook are configured and their server authorization has passed;
+   no physical token or phone-delivery check has been performed. No message
+   content belongs in the push body.
 
-These backend/device checks remain **DEFERRED — NOT YET PERFORMED**. FakeCloud
-coverage is not proof of live RLS enforcement or FCM delivery.
+The live backend checks above are complete. Production SyncEngine-to-QA SQLite
+merge, actual device push receipt, and physical Nearby acceptance remain
+**DEFERRED — NOT YET PERFORMED**. FakeCloud coverage is not proof of app-level
+live sync or physical behavior.

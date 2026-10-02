@@ -105,13 +105,14 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 23 remains the latest public release;
-Build 26 (`0.9.0+26`) is the unpublished local cloud-communication candidate.
-Cross-account direct conversation linking, local mapping, paged cloud-to-local
-message reconciliation, and receipt merge are implemented and covered by
-multi-account FakeCloud tests. The Supabase migration has not been applied or
-remotely verified; physical Nearby reconnect and release verification remain
-unverified.
+overrides use Mock transport. Build 26 (`0.9.0+26`) is the current public QA
+release. Cross-account direct conversation linking, local mapping, paged
+cloud-to-local message reconciliation, and receipt merge are implemented and
+covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
+project, live RLS/Cloud message and receipt checks, FCM authorization path,
+Admin authorization, GitHub APK, and Hosting manifest have passed QA
+verification. Running the production Dart SyncEngine against live QA accounts
+and all physical Nearby/GPS/device checks remain unverified.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -280,16 +281,17 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
   release; physical device acceptance remains pending.
 - **v0.9.0+24 checkpoint:** persistent trust/chat read state and Android
   notifications.
-- **v0.9.0+26 candidate:** bidirectional direct Cloud chat with explicit
+- **v0.9.0+26 public QA:** bidirectional direct Cloud chat with explicit
   account linking, persistent local/cloud mappings, server-timestamp paging,
   stable-UUID merge, read-receipt reconciliation, and multi-account test
-  coverage. Android Keystore-backed identity remains in place. Build 26 is
-  local-only and unpublished; QA Supabase RLS and physical acceptance remain
-  unverified.
+  coverage. Android Keystore-backed identity remains in place. RELIO-QA live
+  migrations, RLS, direct chat/receipts, FCM backend authorization, Admin, and
+  public OTA metadata are verified. Production SyncEngine-to-live-QA and
+  physical device acceptance remain deferred.
 - **v0.9.0+25 checkpoint:** Android Keystore-backed ECDSA identity, versioned
   replay-resistant challenge-response, pinned peer identity, and guarded
-  trusted reconnect are implemented. Remote Supabase/FCM/Admin verification
-  and physical reconnect remain pending. See
+  trusted reconnect are implemented. RELIO-QA Supabase/FCM/Admin verification
+  is complete; physical reconnect remains pending. See
   [docs/COMMUNICATION_PLATFORM_V09.md](docs/COMMUNICATION_PLATFORM_V09.md).
 - **v1.0:** production security review, observability, accessibility audit,
   signed Android release, and end-to-end field testing
