@@ -12,6 +12,14 @@
         "source": "/qa/latest.json",
         "headers": [
           {
+            "key": "Access-Control-Allow-Origin",
+            "value": "https://relio-admin-qa.vercel.app"
+          },
+          {
+            "key": "Access-Control-Allow-Methods",
+            "value": "GET, HEAD, OPTIONS"
+          },
+          {
             "key": "Cache-Control",
             "value": "no-cache, no-store, max-age=0, must-revalidate"
           }
