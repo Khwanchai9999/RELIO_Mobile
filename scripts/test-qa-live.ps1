@@ -321,6 +321,8 @@ $normalAudit = Invoke-QaApi -Method Get -Path '/rest/v1/admin_audit_logs?select=
 Assert-Qa -Condition (@($normalAudit.Data).Count -eq 0) -Message 'Normal user cannot read Admin audit rows'
 $normalAdminCounts = Invoke-QaApi -Method Post -Path '/rest/v1/rpc/admin_dashboard_counts' -Token $a.Token -Body @{}
 Assert-Denied -Response $normalAdminCounts -Message 'Normal user cannot invoke Admin dashboard RPC'
+$rescuerAdminCounts = Invoke-QaApi -Method Post -Path '/rest/v1/rpc/admin_dashboard_counts' -Token $third.Token -Body @{}
+Assert-Denied -Response $rescuerAdminCounts -Message 'Rescuer cannot invoke Admin dashboard RPC'
 $adminCounts = Invoke-QaApi -Method Post -Path '/rest/v1/rpc/admin_dashboard_counts' -Token $admin.Token -Body @{}
 Assert-Qa -Condition ($adminCounts.Status -eq 200) -Message 'QA Admin can invoke Admin dashboard RPC'
 

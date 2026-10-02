@@ -197,6 +197,19 @@ try {
     throw 'QA Admin could not invoke the protected dashboard RPC (response details suppressed).'
 }
 Write-Host 'Verified normal-user denial and QA Admin access for admin_dashboard_counts.'
+try {
+    Invoke-RestMethod -Method Post -Uri "$qaBaseUrl/rest/v1/rpc/admin_dashboard_counts" `
+        -Headers @{ apikey = $anonKey; Authorization = "Bearer $($contexts['Rescuer'].Token)"; Accept = 'application/json' } `
+        -ContentType 'application/json' -Body '{}' -TimeoutSec 30 | Out-Null
+    throw 'The Rescuer account unexpectedly invoked the admin dashboard RPC.'
+} catch {
+    if ($_.Exception.Message -like 'The Rescuer account unexpectedly*') { throw }
+    $response = $_.Exception.Response
+    if ($null -eq $response -or [int]$response.StatusCode -notin @(401, 403)) {
+        throw 'Rescuer denial for admin_dashboard_counts was not confirmed (details suppressed).'
+    }
+}
+Write-Host 'Verified Rescuer denial for admin_dashboard_counts.'
 
 # ใช้ GET ตรวจ endpoint โดยไม่ส่ง webhook secret หรือข้อมูลข้อความ
 try {
