@@ -61,7 +61,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables
 - Incoming Nearby connection requests with explicit accept/reject and saved
-  trust/block controls; automatic reconnect is not yet enabled
+  trust/block controls; cryptographically pinned peers can reconnect after
+  first-contact approval
 - Android local message/SOS notification channels and tap-through navigation;
   FCM token registration is consent-gated and QA-only, while its server
   integration awaits disposable QA Supabase setup
@@ -107,8 +108,9 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 27 (`0.9.0+27`) is the current public QA
-release; Build 28 (`0.9.0+28`) is the identity-handshake candidate.
+overrides use Mock transport. Build 28 (`0.9.0+28`) is the current public QA
+release and published identity-handshake baseline;
+Build 29 (`0.9.0+29`) is the unpublished nearby/media reliability candidate.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -119,8 +121,10 @@ and all physical Nearby/GPS/device checks remain unverified.
 Build 27 fixed a reproduced app-root incoming-prompt scheduling defect and
 added connection tracing and finite transport timeouts. Build 28 fixes the
 first-contact identity challenge parser contract and adds identity-stage and
-disconnect attribution diagnostics. Physical retesting remains deferred; this
-source/test evidence is not a claim of radio success.
+disconnect attribution diagnostics. Build 29 continues trusted reconnect after
+rediscovery, retries locally queued image/video delivery over Nearby, and adds
+privacy-aware text previews plus media-transfer diagnostics. Physical retesting
+remains deferred; this source/test evidence is not a claim of radio success.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -225,8 +229,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 27 is the current public QA release; Build 28 is the
-identity-handshake candidate and is not physically verified.
+releases. Build 28 is the current public QA release; Build 29 is the nearby and
+offline-media reliability candidate and is not physically verified.
 
 ## Architecture
 

@@ -222,11 +222,10 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 26 (`0.9.0+26`) is the latest public QA release.
-Build 27 is the connection-diagnostics candidate; do not install or update a
-phone unless the user explicitly authorizes the physical test and the exact
-release artifact, device serial, package, version, and signing identity are
-verified.
+current install recipe. Build 28 (`0.9.0+28`) is the latest public QA release.
+Build 29 (`0.9.0+29`) is the nearby/media reliability candidate; do not install
+or update a phone from this workspace. The owner should install the signed QA
+build on both test phones only after the remote artifact gate passes.
 Never uninstall the app or clear its data.
 
 The acceptance steps below remain applicable only after that authorization.
@@ -376,3 +375,14 @@ the redacted diagnostics ZIP from both devices if any identity stage stalls or
 fails. Confirm diagnostics distinguish an app-requested disconnect from a
 native/remote disconnect. The development agent did not install or physically
 test Build 28; automated paired tests are not evidence of radio interoperability.
+
+## S. Build 29 nearby and offline-media retest — HUMAN RUN REQUIRED
+
+Build 29 adds trusted-peer rediscovery, offline media queue flushing, optional
+notification previews, and redacted media-transfer diagnostics. After the
+remote APK is verified, the owner should install it on both phones and confirm
+trusted reconnect after one explicit first-contact approval; send an image in
+each direction with Internet disabled; verify the received image renders after
+restart; and check notification sender names with previews both disabled and
+enabled. Export diagnostics from both phones if transfer stages stall. The
+development agent did not install or physically test Build 29.

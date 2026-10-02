@@ -256,6 +256,90 @@ void main() {
   });
 
   test(
+    'pending offline image is transferred when its peer reconnects',
+    () async {
+      final db = AppDatabase.memory();
+      final transport = MockNearbyTransport();
+      final directory = await Directory.systemTemp.createTemp('relio-offline-');
+      final repositories = RelioRepositories(db);
+      final identity = RelioDeviceIdentityRepository(db);
+      final storage = MediaStorageService(rootDirectory: directory);
+      await repositories.conversations.ensureConversation(
+        id: 'offline-peer',
+        participantId: 'offline-peer-device',
+        displayName: 'Offline peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      final file = File('${directory.path}/photo.jpg')
+        ..writeAsBytesSync(Uint8List.fromList([0xff, 0xd8, 0xff]));
+      final attachment = await repositories.attachments.createPending(
+        id: 'offline-attachment',
+        messageId: 'offline-image-message',
+        transferId: 'offline-image-transfer',
+        mediaType: MediaType.image,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpeg',
+        localPath: file.path,
+        byteSize: 3,
+      );
+      final message = await repositories.messages.createOutgoingMedia(
+        conversationId: 'offline-peer',
+        senderId: 'sender',
+        senderDeviceId: await identity.getDeviceId(),
+        type: MessageType.image,
+        fileName: 'photo.jpg',
+        localPath: file.path,
+        attachmentId: attachment.id,
+        messageId: attachment.messageId,
+      );
+      expect(message.status, DeliveryStatus.pending);
+
+      final service = NearbyService(
+        transport: transport,
+        messages: repositories.messages,
+        conversations: repositories.conversations,
+        identity: identity,
+        nearbyDevices: repositories.nearbyDevices,
+        attachments: repositories.attachments,
+        mediaStorage: storage,
+      );
+      addTearDown(() async {
+        await service.close();
+        await db.close();
+        await directory.delete(recursive: true);
+      });
+      await service.initialize();
+      transport.simulatePeer(
+        id: 'offline-peer-endpoint',
+        name: 'Offline peer',
+        deviceId: 'offline-peer-device',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await service.connect('offline-peer-endpoint');
+      transport.simulateIncoming(
+        peerId: 'offline-peer-endpoint',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'offline-peer-device',
+          senderUserId: 'peer-user',
+          displayName: 'Offline peer',
+        ).toBytes(),
+      );
+      final sendDeadline = DateTime.now().add(const Duration(seconds: 2));
+      while ((await repositories.messages.getMessage(message.id))?.status !=
+              DeliveryStatus.nearbySent &&
+          DateTime.now().isBefore(sendDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+
+      expect(transport.sentFiles, [file.path]);
+      expect(
+        (await repositories.messages.getMessage(message.id))?.status,
+        DeliveryStatus.nearbySent,
+      );
+    },
+  );
+
+  test(
     'NearbyService correlates file-before-metadata and persists incoming media',
     () async {
       final db = AppDatabase.memory();

@@ -5,9 +5,9 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Latest public QA release: `0.9.0+27`
+- Latest public QA release: `0.9.0+28`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+28` / versionCode 28 (unpublished, not installed)
+- Current candidate: `0.9.0+29` / versionCode 29 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current public release tag: `qa-v0.9.0-b27`
@@ -46,7 +46,7 @@
   legacy trust fallback, timeout/retry, endpoint-loss history preservation, and
   export redaction. Physical radio behavior is not verified in this workspace.
 
-## Build 28 — first-contact identity-handshake candidate
+## Build 28 — first-contact identity-handshake release
 
 - Build 27 physical logs from Huawei STK-L22/API 29 and Samsung SM-G965F/API 29
   showed that both sides accepted the nearby request and connected natively,
@@ -62,6 +62,23 @@
   simultaneous challenges, wrong signatures, and timeout attribution.
 - No phone was modified or tested for Build 28. Physical retest is still
   required after installation by the owner.
+
+## Build 29 — nearby reliability and offline media candidate
+
+- Trusted-peer rediscovery exercises deterministic signed-identity reconnect
+  and auto-accept after the owner approves first contact.
+- Pending image/video messages use the media transfer path after reconnection
+  instead of being serialized as text. Incoming completed media gets a local
+  notification and remains persisted before acknowledgement.
+- Nearby and Cloud message notifications use the sender name and honor the
+  preview privacy setting; previews are control-character-cleaned and bounded.
+- DEV/QA diagnostics trace media transfer stages without logging message
+  content or file paths. Automated regressions cover reconnect, offline image
+  queue flushing, and preview privacy. These tests do not verify physical radio
+  or OEM behavior.
+- Build 29 remains unpublished until the complete validation and release gates
+  pass. Do not install it on phones; owner-run two-device acceptance remains
+  required.
 
 ## Firebase identity
 

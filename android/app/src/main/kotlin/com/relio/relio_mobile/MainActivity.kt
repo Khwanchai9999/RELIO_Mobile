@@ -128,7 +128,7 @@ class MainActivity : FlutterActivity() {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_MESSAGES, "RELIO messages", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "แจ้งเตือนข้อความ Nearby โดยซ่อนเนื้อหาข้อความ"
+                description = "แจ้งเตือน Nearby; เลือกได้ว่าจะให้แสดงตัวอย่างข้อความ"
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             },
         )

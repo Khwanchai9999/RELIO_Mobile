@@ -228,7 +228,7 @@ $versionName = $versionParts[0]
 $buildNumber = [int]$versionParts[1]
 $artifactName = "relio-test-$version.apk"
 $releaseTag = "qa-v$versionName-b$buildNumber"
-$releaseTitle = "RELIO Test v$versionName Build $buildNumber"
+$releaseTitle = "RELIO Build $buildNumber"
 
 if ((git branch --show-current) -ne 'main') { throw 'Public QA publishing requires branch main.' }
 $sourceStatus = @(git status --porcelain --untracked-files=all)

@@ -10,6 +10,7 @@ import '../domain/relio_entities.dart';
 import '../diagnostics/diagnostics_log_service.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
+import '../notifications/notification_preview.dart';
 import '../repositories/local_repositories.dart';
 import '../relay/relay_engine.dart';
 import 'nearby_transport.dart';
@@ -939,8 +940,19 @@ class NearbyService extends ChangeNotifier {
   ) async {
     if (attachments == null || mediaStorage == null) return;
     final peerId = await _endpointForMessage(message);
-    if (peerId == null && transport is! MockNearbyTransport) return;
+    if (peerId == null && transport is! MockNearbyTransport) {
+      _recordMediaStage(null, 'media_queued_offline');
+      return;
+    }
     try {
+      _recordMediaStage(
+        peerId,
+        'media_send_started',
+        fields: {
+          'mediaType': attachment.mediaType.name,
+          'sizeBytes': attachment.byteSize,
+        },
+      );
       final payloadId = await transport.sendFile(
         attachment.localPath,
         peerId: peerId,
@@ -959,6 +971,7 @@ class NearbyService extends ChangeNotifier {
         payloadId: payloadId,
       );
       await transport.sendBytes(packet.toBytes(), peerId: peerId);
+      _recordMediaStage(peerId, 'media_metadata_sent');
       await attachments!.updateProgress(
         attachment.id,
         status: MediaTransferState.transferring,
@@ -988,6 +1001,13 @@ class NearbyService extends ChangeNotifier {
         });
       }
     } on Object catch (error) {
+      _recordMediaStage(
+        peerId,
+        'media_send_failed',
+        severity: 'error',
+        reason: 'transport_or_metadata_send_failed',
+        nativeCode: _errorCode(error),
+      );
       await attachments!.markFailed(attachment.id, 'send_failed');
       await messages.markFailed(message.id, '$error');
       _fail('ส่งสื่อไม่สำเร็จ: $error');
@@ -998,7 +1018,7 @@ class NearbyService extends ChangeNotifier {
     final message = await messages.getMessage(messageId);
     if (message == null) return;
     await messages.updateDeliveryStatus(messageId, DeliveryStatus.pending);
-    await sendMessage(message);
+    await _sendPendingMessage(message);
   }
 
   Future<String?> _endpointForMessage(RelioMessage message) async {
@@ -1839,12 +1859,19 @@ class NearbyService extends ChangeNotifier {
 
   void _onFilePayload(NearbyFilePayloadEvent event) {
     _mediaFilesByPayload[event.payloadId] = event;
+    _recordMediaStage(event.peerId, 'media_file_received');
     _track(_tryCompleteIncomingMedia(event.payloadId));
   }
 
   void _onTransfer(NearbyTransferEvent event) {
     final transferId = _payloadTransferIds[event.payloadId];
     if (transferId == null || attachments == null) return;
+    _recordMediaStage(
+      event.peerId,
+      'media_native_transfer_${event.status.name}',
+      reason: event.error,
+      fields: {'bytesTransferred': event.bytesTransferred},
+    );
     _track(_updateOutgoingTransfer(transferId, event));
   }
 
@@ -1968,6 +1995,7 @@ class NearbyService extends ChangeNotifier {
       return;
     }
     _mediaMetadataByPayload[payloadId] = packet;
+    _recordMediaStage(endpointId, 'media_metadata_received');
     await _tryCompleteIncomingMedia(payloadId);
   }
 
@@ -2021,6 +2049,21 @@ class NearbyService extends ChangeNotifier {
         );
       }
       await attachments!.markCompleted(attachmentId, localPath: storedPath);
+      await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+      await _notifyIncoming(
+        id: payload['messageId']! as String,
+        title: _peerName(file.peerId, packet.senderUserId),
+        preview: payload['mediaType'] == 'video' ? 'ส่งวิดีโอ' : 'ส่งรูปภาพ',
+        route: '/chat/$conversationId',
+      );
+      _recordMediaStage(
+        file.peerId,
+        'media_received_persisted',
+        fields: {
+          'mediaType': payload['mediaType'],
+          'sizeBytes': payload['byteSize'],
+        },
+      );
       await _sendMediaAck(file.peerId, packet, 'completed');
       _mediaMetadataByPayload.remove(payloadId);
       _mediaFilesByPayload.remove(payloadId);
@@ -2128,6 +2171,7 @@ class NearbyService extends ChangeNotifier {
     required String id,
     required String title,
     required String route,
+    String? preview,
     bool urgent = false,
   }) async {
     if (route == '/chat/$activeConversationId') return;
@@ -2137,12 +2181,44 @@ class NearbyService extends ChangeNotifier {
     if (!await setting.getBool('notifications_enabled', defaultValue: true)) {
       return;
     }
+    final showPreview =
+        !urgent &&
+        await setting.getBool('notification_preview', defaultValue: false);
     await sink.show(
       id: id,
       title: urgent ? 'แจ้งเตือน SOS' : title,
-      body: urgent ? 'มีเหตุฉุกเฉินใหม่ กรุณาตรวจสอบ' : 'คุณมีข้อความใหม่',
+      body: urgent
+          ? 'มีเหตุฉุกเฉินใหม่ กรุณาตรวจสอบ'
+          : notificationPreviewBody(
+              enabled: showPreview,
+              content: preview,
+              fallback: 'คุณมีข้อความใหม่',
+            ),
       route: route,
       urgent: urgent,
+    );
+  }
+
+  void _recordMediaStage(
+    String? endpointId,
+    String event, {
+    String severity = 'info',
+    String? reason,
+    Object? nativeCode,
+    Map<String, Object?> fields = const {},
+  }) {
+    diagnostics?.record(
+      'media',
+      event,
+      severity: severity,
+      connectionTraceId: endpointId == null
+          ? null
+          : _connectionTraces[endpointId],
+      operation: 'nearbyFileTransfer',
+      peerIdentifier: endpointId,
+      reason: reason,
+      nativeCode: nativeCode,
+      fields: fields,
     );
   }
 
@@ -2221,13 +2297,32 @@ class NearbyService extends ChangeNotifier {
           )
           .toList(growable: false);
       for (final message in pending) {
-        await sendMessage(message);
+        await _sendPendingMessage(message);
       }
     } on Object catch (error) {
       _fail('ข้อความที่ค้างส่งยังไม่พร้อม: $error');
     } finally {
       _pendingConversationFlushes.remove(conversationId);
     }
+  }
+
+  Future<void> _sendPendingMessage(RelioMessage message) async {
+    if (message.type != MessageType.image &&
+        message.type != MessageType.video) {
+      await sendMessage(message);
+      return;
+    }
+    final matching = await attachments?.watchForMessage(message.id).first;
+    if (matching == null || matching.isEmpty) {
+      await messages.markFailed(message.id, 'attachment_missing');
+      _recordMediaStage(
+        null,
+        'media_retry_failed',
+        reason: 'attachment_missing',
+      );
+      return;
+    }
+    await sendMediaMessage(message, matching.first);
   }
 
   Future<void> _handleText(String endpointId, RelioPacket packet) async {
@@ -2267,6 +2362,7 @@ class NearbyService extends ChangeNotifier {
       await _notifyIncoming(
         id: messageId,
         title: _peerName(endpointId, packet.senderUserId),
+        preview: packet.payload['text']! as String,
         route: '/chat/$conversationId',
       );
       await _sendAck(endpointId, packet);

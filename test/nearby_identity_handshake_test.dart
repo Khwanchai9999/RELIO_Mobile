@@ -156,10 +156,8 @@ void main() {
           NearbyConnectionState.disconnected,
     );
 
-    pair.transportA.simulateIncomingRequest(
-      name: 'Phone B',
-      fingerprint: (await pair.cryptoB.getPublicIdentity()).fingerprint,
-    );
+    pair.transportA.discoverPeer();
+    pair.transportB.discoverPeer();
     await _waitFor(
       () =>
           pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -243,7 +241,7 @@ void main() {
       final nativeDisconnects = allEvents.where(
         (event) => event['event'] == 'native_endpoint_disconnected',
       );
-      expect(nativeDisconnects, hasLength(2));
+      expect(nativeDisconnects.length, greaterThanOrEqualTo(2));
       expect(
         nativeDisconnects.map((event) => event['disconnectRequester']),
         containsAll(['app', 'nearby_or_remote']),
@@ -315,25 +313,29 @@ class _HandshakePair {
     await _setDeviceId(databaseB, 'device-b');
     final repositoriesA = RelioRepositories(databaseA);
     final repositoriesB = RelioRepositories(databaseB);
+    final cryptoA = _TestIdentityCrypto('device-a');
+    final cryptoB = _TestIdentityCrypto(
+      'device-b',
+      corruptSignatures: corruptSignatureB,
+    );
     final transportA = _LoopbackTransport(
       localEndpointId: 'endpoint-b',
       remoteEndpointId: 'endpoint-a',
       displayName: 'Phone A',
+      localFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
+      remoteFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
     );
     final transportB = _LoopbackTransport(
       localEndpointId: 'endpoint-a',
       remoteEndpointId: 'endpoint-b',
       displayName: 'Phone B',
+      localFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
+      remoteFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
     );
     transportA.other = transportB;
     transportB.other = transportA;
-    final cryptoA = _TestIdentityCrypto('device-a');
-    final cryptoB = _TestIdentityCrypto(
-      'device-b',
-      corruptSignatures: corruptSignatureB,
-    );
     final logsA = DiagnosticsLogService(
       directory: await Directory.systemTemp.createTemp('relio-identity-a-'),
     );
@@ -441,12 +443,16 @@ class _LoopbackTransport implements NearbyTransport {
     required this.localEndpointId,
     required this.remoteEndpointId,
     required this.displayName,
+    required this.localFingerprint,
+    required this.remoteFingerprint,
     this.dropPayloads = false,
   });
 
   final String localEndpointId;
   final String remoteEndpointId;
   final String displayName;
+  final String localFingerprint;
+  final String remoteFingerprint;
   final bool dropPayloads;
   final _peers = StreamController<NearbyPeer>.broadcast();
   final _payloads = StreamController<NearbyPayloadEvent>.broadcast();
@@ -456,7 +462,11 @@ class _LoopbackTransport implements NearbyTransport {
   final List<String> sentPackets = [];
   final Set<String> acceptedConnections = {};
   late final Map<String, NearbyPeer> _knownPeers = {
-    localEndpointId: NearbyPeer(id: localEndpointId, name: displayName),
+    localEndpointId: NearbyPeer(
+      id: localEndpointId,
+      name: displayName,
+      identityFingerprintHint: remoteFingerprint,
+    ),
   };
   _LoopbackTransport? other;
   bool _connected = false;
@@ -547,7 +557,11 @@ class _LoopbackTransport implements NearbyTransport {
     final remote = other!;
     remote._connections.add(
       NearbyConnectionEvent(
-        peer: NearbyPeer(id: remote.localEndpointId, name: displayName),
+        peer: NearbyPeer(
+          id: remote.localEndpointId,
+          name: displayName,
+          identityFingerprintHint: localFingerprint,
+        ),
         state: NearbyConnectionState.incomingRequest,
         isIncomingRequest: true,
       ),

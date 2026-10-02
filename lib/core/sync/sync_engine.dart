@@ -6,6 +6,7 @@ import '../cloud/cloud_storage_policy.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
+import '../notifications/notification_preview.dart';
 import '../repositories/local_repositories.dart';
 import '../../data/models/prototype_models.dart' show DeviceStatus;
 import 'sync_types.dart';
@@ -575,9 +576,11 @@ class SyncEngine {
             link.localConversationId,
           ))?.displayName ??
           'ข้อความใหม่',
-      body: showPreview
-          ? message.content ?? 'คุณมีข้อความใหม่'
-          : 'คุณมีข้อความใหม่',
+      body: notificationPreviewBody(
+        enabled: showPreview,
+        content: message.content,
+        fallback: 'คุณมีข้อความใหม่',
+      ),
       route: '/chat/${link.localConversationId}',
       urgent: false,
     );

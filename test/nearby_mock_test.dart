@@ -5,6 +5,7 @@ import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/nearby/nearby_service.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
+import 'package:relio_mobile/core/notifications/local_notification_service.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
@@ -40,6 +41,72 @@ void main() {
     await service.connect('peer-1');
     expect(transport.peers['peer-1']?.connected, isTrue);
   });
+
+  test(
+    'Nearby notifications use sender name and the privacy preview setting',
+    () async {
+      await service.close();
+      transport = MockNearbyTransport();
+      final notifications = _RecordingNotifications();
+      service = NearbyService(
+        transport: transport,
+        messages: repositories.messages,
+        conversations: repositories.conversations,
+        identity: RelioDeviceIdentityRepository(database),
+        nearbyDevices: repositories.nearbyDevices,
+        settings: repositories.settings,
+        localNotifications: notifications,
+      );
+      await service.initialize();
+      transport.simulatePeer(
+        id: 'preview-endpoint',
+        name: 'Mali',
+        deviceId: 'mali-device',
+      );
+      await Future<void>.delayed(Duration.zero);
+      await service.connect('preview-endpoint');
+      transport.simulateIncoming(
+        peerId: 'preview-endpoint',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'mali-device',
+          senderUserId: 'mali-user',
+          displayName: 'Mali',
+        ).toBytes(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      transport.simulateIncoming(
+        peerId: 'preview-endpoint',
+        bytes: RelioPacket.textMessage(
+          senderDeviceId: 'mali-device',
+          senderUserId: 'mali-user',
+          messageId: 'private-message',
+          conversationId: 'mali-device',
+          text: 'Meet at the north gate.',
+          timestamp: DateTime.now(),
+        ).toBytes(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(notifications.calls.single.title, 'Mali');
+      expect(notifications.calls.single.body, 'คุณมีข้อความใหม่');
+
+      await repositories.settings.setBool('notification_preview', true);
+      transport.simulateIncoming(
+        peerId: 'preview-endpoint',
+        bytes: RelioPacket.textMessage(
+          senderDeviceId: 'mali-device',
+          senderUserId: 'mali-user',
+          messageId: 'preview-message',
+          conversationId: 'mali-device',
+          text: 'Bring water.',
+          timestamp: DateTime.now(),
+        ).toBytes(),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(notifications.calls.last.title, 'Mali');
+      expect(notifications.calls.last.body, 'Bring water.');
+    },
+  );
 
   test('duplicate manual taps share one native connection request', () async {
     transport.simulatePeer(id: 'single-flight-peer', name: 'Peer');
@@ -319,4 +386,29 @@ void main() {
       );
     },
   );
+}
+
+class _RecordingNotifications implements LocalNotificationSink {
+  final calls = <({String title, String body, String route, bool urgent})>[];
+
+  @override
+  Stream<String> get tappedRoutes => const Stream<String>.empty();
+  @override
+  Future<String?> consumeInitialRoute() async => null;
+  @override
+  Future<bool> requestPermission() async => true;
+  @override
+  Future<bool> get notificationsAllowed async => true;
+  @override
+  Future<String?> getFcmToken() async => null;
+  @override
+  Future<void> show({
+    required String id,
+    required String title,
+    required String body,
+    required String route,
+    required bool urgent,
+  }) async {
+    calls.add((title: title, body: body, route: route, urgent: urgent));
+  }
 }
