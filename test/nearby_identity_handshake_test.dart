@@ -205,7 +205,7 @@ void main() {
     'identity timeout is logged before app disconnect and state expires',
     () async {
       final pair = await _HandshakePair.create(
-        handshakeTimeout: const Duration(milliseconds: 30),
+        handshakeTimeout: const Duration(milliseconds: 500),
         dropPayloads: true,
       );
       addTearDown(pair.close);
