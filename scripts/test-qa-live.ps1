@@ -336,6 +336,10 @@ $bReadsPushToken = Invoke-QaApi -Method Get -Path "/rest/v1/device_push_tokens?s
 Assert-Qa -Condition (@($bReadsPushToken.Data).Count -eq 0) -Message 'User B cannot read User A push-token row'
 $adminReadsPushToken = Invoke-QaApi -Method Get -Path "/rest/v1/device_push_tokens?select=token&id=eq.$($pushToken.Data[0].id)" -Token $admin.Token
 Assert-Qa -Condition (@($adminReadsPushToken.Data).Count -eq 0) -Message 'Admin client cannot retrieve raw push tokens'
+$pushTokenCleanup = Invoke-QaApi -Method Delete -Path "/rest/v1/device_push_tokens?device_id=eq.$deviceId" `
+    -Token $a.Token -Prefer 'return=minimal'
+Assert-Qa -Condition ($pushTokenCleanup.Status -in @(200, 204)) `
+    -Message 'Synthetic QA push-token fixture is removed after ownership checks'
 
 $sortedUserIds = @([string]$a.Id, [string]$b.Id)
 [Array]::Sort($sortedUserIds, [StringComparer]::Ordinal)
