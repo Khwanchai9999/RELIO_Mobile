@@ -47,6 +47,13 @@ class _PendingIdentityChallenge {
   final DateTime expiresAt;
 }
 
+class _AppDisconnectRequest {
+  const _AppDisconnectRequest(this.reason, this.requestedAt);
+
+  final String reason;
+  final DateTime requestedAt;
+}
+
 class NearbyService extends ChangeNotifier {
   NearbyService({
     required this.transport,
@@ -63,7 +70,7 @@ class NearbyService extends ChangeNotifier {
     this.relayEngine,
     this.diagnostics,
     PeerIdentityCrypto? identityCrypto,
-    this.handshakeTimeout = const Duration(seconds: 8),
+    this.handshakeTimeout = const Duration(seconds: 30),
     this.connectionAttemptTimeout = const Duration(seconds: 35),
   }) : identityCrypto =
            identityCrypto ??
@@ -152,11 +159,13 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _approvedConnectionEndpoints = {};
   final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
-  final Map<String, Timer> _helloTimeouts = {};
+  final Map<String, Timer> _identityHandshakeTimeouts = {};
   final Map<String, Timer> _connectionTimeouts = {};
   final Map<String, String> _connectionTraces = {};
   final Map<String, DateTime> _connectionStartedAt = {};
   final Map<String, _PendingIdentityChallenge> _identityChallenges = {};
+  final Set<String> _completedIdentityHandshakes = {};
+  final Map<String, _AppDisconnectRequest> _appDisconnectRequests = {};
   final Set<String> _automaticConnectionAttempts = {};
   final Map<String, DateTime> _nextReconnectAt = {};
   final Map<String, int> _reconnectAttemptCounts = {};
@@ -317,13 +326,13 @@ class NearbyService extends ChangeNotifier {
     for (final peer in discoveredPeers.toList()) {
       if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
           peerStates[peer.endpointId] == NearbyConnectionState.connecting) {
-        await disconnect(peer.endpointId);
+        await disconnect(peer.endpointId, reason: 'nearby_session_stopped');
       }
     }
-    for (final timer in _helloTimeouts.values) {
+    for (final timer in _identityHandshakeTimeouts.values) {
       timer.cancel();
     }
-    _helloTimeouts.clear();
+    _identityHandshakeTimeouts.clear();
     discoveredPeers.clear();
     peerStates.clear();
     endpointToDeviceId.clear();
@@ -582,7 +591,7 @@ class NearbyService extends ChangeNotifier {
     _userInitiatedEndpoints.remove(endpointId);
     _approvedConnectionEndpoints.remove(endpointId);
     try {
-      await transport.disconnect(endpointId);
+      await disconnect(endpointId, reason: 'connection_attempt_timeout');
     } on Object {
       // Timeout cleanup is best effort; local transient state still expires.
     }
@@ -604,13 +613,22 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> acceptConnectionRequest(String endpointId) async {
-    if (!pendingConnectionRequests.containsKey(endpointId)) return;
+    final isAutomaticTrustedReconnect =
+        !pendingConnectionRequests.containsKey(endpointId) &&
+        _approvedConnectionEndpoints.contains(endpointId);
+    if (!pendingConnectionRequests.containsKey(endpointId) &&
+        !isAutomaticTrustedReconnect) {
+      return;
+    }
     diagnostics?.record(
       'connection',
-      'accept_tapped',
+      isAutomaticTrustedReconnect
+          ? 'trusted_reconnect_accepted'
+          : 'accept_tapped',
       connectionTraceId: _connectionTraces[endpointId],
       operation: 'acceptConnection',
       peerIdentifier: endpointId,
+      fields: {'automaticTrustedReconnect': isAutomaticTrustedReconnect},
     );
     _approvedConnectionEndpoints.add(endpointId);
     pendingConnectionRequests.remove(endpointId);
@@ -678,12 +696,39 @@ class NearbyService extends ChangeNotifier {
     }
   }
 
-  Future<void> disconnect(String peerId) async {
+  Future<void> disconnect(
+    String peerId, {
+    String reason = 'user_requested',
+  }) async {
+    _appDisconnectRequests[peerId] = _AppDisconnectRequest(
+      reason,
+      DateTime.now().toUtc(),
+    );
+    _recordIdentityStage(
+      peerId,
+      'disconnect_requested_by_app',
+      reason: reason,
+      fields: {'disconnectReason': reason},
+    );
+    _recordIdentityStage(
+      peerId,
+      'disconnect_requested_reason',
+      reason: reason,
+      fields: {'disconnectReason': reason},
+    );
     try {
       await transport.disconnect(peerId);
       peerStates[peerId] = NearbyConnectionState.disconnected;
       _log('ตัดการเชื่อมต่อ $peerId');
     } on Object catch (error) {
+      _appDisconnectRequests.remove(peerId);
+      _recordIdentityStage(
+        peerId,
+        'disconnect_request_failed',
+        severity: 'error',
+        reason: reason,
+        nativeCode: _errorCode(error),
+      );
       _fail('ตัดการเชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
@@ -1013,7 +1058,7 @@ class NearbyService extends ChangeNotifier {
   void _onPeer(NearbyPeer peer) {
     if (peer.isLost) {
       if (peerStates[peer.endpointId] != NearbyConnectionState.connected) {
-        _helloTimeouts.remove(peer.endpointId)?.cancel();
+        _identityHandshakeTimeouts.remove(peer.endpointId)?.cancel();
         _connectionTimeouts.remove(peer.endpointId)?.cancel();
         _connectionStartedAt.remove(peer.endpointId);
         _connectionTraces.remove(peer.endpointId);
@@ -1162,6 +1207,7 @@ class NearbyService extends ChangeNotifier {
         endpointId,
         () => const Uuid().v4(),
       );
+      _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
       diagnostics?.record(
         'connection',
         'native_connection_initiated_received',
@@ -1197,6 +1243,24 @@ class NearbyService extends ChangeNotifier {
         );
       }
     }
+    if (event.state == NearbyConnectionState.disconnected) {
+      final requested = _appDisconnectRequests.remove(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'native_endpoint_disconnected',
+        severity: event.error == null ? 'warning' : 'error',
+        reason: requested?.reason ?? 'not_requested_by_app',
+        fields: {
+          'disconnectRequester': requested == null ? 'nearby_or_remote' : 'app',
+          'appDisconnectRequestFresh':
+              requested != null &&
+              DateTime.now().toUtc().difference(requested.requestedAt) <=
+                  const Duration(seconds: 5),
+          if (event.error != null) 'nativeErrorAvailable': true,
+        },
+        nativeCode: event.error,
+      );
+    }
     peerStates[endpointId] = event.state;
     diagnostics?.record(
       'connection',
@@ -1224,12 +1288,20 @@ class NearbyService extends ChangeNotifier {
     if (event.state == NearbyConnectionState.connected) {
       pendingConnectionRequests.remove(endpointId);
       peerErrors.remove(endpointId);
-      _helloTimeouts.remove(endpointId)?.cancel();
-      _helloTimeouts[endpointId] = Timer(handshakeTimeout, () {
+      _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
+      _identityHandshakeTimeouts.remove(endpointId)?.cancel();
+      _completedIdentityHandshakes.remove(endpointId);
+      _identityHandshakeTimeouts[endpointId] = Timer(handshakeTimeout, () {
         if (peerStates[endpointId] == NearbyConnectionState.connected &&
-            !endpointToDeviceId.containsKey(endpointId)) {
-          peerErrors[endpointId] = 'hello_timeout';
-          _log('ERROR: RELIO hello timeout for endpoint $endpointId');
+            !_completedIdentityHandshakes.contains(endpointId)) {
+          _recordIdentityStage(
+            endpointId,
+            'identity_handshake_timeout',
+            severity: 'error',
+            reason: 'identity_proof_or_enrollment_deadline',
+            fields: {'timeoutMs': handshakeTimeout.inMilliseconds},
+          );
+          peerErrors[endpointId] = 'identity_handshake_timeout';
           _track(_expireHandshake(endpointId));
           notifyListeners();
         }
@@ -1253,12 +1325,12 @@ class NearbyService extends ChangeNotifier {
       _approvedConnectionEndpoints.remove(endpointId);
       _userInitiatedEndpoints.remove(endpointId);
       _identityChallenges.remove(endpointId);
-      _helloTimeouts.remove(endpointId)?.cancel();
-      peerErrors.remove(endpointId);
+      _completedIdentityHandshakes.remove(endpointId);
+      _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       final deviceId = endpointToDeviceId.remove(endpointId);
       if (deviceId != null) deviceToEndpointId.remove(deviceId);
     } else if (event.state == NearbyConnectionState.failed) {
-      _helloTimeouts.remove(endpointId)?.cancel();
+      _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       peerErrors[endpointId] = event.error ?? 'connection failed';
     }
     if (event.error != null) peerErrors[endpointId] = event.error!;
@@ -1284,11 +1356,66 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _beginPeerHandshake(String endpointId) async {
+    _recordIdentityStage(
+      endpointId,
+      'identity_handshake_started',
+      fields: {
+        'firstContactConsent':
+            _approvedConnectionEndpoints.contains(endpointId) ||
+            _userInitiatedEndpoints.contains(endpointId),
+        'pinnedPeerKeyRequiredBeforehand': false,
+      },
+    );
     if (identityCrypto is MockPeerIdentityCrypto) {
       await _handshakeAndShareActiveSos(endpointId);
+      _completedIdentityHandshakes.add(endpointId);
+      _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       return;
     }
-    await _sendIdentityChallenge(endpointId);
+    try {
+      await _sendIdentityChallenge(endpointId);
+    } on Object catch (error) {
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'challenge_send_failed',
+        nativeCode: _errorCode(error),
+      );
+      peerErrors[endpointId] = 'identity_challenge_send_failed';
+      await disconnect(endpointId, reason: 'identity_challenge_send_failed');
+    }
+  }
+
+  void _recordIdentityStage(
+    String endpointId,
+    String event, {
+    String severity = 'info',
+    String? reason,
+    Object? nativeCode,
+    Map<String, Object?> fields = const {},
+  }) {
+    final startedAt = _connectionStartedAt[endpointId];
+    diagnostics?.record(
+      'identity',
+      event,
+      severity: severity,
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'identityHandshake',
+      peerIdentifier: endpointId,
+      reason: reason,
+      nativeCode: nativeCode,
+      fields: {
+        'protocolVersion': 2,
+        'handshakeState': event,
+        if (startedAt != null)
+          'elapsedMs': DateTime.now()
+              .toUtc()
+              .difference(startedAt)
+              .inMilliseconds,
+        ...fields,
+      },
+    );
   }
 
   void _queueIncomingRequest(NearbyConnectionEvent event) {
@@ -1389,27 +1516,42 @@ class NearbyService extends ChangeNotifier {
       _queueIncomingRequest(event);
       return;
     }
+    _approvedConnectionEndpoints.add(endpointId);
+    diagnostics?.record(
+      'trust',
+      'trusted_reconnect_candidate_accepted',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'acceptConnection',
+      peerIdentifier: endpointId,
+      fields: {'pinnedKeyAvailable': true},
+    );
     await acceptConnectionRequest(endpointId);
   }
 
   Future<void> _sendIdentityChallenge(String endpointId) async {
+    if (_identityChallenges.containsKey(endpointId)) {
+      _recordIdentityStage(
+        endpointId,
+        'identity_challenge_suppressed',
+        reason: 'challenge_already_pending',
+      );
+      return;
+    }
     final localId = await identity.getDeviceId();
     final bytes = List<int>.generate(32, (_) => Random.secure().nextInt(256));
     final challengeId = const Uuid().v4();
     final nonce = base64Url.encode(bytes).replaceAll('=', '');
-    final expiresAt = DateTime.now().toUtc().add(const Duration(seconds: 20));
+    final expiresAt = DateTime.now().toUtc().add(const Duration(seconds: 45));
     _identityChallenges[endpointId] = _PendingIdentityChallenge(
       challengeId: challengeId,
       nonce: nonce,
       challengerDeviceId: localId,
       expiresAt: expiresAt,
     );
-    diagnostics?.record(
-      'trust',
-      'identity_challenge_started',
-      connectionTraceId: _connectionTraces[endpointId],
-      operation: 'identityHandshake',
-      peerIdentifier: endpointId,
+    _recordIdentityStage(
+      endpointId,
+      'identity_challenge_created',
+      fields: {'challengeTtlMs': 45000},
     );
     final packet = RelioPacket.identityChallenge(
       senderDeviceId: localId,
@@ -1420,12 +1562,14 @@ class NearbyService extends ChangeNotifier {
       expiresAt: expiresAt,
     );
     await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+    _recordIdentityStage(endpointId, 'identity_challenge_sent');
   }
 
   Future<void> _handleIdentityChallenge(
     String endpointId,
     RelioPacket packet,
   ) async {
+    _recordIdentityStage(endpointId, 'identity_challenge_received');
     final payload = packet.payload;
     final challengeId = payload['challengeId']! as String;
     final nonce = payload['nonce']! as String;
@@ -1436,10 +1580,16 @@ class NearbyService extends ChangeNotifier {
         expiresAt == null ||
         !expiresAt.isAfter(DateTime.now().toUtc()) ||
         expiresAt.difference(DateTime.now().toUtc()) >
-            const Duration(seconds: 30) ||
+            const Duration(seconds: 60) ||
         !RegExp(r'^[A-Za-z0-9_-]{40,48}$').hasMatch(nonce)) {
       protocolErrorCount++;
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'invalid_or_expired_challenge',
+      );
+      await disconnect(endpointId, reason: 'invalid_or_expired_challenge');
       return;
     }
     final now = DateTime.now().toUtc();
@@ -1447,7 +1597,13 @@ class NearbyService extends ChangeNotifier {
     _receivedChallengeExpiries.removeWhere((_, expiry) => !expiry.isAfter(now));
     if (_receivedChallengeExpiries.containsKey(challengeId)) {
       protocolErrorCount++;
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'challenge_replay',
+      );
+      await disconnect(endpointId, reason: 'challenge_replay');
       return;
     }
     if (_receivedChallengeExpiries.length >= 128) {
@@ -1476,13 +1632,18 @@ class NearbyService extends ChangeNotifier {
       fingerprint: own.fingerprint,
       signature: signature,
     );
+    _recordIdentityStage(endpointId, 'identity_response_created');
+    _recordIdentityStage(endpointId, 'identity_public_key_sent');
     await transport.sendBytes(proof.toBytes(), peerId: endpointId);
+    _recordIdentityStage(endpointId, 'identity_response_sent');
   }
 
   Future<void> _handleIdentityProof(
     String endpointId,
     RelioPacket packet,
   ) async {
+    _recordIdentityStage(endpointId, 'identity_response_received');
+    _recordIdentityStage(endpointId, 'identity_public_key_received');
     final challenge = _identityChallenges[endpointId];
     final payload = packet.payload;
     if (challenge == null ||
@@ -1491,7 +1652,16 @@ class NearbyService extends ChangeNotifier {
         payload['nonce'] != challenge.nonce ||
         payload['challengerDeviceId'] != challenge.challengerDeviceId) {
       protocolErrorCount++;
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'challenge_response_mismatch_or_expired',
+      );
+      await disconnect(
+        endpointId,
+        reason: 'challenge_response_mismatch_or_expired',
+      );
       return;
     }
     // Consume before signature work: a replay cannot reuse this challenge even
@@ -1505,7 +1675,13 @@ class NearbyService extends ChangeNotifier {
       computed = await identityCrypto.fingerprint(publicKey);
     } on Object {
       protocolErrorCount++;
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_signature_verify_failed',
+        severity: 'error',
+        reason: 'invalid_public_key',
+      );
+      await disconnect(endpointId, reason: 'invalid_public_key_fingerprint');
       return;
     }
     final signed = identityChallengeMessage(
@@ -1514,6 +1690,7 @@ class NearbyService extends ChangeNotifier {
       challengerDeviceId: challenge.challengerDeviceId,
       responderDeviceId: deviceId,
     );
+    _recordIdentityStage(endpointId, 'identity_signature_verify_started');
     final valid =
         computed == fingerprint &&
         await identityCrypto.verify(
@@ -1523,21 +1700,32 @@ class NearbyService extends ChangeNotifier {
         );
     if (!valid) {
       protocolErrorCount++;
-      diagnostics?.record(
-        'trust',
-        'identity_proof_failed',
+      _recordIdentityStage(
+        endpointId,
+        'identity_signature_verify_failed',
         severity: 'error',
-        connectionTraceId: _connectionTraces[endpointId],
-        operation: 'identityHandshake',
-        peerIdentifier: endpointId,
         reason: 'signature_or_fingerprint_mismatch',
       );
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'signature_or_fingerprint_mismatch',
+      );
+      peerErrors[endpointId] = 'identity_proof_invalid';
+      await disconnect(endpointId, reason: 'signature_or_fingerprint_mismatch');
       return;
     }
+    _recordIdentityStage(endpointId, 'identity_signature_verify_success');
     final saved = await nearbyDevices.getDevice(deviceId);
     if (saved?.isBlocked == true) {
-      await disconnect(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
+        reason: 'peer_blocked',
+      );
+      await disconnect(endpointId, reason: 'peer_blocked');
       return;
     }
     final wasPinned = saved?.publicIdentityFingerprint != null;
@@ -1550,37 +1738,29 @@ class NearbyService extends ChangeNotifier {
         _userInitiatedEndpoints.contains(endpointId);
     if (wasPinned && !pinnedMatches && !consented) {
       peerErrors[endpointId] = 'identity_changed';
-      diagnostics?.record(
-        'trust',
-        'identity_mismatch',
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
         severity: 'error',
-        connectionTraceId: _connectionTraces[endpointId],
-        operation: 'identityHandshake',
-        peerIdentifier: endpointId,
         reason: 'pinned_identity_changed',
       );
-      await disconnect(endpointId);
+      await disconnect(endpointId, reason: 'pinned_identity_changed');
       return;
     }
     if (!pinnedMatches && !consented) {
       peerErrors[endpointId] = 'approval_required';
-      diagnostics?.record(
-        'trust',
-        'manual_fallback',
-        connectionTraceId: _connectionTraces[endpointId],
-        operation: 'identityHandshake',
-        peerIdentifier: endpointId,
+      _recordIdentityStage(
+        endpointId,
+        'identity_handshake_failed',
+        severity: 'error',
         reason: 'approval_required',
       );
-      await disconnect(endpointId);
+      await disconnect(endpointId, reason: 'manual_approval_required');
       return;
     }
-    diagnostics?.record(
-      'trust',
+    _recordIdentityStage(
+      endpointId,
       'identity_proof_verified',
-      connectionTraceId: _connectionTraces[endpointId],
-      operation: 'identityHandshake',
-      peerIdentifier: endpointId,
       fields: {'pinnedIdentityMatched': pinnedMatches},
     );
     _updatePeerIdentity(
@@ -1591,6 +1771,13 @@ class NearbyService extends ChangeNotifier {
     );
     final status = _statusFrom(payload['status']! as String);
     peerStatuses[deviceId] = status;
+    if (!pinnedMatches) {
+      _recordIdentityStage(
+        endpointId,
+        'identity_enrollment_started',
+        fields: {'wasPreviouslyPinned': wasPinned},
+      );
+    }
     await nearbyDevices.upsert(
       deviceId: deviceId,
       displayName: payload['displayName']! as String,
@@ -1602,6 +1789,12 @@ class NearbyService extends ChangeNotifier {
         publicIdentityKey: publicKey,
         fingerprint: fingerprint,
       );
+      _recordIdentityStage(
+        endpointId,
+        'identity_fingerprint_pinned',
+        fields: {'fingerprintPrefix': fingerprint.substring(0, 12)},
+      );
+      _recordIdentityStage(endpointId, 'identity_enrollment_completed');
     }
     _automaticConnectionAttempts.remove(fingerprint);
     _reconnectTimers.remove(fingerprint)?.cancel();
@@ -1614,8 +1807,11 @@ class NearbyService extends ChangeNotifier {
       displayName: payload['displayName']! as String,
       participantStatus: status,
     );
-    _helloTimeouts.remove(endpointId)?.cancel();
+    _completedIdentityHandshakes.add(endpointId);
+    _identityHandshakeTimeouts.remove(endpointId)?.cancel();
     peerErrors.remove(endpointId);
+    _recordIdentityStage(endpointId, 'identity_handshake_completed');
+    _recordIdentityStage(endpointId, 'identity_hello_sent');
     await sendHello(peerId: endpointId);
     _track(_flushPendingMessages(conversationId));
     final active = await sos?.readActive(
@@ -1625,10 +1821,15 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _expireHandshake(String endpointId) async {
-    await disconnect(endpointId);
+    if (peerStates[endpointId] != NearbyConnectionState.connected ||
+        _completedIdentityHandshakes.contains(endpointId)) {
+      return;
+    }
+    peerErrors[endpointId] = 'identity_handshake_timeout';
+    await disconnect(endpointId, reason: 'identity_handshake_timeout');
     endpointToDeviceId.remove(endpointId);
     peerStates[endpointId] = NearbyConnectionState.failed;
-    peerErrors[endpointId] = 'hello_timeout';
+    peerErrors[endpointId] = 'identity_handshake_timeout';
     notifyListeners();
   }
 
@@ -1677,8 +1878,10 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handlePayload(NearbyPayloadEvent event) async {
+    RelioPacket? receivedPacket;
     try {
       final packet = RelioPacket.fromBytes(event.bytes);
+      receivedPacket = packet;
       final mappedDeviceId = endpointToDeviceId[event.peerId];
       final isIdentityHandshake =
           packet.type == RelioPacketType.identityChallenge ||
@@ -1726,10 +1929,30 @@ class NearbyService extends ChangeNotifier {
     } on RelioPacketException catch (error) {
       protocolErrorCount += 1;
       peerErrors[event.peerId] = 'invalid_packet';
+      if (receivedPacket?.type == RelioPacketType.identityChallenge ||
+          receivedPacket?.type == RelioPacketType.identityProof) {
+        _recordIdentityStage(
+          event.peerId,
+          'identity_handshake_failed',
+          severity: 'error',
+          reason: 'invalid_packet',
+          fields: {'failureType': error.runtimeType.toString()},
+        );
+      }
       notifyListeners();
       _fail('packet ไม่ถูกต้อง: ${error.message}');
     } on Object catch (error) {
       peerErrors[event.peerId] = 'packet_processing_failed';
+      if (receivedPacket?.type == RelioPacketType.identityChallenge ||
+          receivedPacket?.type == RelioPacketType.identityProof) {
+        _recordIdentityStage(
+          event.peerId,
+          'identity_handshake_failed',
+          severity: 'error',
+          reason: 'packet_handler_exception',
+          fields: {'failureType': error.runtimeType.toString()},
+        );
+      }
       notifyListeners();
       _fail('ประมวลผล packet ไม่สำเร็จ: $error');
     }
@@ -1928,7 +2151,7 @@ class NearbyService extends ChangeNotifier {
     final savedPeer = await nearbyDevices.getDevice(packet.senderDeviceId);
     if (savedPeer?.isBlocked == true) {
       _log('blocked peer rejected after identity handshake');
-      await disconnect(endpointId);
+      await disconnect(endpointId, reason: 'blocked_peer');
       return;
     }
     if (identityCrypto is! MockPeerIdentityCrypto &&
@@ -1937,7 +2160,7 @@ class NearbyService extends ChangeNotifier {
             savedPeer?.publicIdentityFingerprint == null)) {
       protocolErrorCount += 1;
       _log('hello rejected before cryptographic identity proof');
-      await disconnect(endpointId);
+      await disconnect(endpointId, reason: 'hello_before_identity_proof');
       return;
     }
     if (savedPeer?.isTrusted != true &&
@@ -1945,7 +2168,7 @@ class NearbyService extends ChangeNotifier {
         !_userInitiatedEndpoints.contains(endpointId)) {
       protocolErrorCount += 1;
       _log('unapproved peer identity rejected');
-      await disconnect(endpointId);
+      await disconnect(endpointId, reason: 'unapproved_peer');
       return;
     }
     final status = _statusFrom(packet.payload['status'] as String);
@@ -1977,8 +2200,13 @@ class NearbyService extends ChangeNotifier {
       displayName: displayName,
       capabilities: _capabilitiesFrom(packet.payload['capabilities']),
     );
-    _helloTimeouts.remove(endpointId)?.cancel();
+    _completedIdentityHandshakes.add(endpointId);
+    _identityHandshakeTimeouts.remove(endpointId)?.cancel();
     peerErrors.remove(endpointId);
+    _recordIdentityStage(endpointId, 'identity_hello_received');
+    if (identityCrypto is MockPeerIdentityCrypto) {
+      _recordIdentityStage(endpointId, 'identity_handshake_completed');
+    }
     _track(_flushPendingMessages(conversationId));
     _log('peer established: endpoint $endpointId ↔ ${packet.senderDeviceId}');
   }
@@ -2301,10 +2529,10 @@ class NearbyService extends ChangeNotifier {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    for (final timer in _helloTimeouts.values) {
+    for (final timer in _identityHandshakeTimeouts.values) {
       timer.cancel();
     }
-    _helloTimeouts.clear();
+    _identityHandshakeTimeouts.clear();
     for (final timer in _connectionTimeouts.values) {
       timer.cancel();
     }

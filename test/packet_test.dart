@@ -25,6 +25,23 @@ void main() {
   });
 
   test(
+    'first-contact identity challenge permits an unknown target device ID',
+    () {
+      final packet = RelioPacket.identityChallenge(
+        senderDeviceId: 'device-a',
+        senderUserId: 'user-a',
+        challengeId: 'first-contact',
+        nonce: List.filled(43, 'B').join(),
+        targetDeviceId: '',
+        expiresAt: DateTime.now().toUtc().add(const Duration(seconds: 45)),
+      );
+
+      final decoded = RelioPacket.fromBytes(packet.toBytes());
+      expect(decoded.payload['targetDeviceId'], isEmpty);
+    },
+  );
+
+  test(
     'protocol v2 cannot be used to bypass identity proof for chat packets',
     () {
       final json =

@@ -5,12 +5,12 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Latest public QA release: `0.9.0+26`
+- Latest public QA release: `0.9.0+27`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+27` / versionCode 27 (unpublished, not installed)
+- Current candidate: `0.9.0+28` / versionCode 28 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
-- Current public release tag: `qa-v0.9.0-b26`
+- Current public release tag: `qa-v0.9.0-b27`
 - Drift schema: v7; v6 data is migrated by
   adding nullable pinned-key fields and disabling reconnect for legacy rows
 - DEV package: `com.relio.relio_mobile.dev`
@@ -36,7 +36,7 @@
 - Build 26 is public QA. Physical Nearby, notification, and device acceptance
   remain deferred.
 
-## Build 27 — local connection-diagnostics candidate
+## Build 27 — public connection-diagnostics release
 
 - Fixes root-Navigator incoming-request presentation when a Nearby page is no
   longer mounted, and bounds unanswered native connection results.
@@ -45,6 +45,23 @@
 - Automated tests cover manual/auto single-flight, incoming-request navigation,
   legacy trust fallback, timeout/retry, endpoint-loss history preservation, and
   export redaction. Physical radio behavior is not verified in this workspace.
+
+## Build 28 — first-contact identity-handshake candidate
+
+- Build 27 physical logs from Huawei STK-L22/API 29 and Samsung SM-G965F/API 29
+  showed that both sides accepted the nearby request and connected natively,
+  then timed out after starting identity proof.
+- Source audit found the initial challenge intentionally carries an empty
+  stable target ID before enrollment, while the parser rejected empty values.
+  The identity deadline also disconnected after eight seconds without useful
+  stage attribution.
+- Build 28 accepts that empty target only for the initial endpoint-scoped
+  challenge, keeps signature verification, user acceptance, and key pinning,
+  expands the finite handshake bound to 30 seconds, and fixes trusted
+  reconnect auto-accept. Paired tests cover first contact, reconnect,
+  simultaneous challenges, wrong signatures, and timeout attribution.
+- No phone was modified or tested for Build 28. Physical retest is still
+  required after installation by the owner.
 
 ## Firebase identity
 

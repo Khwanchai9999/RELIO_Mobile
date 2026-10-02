@@ -107,8 +107,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 26 (`0.9.0+26`) is the current public QA
-release; Build 27 (`0.9.0+27`) is the connection-diagnostics candidate.
+overrides use Mock transport. Build 27 (`0.9.0+27`) is the current public QA
+release; Build 28 (`0.9.0+28`) is the identity-handshake candidate.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -116,9 +116,11 @@ project, live RLS/Cloud message and receipt checks, FCM authorization path,
 Admin authorization, GitHub APK, and Hosting manifest have passed QA
 verification. Running the production Dart SyncEngine against live QA accounts
 and all physical Nearby/GPS/device checks remain unverified.
-Build 27 fixes a reproduced app-root incoming-prompt scheduling defect and
-adds connection tracing and finite transport timeouts. Physical retesting
-remains deferred; this source/test evidence is not a claim of radio success.
+Build 27 fixed a reproduced app-root incoming-prompt scheduling defect and
+added connection tracing and finite transport timeouts. Build 28 fixes the
+first-contact identity challenge parser contract and adds identity-stage and
+disconnect attribution diagnostics. Physical retesting remains deferred; this
+source/test evidence is not a claim of radio success.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -223,8 +225,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 26 is the current public QA release; Build 27 is the
-connection-diagnostics candidate and is not physically verified.
+releases. Build 27 is the current public QA release; Build 28 is the
+identity-handshake candidate and is not physically verified.
 
 ## Architecture
 

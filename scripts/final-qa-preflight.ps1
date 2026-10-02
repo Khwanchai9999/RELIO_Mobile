@@ -82,15 +82,15 @@ if ($env:VITE_SUPABASE_URL -ne $expectedAdminSupabaseUrl -or
 
 $pubspec = Get-Content -Raw -LiteralPath (Join-Path $projectRoot 'pubspec.yaml')
 $versionMatch = [regex]::Match($pubspec, '(?m)^version:\s+([^\s#]+)')
-if (-not $versionMatch.Success -or $versionMatch.Groups[1].Value -ne '0.9.0+27') {
-    throw 'Final preflight is scoped to the Build 27 candidate (0.9.0+27); refusing an implicit version change.'
+if (-not $versionMatch.Success -or $versionMatch.Groups[1].Value -ne '0.9.0+28') {
+    throw 'Final preflight is scoped to the Build 28 candidate (0.9.0+28); refusing an implicit version change.'
 }
-$releaseNotesPath = Join-Path $projectRoot 'release_notes\0.9.0-build-27.md'
+$releaseNotesPath = Join-Path $projectRoot 'release_notes\0.9.0-build-28.md'
 if (-not (Test-Path -LiteralPath $releaseNotesPath) -or
-    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)Build 27' -or
-    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)connection diagnostics' -or
+    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)Build 28' -or
+    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)identity-stage' -or
     (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)physical device retest remains deferred') {
-    throw 'Build 27 release notes are missing or do not state the connection diagnostics and deferred physical-device boundary.'
+    throw 'Build 28 release notes are missing or do not state identity diagnostics and the deferred physical-device boundary.'
 }
 
 Write-Host 'Checking Firebase QA/PROD SDK isolation...'

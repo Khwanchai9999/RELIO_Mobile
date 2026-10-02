@@ -152,14 +152,14 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Build 26 (`0.9.0+26`) is the latest public QA
-release; Build 27 (`0.9.0+27`) is the connection-diagnostics candidate.
-Android Keystore identity and bidirectional direct Cloud text sync are locally
-automated-tested. Build 27 includes app-root incoming prompt scheduling,
-bounded connection timeouts, and DEV/QA-only redacted diagnostics export.
-Physical Nearby verification remains deferred; do not install builds on
-phones or claim physical behavior without explicit physical-test
-authorization.
+`scripts/public-qa-config.ps1`. Build 27 (`0.9.0+27`) is the latest public QA
+release; Build 28 (`0.9.0+28`) is the identity-handshake candidate. Android
+Keystore identity and bidirectional direct Cloud text sync are locally
+automated-tested. Build 28 fixes the first-contact challenge parser contract,
+adds bounded identity-stage/disconnect attribution diagnostics, and tests
+paired enrollment, trusted reconnect, simultaneous challenges, bad signatures,
+and timeout. Physical Build 28 retest remains deferred; do not install builds
+on phones or claim physical behavior without explicit physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -182,8 +182,9 @@ Physical-radio, runtime-permission, GPS, and two-phone relay checks are
 `DEFERRED MANUAL VERIFICATION` for v0.9. Keep them in
 `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
 performing them. Build 25 pins cryptographic peer identity and gates automatic
-reconnect on signed challenge-response; Build 26 adds Cloud pull/merge and
-Build 27 adds connection diagnostics. Unit
+reconnect on signed challenge-response; Build 26 adds Cloud pull/merge, Build
+27 adds connection diagnostics, and Build 28 fixes first-contact identity
+handshake handling. Unit
 tests, emulator checks, and signed builds do not prove physical behavior or
 remote policy enforcement.
 

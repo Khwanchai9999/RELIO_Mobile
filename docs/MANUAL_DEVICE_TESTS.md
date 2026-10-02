@@ -364,3 +364,15 @@ text in each direction. If the connection hangs or fails, export a diagnostics
 ZIP from Settings → การวินิจฉัยระบบ on both devices. No ADB or logcat is needed
 unless ZIP export itself fails. This physical test has not been performed by
 the development agent.
+
+## R. Build 28 identity-handshake retest — HUMAN RUN REQUIRED
+
+Build 28 fixes the first-contact identity challenge parser contract implicated
+by correlated Build 27 logs from Huawei STK-L22/API 29 and Samsung SM-G965F/API
+29. After installing Build 28 on both phones, test a fresh first contact with
+explicit user acceptance, verify both peers remain connected and become
+trusted, then disconnect and reconnect to verify trusted auto-accept. Export
+the redacted diagnostics ZIP from both devices if any identity stage stalls or
+fails. Confirm diagnostics distinguish an app-requested disconnect from a
+native/remote disconnect. The development agent did not install or physically
+test Build 28; automated paired tests are not evidence of radio interoperability.

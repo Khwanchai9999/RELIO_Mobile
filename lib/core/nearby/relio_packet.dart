@@ -441,9 +441,13 @@ class RelioPacket {
             'Identity handshake requires protocol v2.',
           );
         }
+        // First contact has no stable target ID yet; an empty target means
+        // this challenge is scoped to the already-authenticated endpoint.
+        final targetDeviceId = payload['targetDeviceId'];
         if (_payloadString('challengeId').length > 64 ||
             _payloadString('nonce').length != 43 ||
-            _payloadString('targetDeviceId').length > 128 ||
+            targetDeviceId is! String ||
+            targetDeviceId.length > 128 ||
             _payloadString('expiresAt').length > 40) {
           throw const RelioPacketException(
             'Invalid identity challenge fields.',

@@ -26,6 +26,8 @@ class DiagnosticsLogService {
   DateTime? get oldestEvent => _oldest;
   DateTime? get newestEvent => _newest;
 
+  Future<void> flush() => _writeQueue;
+
   Future<Directory> get _root async => directory ??= Directory(
     '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}diagnostics',
   );
