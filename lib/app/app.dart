@@ -176,6 +176,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
             final brightness = Theme.of(context).brightness;
             return IncomingConnectionPromptHost(
               dependencies: _dependencies,
+              navigatorKey: _router.routerDelegate.navigatorKey,
               child: AnnotatedRegion<SystemUiOverlayStyle>(
                 value: SystemUiOverlayStyle(
                   statusBarColor: Colors.transparent,
@@ -204,11 +205,13 @@ class IncomingConnectionPromptHost extends StatefulWidget {
   const IncomingConnectionPromptHost({
     required this.dependencies,
     required this.child,
+    this.navigatorKey,
     super.key,
   });
 
   final RelioDependencies dependencies;
   final Widget child;
+  final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
   State<IncomingConnectionPromptHost> createState() =>
@@ -276,48 +279,81 @@ class _IncomingConnectionPromptHostState
     final entry = service.pendingConnectionRequests.entries.first;
     final request = entry.value;
     _dialogOpen = true;
+    widget.dependencies.diagnostics.record(
+      'connection',
+      'incoming_request_ui_observed',
+      connectionTraceId: service.connectionTraceForEndpoint(entry.key),
+      operation: 'IncomingConnectionPromptHost',
+      peerIdentifier: entry.key,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final accepted = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(
-            request.isIncomingRequest ? 'คำขอเชื่อมต่อ' : 'ยืนยันการเชื่อมต่อ',
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                request.isIncomingRequest
-                    ? '${request.peer.name} ต้องการเชื่อมต่อกับคุณ'
-                    : 'กำลังเชื่อมต่อกับ ${request.peer.name}',
-              ),
-              if (request.authenticationToken case final token?) ...[
-                const SizedBox(height: 16),
-                const Text('รหัสยืนยัน Nearby'),
-                SelectableText(
-                  token,
-                  style: Theme.of(dialogContext).textTheme.headlineSmall,
+      final navigator = widget.navigatorKey?.currentState;
+      if (navigator == null) {
+        widget.dependencies.diagnostics.record(
+          'connection',
+          'incoming_request_ui_unavailable',
+          connectionTraceId: service.connectionTraceForEndpoint(entry.key),
+          operation: 'showDialog',
+          peerIdentifier: entry.key,
+          reason: 'root_navigator_not_ready',
+        );
+        _dialogOpen = false;
+        return;
+      }
+      widget.dependencies.diagnostics.record(
+        'connection',
+        'accept_reject_dialog_displayed',
+        connectionTraceId: service.connectionTraceForEndpoint(entry.key),
+        operation: 'showDialog',
+        peerIdentifier: entry.key,
+      );
+      final accepted = await navigator.push<bool>(
+        DialogRoute<bool>(
+          context: navigator.context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(
+              request.isIncomingRequest
+                  ? 'คำขอเชื่อมต่อ'
+                  : 'ยืนยันการเชื่อมต่อ',
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  request.isIncomingRequest
+                      ? '${request.peer.name} ต้องการเชื่อมต่อกับคุณ'
+                      : 'กำลังเชื่อมต่อกับ ${request.peer.name}',
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  'ตรวจสอบว่ารหัสตรงกันบนโทรศัพท์ทั้งสองเครื่องก่อนยืนยัน',
-                ),
+                if (request.authenticationToken case final token?) ...[
+                  const SizedBox(height: 16),
+                  const Text('รหัสยืนยัน Nearby'),
+                  SelectableText(
+                    token,
+                    style: Theme.of(dialogContext).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'ตรวจสอบว่ารหัสตรงกันบนโทรศัพท์ทั้งสองเครื่องก่อนยืนยัน',
+                  ),
+                ],
               ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: Text(request.isIncomingRequest ? 'ปฏิเสธ' : 'ยกเลิก'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: Text(
+                  request.isIncomingRequest ? 'ยอมรับ' : 'ยืนยันรหัส',
+                ),
+              ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(request.isIncomingRequest ? 'ปฏิเสธ' : 'ยกเลิก'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(request.isIncomingRequest ? 'ยอมรับ' : 'ยืนยันรหัส'),
-            ),
-          ],
         ),
       );
       if (!mounted) return;
@@ -329,6 +365,7 @@ class _IncomingConnectionPromptHostState
       _dialogOpen = false;
       _showNextRequest();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override

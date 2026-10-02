@@ -11,6 +11,7 @@ import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
 import 'cloud/supabase_cloud_data_source.dart';
+import 'diagnostics/diagnostics_log_service.dart';
 import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
 import 'notifications/local_notification_service.dart';
@@ -47,6 +48,7 @@ class RelioDependencies {
                : AndroidNearbyTransport()) {
     connectivityStatus =
         connectivityStatusService ?? ConnectivityStatusService();
+    diagnostics = DiagnosticsLogService();
     this.locationService =
         locationService ??
         (this.transport is! MockNearbyTransport &&
@@ -97,6 +99,7 @@ class RelioDependencies {
       mediaStorage: mediaStorageService,
       localNotifications: localNotificationService,
       relayEngine: relayEngine,
+      diagnostics: diagnostics,
     );
     syncEngine = SyncEngine(
       repositories: repositories,
@@ -115,6 +118,7 @@ class RelioDependencies {
   final NearbyTransport transport;
   final bool useMockTransport;
   late final ConnectivityStatusService connectivityStatus;
+  late final DiagnosticsLogService diagnostics;
   late final RelioRepositories repositories;
   late final RelioDeviceIdentityRepository identity;
   late final PermissionService permissionService;
@@ -278,6 +282,7 @@ class RelioDependencies {
   ].join('/');
 
   Future<void> _initialize() async {
+    unawaited(diagnostics.initialize());
     if (_isAndroid && !useMockTransport) {
       _readinessSubscription = connectivityStatus.changes.listen((_) {
         unawaited(startNearbySessionIfPermitted());

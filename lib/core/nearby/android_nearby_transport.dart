@@ -175,18 +175,38 @@ class AndroidNearbyTransport implements NearbyTransport {
   @override
   Future<void> acceptConnection(String peerId) async {
     if (!_pendingConnectionRequests.remove(peerId)) return;
-    await _nearby.acceptConnection(
-      peerId,
-      onPayLoadRecieved: _payloadReceived,
-      onPayloadTransferUpdate: _payloadTransferUpdated,
-    );
+    try {
+      await _nearby.acceptConnection(
+        peerId,
+        onPayLoadRecieved: _payloadReceived,
+        onPayloadTransferUpdate: _payloadTransferUpdated,
+      );
+    } on PlatformException catch (error) {
+      throw _platformFailure('acceptConnection', error);
+    } on Object catch (error) {
+      throw NearbyTransportException(
+        'Unable to accept Nearby connection.',
+        operation: 'acceptConnection',
+        exceptionType: error.runtimeType.toString(),
+      );
+    }
   }
 
   @override
   Future<void> rejectConnection(String peerId) async {
     _pendingConnectionRequests.remove(peerId);
     _connectionRequests.remove(peerId);
-    await _nearby.rejectConnection(peerId);
+    try {
+      await _nearby.rejectConnection(peerId);
+    } on PlatformException catch (error) {
+      throw _platformFailure('rejectConnection', error);
+    } on Object catch (error) {
+      throw NearbyTransportException(
+        'Unable to reject Nearby connection.',
+        operation: 'rejectConnection',
+        exceptionType: error.runtimeType.toString(),
+      );
+    }
     _connections.add(
       NearbyConnectionEvent(
         peer: NearbyPeer(id: peerId, name: _peerNames[peerId] ?? 'RELIO'),
@@ -216,16 +236,25 @@ class AndroidNearbyTransport implements NearbyTransport {
       if (!requested) {
         throw const NearbyTransportException(
           'Android connection request failed.',
+          code: 'request_returned_false',
+          operation: 'requestConnection',
+          exceptionType: 'bool',
+          returnedFalse: true,
         );
       }
     } on NearbyTransportException {
       _connectionRequests.remove(peerId);
       rethrow;
+    } on PlatformException catch (error) {
+      _connectionRequests.remove(peerId);
+      throw _platformFailure('requestConnection', error);
     } on Object catch (error) {
       _connectionRequests.remove(peerId);
       throw NearbyTransportException(
-        'Unable to request connection: $error',
+        'Unable to request Nearby connection.',
         code: _failureCode(error),
+        operation: 'requestConnection',
+        exceptionType: error.runtimeType.toString(),
       );
     }
   }
@@ -446,7 +475,7 @@ class AndroidNearbyTransport implements NearbyTransport {
         );
     final statusName = status?.group(2) ?? _statusName(statusCode);
     return NearbyTransportException(
-      'PlatformException while starting $operation.',
+      'PlatformException during $operation.',
       code: statusName ?? error.code,
       operation: operation,
       exceptionType: error.runtimeType.toString(),

@@ -192,6 +192,8 @@ class MockNearbyTransport implements NearbyTransport {
   int advertisingStartCount = 0;
   int discoveryStartCount = 0;
   int resetSessionOperationsCount = 0;
+  int connectionRequestCount = 0;
+  bool holdConnectionRequests = false;
   final Set<String> acceptedConnections = {};
   final Set<String> rejectedConnections = {};
   bool isAdvertising = false;
@@ -270,6 +272,7 @@ class MockNearbyTransport implements NearbyTransport {
 
   @override
   Future<void> requestConnection(String peerId) async {
+    connectionRequestCount++;
     final peer = peers[peerId];
     if (peer == null) {
       throw const NearbyTransportException('Mock peer was not discovered.');
@@ -281,6 +284,7 @@ class MockNearbyTransport implements NearbyTransport {
         state: NearbyConnectionState.connecting,
       ),
     );
+    if (holdConnectionRequests) return;
     final connected = NearbyPeer(
       id: peer.id,
       name: peer.name,
@@ -353,16 +357,40 @@ class MockNearbyTransport implements NearbyTransport {
     required String id,
     required String name,
     String? deviceId,
+    String? identityFingerprintHint,
     List<String> capabilities = const [],
   }) {
     final peer = NearbyPeer(
       id: id,
       name: name,
       deviceId: deviceId,
+      identityFingerprintHint: identityFingerprintHint,
       capabilities: capabilities,
     );
     peers[id] = peer;
     _peers.add(peer);
+  }
+
+  void simulateIncomingConnection({
+    required String id,
+    required String name,
+    String? identityFingerprintHint,
+    String? authenticationToken,
+  }) {
+    final peer = NearbyPeer(
+      id: id,
+      name: name,
+      identityFingerprintHint: identityFingerprintHint,
+    );
+    peers[id] = peer;
+    _connections.add(
+      NearbyConnectionEvent(
+        peer: peer,
+        state: NearbyConnectionState.incomingRequest,
+        authenticationToken: authenticationToken,
+        isIncomingRequest: true,
+      ),
+    );
   }
 
   void simulateIncoming({required String peerId, required Uint8List bytes}) {

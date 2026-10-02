@@ -5,19 +5,19 @@
 - Workspace and Git root: `D:\RELIO_Mobile`
 - Platform: Android only
 - Previous Firebase App Distribution release: `0.8.5+11`
-- Latest public QA release: `0.9.0+23`
+- Latest public QA release: `0.9.0+26`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+26` / versionCode 26 (unpublished, not installed)
+- Current candidate: `0.9.0+27` / versionCode 27 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
-- Current public release tag: `qa-v0.9.0-b23`
-- Drift schema: v7 in the local Build 26 candidate; v6 data is migrated by
+- Current public release tag: `qa-v0.9.0-b26`
+- Drift schema: v7; v6 data is migrated by
   adding nullable pinned-key fields and disabling reconnect for legacy rows
 - DEV package: `com.relio.relio_mobile.dev`
 - QA package: `com.relio.relio_mobile.test`
 - PROD package: `com.relio.relio_mobile`
 
-## Build 26 — local Cloud communication candidate
+## Build 26 — public Cloud communication baseline
 
 - Cross-account direct conversation creation/linking, owner-scoped persistent
   mappings, paged Cloud pull, SQLite merge, UUID dedupe, unread tracking, and
@@ -33,8 +33,18 @@
   and real Android push delivery is not verified. Admin remains separately
   protected by authenticated profile roles and audited RPCs; no Admin source
   changes were needed for this Mobile pass.
-- Build 26 stays unpublished and uninstalled. Physical Nearby, notification,
-  and device acceptance remain deferred.
+- Build 26 is public QA. Physical Nearby, notification, and device acceptance
+  remain deferred.
+
+## Build 27 — local connection-diagnostics candidate
+
+- Fixes root-Navigator incoming-request presentation when a Nearby page is no
+  longer mounted, and bounds unanswered native connection results.
+- Adds DEV/QA-only rolling redacted diagnostics and ZIP export. Production
+  excludes the route and native share/device-info channel.
+- Automated tests cover manual/auto single-flight, incoming-request navigation,
+  legacy trust fallback, timeout/retry, endpoint-loss history preservation, and
+  export redaction. Physical radio behavior is not verified in this workspace.
 
 ## Firebase identity
 

@@ -28,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private val updateChannel = "relio/app_update"
     private val notificationChannel = "relio/notifications"
     private val identityChannel = "relio/device_identity"
+    private val diagnosticsChannel = "relio/diagnostics"
     private val identityKeyStore = RelioIdentityKeyStore()
     private val identityExecutor = Executors.newSingleThreadExecutor()
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
@@ -50,6 +51,42 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler(::handleUpdateCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, identityChannel)
             .setMethodCallHandler(::handleIdentityCall)
+        if (packageName != PROD_APPLICATION_ID) {
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, diagnosticsChannel)
+                .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getDiagnosticsDeviceInfo" -> result.success(
+                        mapOf(
+                            "manufacturer" to Build.MANUFACTURER.take(80),
+                            "model" to Build.MODEL.take(100),
+                            "androidVersion" to Build.VERSION.RELEASE.take(40),
+                            "apiLevel" to Build.VERSION.SDK_INT,
+                            "package" to packageName,
+                        ),
+                    )
+                    "shareDiagnosticsZip" -> {
+                        try {
+                            val path = call.argument<String>("path")
+                                ?: throw IllegalArgumentException("missing archive path")
+                            val file = File(path).canonicalFile
+                            val cache = File(cacheDir, "diagnostics").canonicalFile
+                            require(file.isFile && file.parentFile == cache) { "invalid archive path" }
+                            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/zip"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(Intent.createChooser(share, "ส่งออกข้อมูลวินิจฉัย RELIO"))
+                            result.success(null)
+                        } catch (_: Throwable) {
+                            result.error("diagnostics_share_failed", "Could not share diagnostics archive", null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+                }
+        }
         createNotificationChannels()
         notificationsMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -357,5 +394,6 @@ class MainActivity : FlutterActivity() {
         private const val CHANNEL_SYSTEM = "relio_system"
         private const val EXTRA_NOTIFICATION_ROUTE = "relio_notification_route"
         private const val QA_APPLICATION_ID = "com.relio.relio_mobile.test"
+        private const val PROD_APPLICATION_ID = "com.relio.relio_mobile"
     }
 }

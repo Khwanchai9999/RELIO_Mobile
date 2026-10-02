@@ -222,8 +222,8 @@ automated tests cover the deterministic path.
 ## M. Historical Build 17 two-device test notes — INACTIVE
 
 Build 17's device-test instructions are historical and must not be used as a
-current install recipe. Build 23 (`0.9.0+23`) is the latest public QA release.
-Build 24 (`0.9.0+24`) is an unpublished candidate; do not install or update a
+current install recipe. Build 26 (`0.9.0+26`) is the latest public QA release.
+Build 27 is the connection-diagnostics candidate; do not install or update a
 phone unless the user explicitly authorizes the physical test and the exact
 release artifact, device serial, package, version, and signing identity are
 verified.
@@ -353,3 +353,14 @@ The live backend checks above are complete. Production SyncEngine-to-QA SQLite
 merge, actual device push receipt, and physical Nearby acceptance remain
 **DEFERRED — NOT YET PERFORMED**. FakeCloud coverage is not proof of app-level
 live sync or physical behavior.
+
+## Q. Build 27 Nearby connection retest — HUMAN RUN REQUIRED
+
+Build 27 adds DEV/QA system diagnostics and fixes a reproduced app-root prompt
+scheduling defect. After the public QA release is verified, update both phones
+to Build 27, open RELIO and Nearby on each, confirm discovery, and connect from
+Phone A to Phone B. Confirm that B receives Accept/Reject; if accepted, send one
+text in each direction. If the connection hangs or fails, export a diagnostics
+ZIP from Settings → การวินิจฉัยระบบ on both devices. No ADB or logcat is needed
+unless ZIP export itself fails. This physical test has not been performed by
+the development agent.

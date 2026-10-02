@@ -92,6 +92,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - Permission service architecture and Android Nearby-related declarations
 - Development-only `/developer/nearby` diagnostics screen, reachable from
   Profile → Settings → Nearby Diagnostics
+- DEV/QA-only `ตั้งค่า → การวินิจฉัยระบบ` with bounded, redacted logs and a
+  shareable diagnostics ZIP; production excludes its route and native action
 - SOS setup, confirmation, active state, stop confirmation, and received SOS
 - Rescue mode with active SOS cases and local status updates
 - Profile, settings, dark mode, theme selection, and sync visibility
@@ -106,13 +108,17 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
 overrides use Mock transport. Build 26 (`0.9.0+26`) is the current public QA
-release. Cross-account direct conversation linking, local mapping, paged
+release; Build 27 (`0.9.0+27`) is the connection-diagnostics candidate.
+Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
 project, live RLS/Cloud message and receipt checks, FCM authorization path,
 Admin authorization, GitHub APK, and Hosting manifest have passed QA
 verification. Running the production Dart SyncEngine against live QA accounts
 and all physical Nearby/GPS/device checks remain unverified.
+Build 27 fixes a reproduced app-root incoming-prompt scheduling defect and
+adds connection tracing and finite transport timeouts. Physical retesting
+remains deferred; this source/test evidence is not a claim of radio success.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -217,8 +223,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 23 is the current public QA release. Builds 24 and 25 remain
-unpublished and have not been installed; physical acceptance remains pending.
+releases. Build 26 is the current public QA release; Build 27 is the
+connection-diagnostics candidate and is not physically verified.
 
 ## Architecture
 
@@ -288,6 +294,9 @@ file payloads; binary content is never Base64-encoded into protocol JSON. See
   migrations, RLS, direct chat/receipts, FCM backend authorization, Admin, and
   public OTA metadata are verified. Production SyncEngine-to-live-QA and
   physical device acceptance remain deferred.
+- **v0.9.0+27 candidate:** app-root incoming prompt scheduling fix, connection
+  trace IDs, finite native-result timeout, and DEV/QA privacy-tested
+  diagnostics export. Physical device acceptance remains deferred.
 - **v0.9.0+25 checkpoint:** Android Keystore-backed ECDSA identity, versioned
   replay-resistant challenge-response, pinned peer identity, and guarded
   trusted reconnect are implemented. RELIO-QA Supabase/FCM/Admin verification

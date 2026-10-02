@@ -6,6 +6,7 @@ import '../features/chat/chat_screens.dart';
 import '../features/developer/nearby_diagnostics_screen.dart';
 import '../features/developer/cloud_diagnostics_screen.dart';
 import '../features/developer/relay_diagnostics_screen.dart';
+import '../features/diagnostics/system_diagnostics_screen.dart';
 import '../features/home/home_screen.dart';
 import '../features/nearby/nearby_screen.dart';
 import '../features/onboarding/welcome_screen.dart';
@@ -60,24 +61,24 @@ GoRouter createRelioRouter() {
           GoRoute(path: '/sync', builder: (_, _) => const SyncScreen()),
         ],
       ),
-      GoRoute(
-        path: '/developer/nearby',
-        redirect: (_, _) =>
-            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
-        builder: (_, _) => const NearbyDiagnosticsScreen(),
-      ),
-      GoRoute(
-        path: '/developer/cloud',
-        redirect: (_, _) =>
-            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
-        builder: (_, _) => const CloudDiagnosticsScreen(),
-      ),
-      GoRoute(
-        path: '/developer/relay',
-        redirect: (_, _) =>
-            RelioBuildInfo.developerDiagnosticsEnabled ? null : '/home',
-        builder: (_, _) => const RelayDiagnosticsScreen(),
-      ),
+      if (RelioBuildInfo.developerDiagnosticsEnabled) ...[
+        GoRoute(
+          path: '/diagnostics',
+          builder: (_, _) => const SystemDiagnosticsScreen(),
+        ),
+        GoRoute(
+          path: '/developer/nearby',
+          builder: (_, _) => const NearbyDiagnosticsScreen(),
+        ),
+        GoRoute(
+          path: '/developer/cloud',
+          builder: (_, _) => const CloudDiagnosticsScreen(),
+        ),
+        GoRoute(
+          path: '/developer/relay',
+          builder: (_, _) => const RelayDiagnosticsScreen(),
+        ),
+      ],
     ],
     errorBuilder: (context, state) => Scaffold(
       body: Center(

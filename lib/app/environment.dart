@@ -49,8 +49,8 @@ abstract final class RelioBuildInfo {
   static bool get isTest => environment == RelioEnvironment.test;
 
   // Production can disable developer diagnostics from one environment gate.
-  static bool get developerDiagnosticsEnabled =>
-      environment != RelioEnvironment.production;
+  static const bool developerDiagnosticsEnabled =
+      environmentName != 'production';
 
   static const String appName = 'RELIO';
 

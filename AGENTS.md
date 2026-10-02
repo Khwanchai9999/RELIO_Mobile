@@ -152,13 +152,14 @@ flutter build apk --flavor prod --debug
 ```
 
 QA debug builds must receive the approved updater dart-defines from
-`scripts/public-qa-config.ps1`. Build 23 (`0.9.0+23`) is the latest public QA
-release. Build 24 and Build 25 are historical local checkpoints; Build 26
-(`0.9.0+26`) is the current unpublished candidate. Android Keystore identity
-and bidirectional direct Cloud text sync are implemented and locally
-automated-tested, but are not physically or remotely backend verified. Do not
-install it on phones or claim physical Nearby verification without explicit
-physical-test authorization.
+`scripts/public-qa-config.ps1`. Build 26 (`0.9.0+26`) is the latest public QA
+release; Build 27 (`0.9.0+27`) is the connection-diagnostics candidate.
+Android Keystore identity and bidirectional direct Cloud text sync are locally
+automated-tested. Build 27 includes app-root incoming prompt scheduling,
+bounded connection timeouts, and DEV/QA-only redacted diagnostics export.
+Physical Nearby verification remains deferred; do not install builds on
+phones or claim physical behavior without explicit physical-test
+authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
 WARN policy for missing config, so DEV and PROD remain Supabase-only and
@@ -181,8 +182,8 @@ Physical-radio, runtime-permission, GPS, and two-phone relay checks are
 `DEFERRED MANUAL VERIFICATION` for v0.9. Keep them in
 `docs/MANUAL_DEVICE_TESTS.md`; do not claim real-device Nearby success without
 performing them. Build 25 pins cryptographic peer identity and gates automatic
-reconnect on signed challenge-response; Build 26 adds Cloud pull/merge but its
-Supabase migration/RLS still requires separate QA backend verification. Unit
+reconnect on signed challenge-response; Build 26 adds Cloud pull/merge and
+Build 27 adds connection diagnostics. Unit
 tests, emulator checks, and signed builds do not prove physical behavior or
 remote policy enforcement.
 
