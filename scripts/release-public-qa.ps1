@@ -72,13 +72,22 @@ function ConvertFrom-CliJson {
 
 function Invoke-FirebaseCli {
     param([string[]]$Arguments)
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'Continue'
-        $output = & $firebase.Source @Arguments 2>&1
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+    $identityListing = ($Arguments.Count -eq 2 -and
+        $Arguments[0] -eq 'projects:list' -and $Arguments[1] -eq '--json')
+    $attemptLimit = if ($identityListing) { 3 } else { 1 }
+    $output = @()
+    $exitCode = 1
+    for ($attempt = 1; $attempt -le $attemptLimit; $attempt++) {
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $output = & $firebase.Source @Arguments 2>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($exitCode -eq 0 -or $attempt -eq $attemptLimit) { break }
+        Start-Sleep -Seconds 1
     }
     if ($exitCode -ne 0) { throw "Firebase CLI command failed: firebase $($Arguments -join ' ')." }
     return ,$output
