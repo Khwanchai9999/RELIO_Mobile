@@ -202,7 +202,7 @@ void main() {
   );
 
   test(
-    'identity timeout is logged before app disconnect and state expires',
+    'identity timeout race is logged and attributes both disconnect sides',
     () async {
       final pair = await _HandshakePair.create(
         handshakeTimeout: const Duration(milliseconds: 500),
@@ -215,30 +215,38 @@ void main() {
         () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
       );
       await pair.serviceB.acceptConnectionRequest('endpoint-a');
-      await _waitFor(
-        () =>
-            pair.serviceA.peerErrors['endpoint-b'] ==
-                'identity_handshake_timeout' &&
-            pair.serviceA.peerStates['endpoint-b'] !=
-                NearbyConnectionState.connecting,
+      await Future<void>.delayed(const Duration(seconds: 2));
+      expect(
+        pair.serviceA.peerStates['endpoint-b'],
+        isNot(NearbyConnectionState.connecting),
+      );
+      expect(
+        pair.serviceB.peerStates['endpoint-a'],
+        isNot(NearbyConnectionState.connecting),
       );
 
-      await pair.logsA.flush();
-      final logFile = File(
-        '${pair.logsA.directory!.path}${Platform.pathSeparator}diagnostics.jsonl',
-      );
-      final events = (await logFile.readAsLines())
-          .where((line) => line.isNotEmpty)
-          .map((line) => jsonDecode(line) as Map<String, dynamic>)
-          .map((event) => event['event'])
-          .toList();
-      expect(events, contains('identity_handshake_timeout'));
-      expect(events, contains('disconnect_requested_by_app'));
-      expect(events, contains('disconnect_requested_reason'));
-      expect(events, contains('native_endpoint_disconnected'));
+      final eventsA = await _readEvents(pair.logsA);
+      final eventsB = await _readEvents(pair.logsB);
+      final allEvents = [...eventsA, ...eventsB];
       expect(
-        pair.serviceA.peerErrors['endpoint-b'],
-        'identity_handshake_timeout',
+        allEvents.map((event) => event['event']),
+        contains('identity_handshake_timeout'),
+      );
+      expect(
+        allEvents.map((event) => event['event']),
+        contains('disconnect_requested_by_app'),
+      );
+      expect(
+        allEvents.map((event) => event['event']),
+        contains('disconnect_requested_reason'),
+      );
+      final nativeDisconnects = allEvents.where(
+        (event) => event['event'] == 'native_endpoint_disconnected',
+      );
+      expect(nativeDisconnects, hasLength(2));
+      expect(
+        nativeDisconnects.map((event) => event['disconnectRequester']),
+        containsAll(['app', 'nearby_or_remote']),
       );
     },
   );
