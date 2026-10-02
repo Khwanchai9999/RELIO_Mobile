@@ -88,8 +88,9 @@ if (-not $versionMatch.Success -or $versionMatch.Groups[1].Value -ne '0.9.0+26')
 $releaseNotesPath = Join-Path $projectRoot 'release_notes\0.9.0-build-26.md'
 if (-not (Test-Path -LiteralPath $releaseNotesPath) -or
     (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)Build 26' -or
-    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)not been uploaded') {
-    throw 'Build 26 release notes are missing or do not preserve its unpublished status.'
+    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)push webhook authentication' -or
+    (Get-Content -Raw -LiteralPath $releaseNotesPath) -notmatch '(?i)deferred to the final human device test') {
+    throw 'Build 26 release notes are missing or do not state the verified backend and deferred physical-device boundary.'
 }
 
 Write-Host 'Checking Firebase QA/PROD SDK isolation...'
@@ -113,19 +114,31 @@ if (-not [Uri]::TryCreate($adminUrl, [UriKind]::Absolute, [ref]$adminUri) -or
     $adminUri.Scheme -ne 'https' -or $adminUri.IsLoopback) {
     throw 'RELIO_ADMIN_QA_URL must be a deployed HTTPS origin.'
 }
+$vercel = Get-Command npx -ErrorAction SilentlyContinue
+if (-not $vercel) { throw 'npx is required to verify the protected QA Admin deployment.' }
+$adminProbe = $null
+$adminProbeExitCode = 1
+Push-Location $adminRoot
 try {
-    $adminResponse = Invoke-WebRequest -UseBasicParsing -Uri $adminUri.AbsoluteUri -TimeoutSec 30
-} catch {
-    throw 'Deployed QA Admin did not return a successful response.'
+    $adminProbe = & $vercel.Source --yes vercel curl $adminUri.AbsoluteUri -- --output NUL --write-out '%{http_code}' 2>&1
+    $adminProbeExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
 }
-if ([int]$adminResponse.StatusCode -ne 200) { throw 'Deployed QA Admin did not return HTTP 200.' }
-Write-Host "Deployed Admin QA page returned HTTP 200: $($adminUri.Host)."
+if ($adminProbeExitCode -ne 0 -or (($adminProbe -join "`n") -notmatch '(?m)^200\s*$')) {
+    throw 'Deployed QA Admin did not return HTTP 200 through its scoped Vercel protection bypass.'
+}
+Write-Host "Deployed Admin QA page returned HTTP 200 through authenticated Vercel verification: $($adminUri.Host)."
 
 Write-Host 'Checking FCM Edge Function unit suite...'
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { throw 'Node.js is required for the FCM logic tests.' }
 & $node.Source --test (Join-Path $projectRoot 'supabase\functions\send-message-push\logic.test.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'FCM logic tests failed.' }
+
+Write-Host 'Checking live RELIO-QA push webhook authorization and idempotency...'
+& (Join-Path $PSScriptRoot 'test-qa-fcm-live.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Live QA push webhook tests failed.' }
 
 Write-Host 'Checking Admin tests, lint, and production build...'
 if (-not (Test-Path -LiteralPath (Join-Path $adminRoot 'node_modules'))) {

@@ -33,20 +33,38 @@ $localQaDirectory = Join-Path $projectRoot '.qa-local'
 if (-not (Test-Path -LiteralPath $localQaDirectory)) {
     New-Item -ItemType Directory -Path $localQaDirectory | Out-Null
 }
-$directoryAcl = Get-Acl -LiteralPath $localQaDirectory
-$directoryAcl.SetAccessRuleProtection($true, $false)
 $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$directoryAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-        $currentSid,
-        [Security.AccessControl.FileSystemRights]::FullControl,
-        [Security.AccessControl.AccessControlType]::Allow
-    )))
-Set-Acl -LiteralPath $localQaDirectory -AclObject $directoryAcl
+function Assert-QaPrivateAcl {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $acl = Get-Acl -LiteralPath $Path
+    if ($acl.Owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().Name) {
+        throw 'A local QA secret path is not owned by the current account.'
+    }
+    $hasOwnerFullControl = $false
+    foreach ($rule in $acl.Access) {
+        $ruleSid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($ruleSid -eq $currentSid.Value -and
+            $rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne 0) {
+            $hasOwnerFullControl = $true
+        }
+        if ($ruleSid -ne $currentSid.Value -and $ruleSid -ne 'S-1-5-18' -and
+            -not $ruleSid.StartsWith('S-1-5-5-')) {
+            throw 'A local QA secret path grants access outside the current user/system session.'
+        }
+    }
+    if (-not $hasOwnerFullControl) {
+        throw 'The current account lacks full control over a local QA secret path.'
+    }
+}
+Assert-QaPrivateAcl -Path $localQaDirectory
 
 $serviceAccountPath = Join-Path $localQaDirectory 'relio-qa-fcm-service-account.json'
 if (-not (Test-Path -LiteralPath $serviceAccountPath)) {
     throw 'The dedicated QA FCM service-account JSON is missing from .qa-local.'
 }
+Assert-QaPrivateAcl -Path $serviceAccountPath
 $serviceAccount = Get-Content -Raw -LiteralPath $serviceAccountPath | ConvertFrom-Json
 if ($serviceAccount.project_id -ne 'relio-17dc0' -or
     [string]$serviceAccount.client_email -notmatch '^relio-qa-fcm-sender@relio-17dc0\.iam\.gserviceaccount\.com$' -or
@@ -75,14 +93,7 @@ foreach ($line in Get-Content -LiteralPath $configPath) {
 }
 if (-not $replacedWebhook) { $configLines.Add($webhookConfigLine) }
 [IO.File]::WriteAllText($configPath, (($configLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
-$configAcl = Get-Acl -LiteralPath $configPath
-$configAcl.SetAccessRuleProtection($true, $false)
-$configAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-        $currentSid,
-        [Security.AccessControl.FileSystemRights]::FullControl,
-        [Security.AccessControl.AccessControlType]::Allow
-    )))
-Set-Acl -LiteralPath $configPath -AclObject $configAcl
+Assert-QaPrivateAcl -Path $configPath
 $env:RELIO_QA_DATABASE_WEBHOOK_SECRET = $webhookSecret
 
 $tempEnvPath = Join-Path $localQaDirectory 'edge-secrets.env'
@@ -98,14 +109,7 @@ try {
         "FCM_PROJECT_ID='relio-17dc0'"
     )
     [IO.File]::WriteAllText($tempEnvPath, (($edgeValues -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
-    $tempEnvAcl = Get-Acl -LiteralPath $tempEnvPath
-    $tempEnvAcl.SetAccessRuleProtection($true, $false)
-    $tempEnvAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-            $currentSid,
-            [Security.AccessControl.FileSystemRights]::FullControl,
-            [Security.AccessControl.AccessControlType]::Allow
-        )))
-    Set-Acl -LiteralPath $tempEnvPath -AclObject $tempEnvAcl
+    Assert-QaPrivateAcl -Path $tempEnvPath
 
     $url = "https://$qaRef.supabase.co/functions/v1/send-message-push"
     $sqlUrl = $url.Replace("'", "''")
@@ -137,16 +141,7 @@ end
 `$`$;
 "@
     [IO.File]::WriteAllText($tempSqlPath, $sql, [Text.UTF8Encoding]::new($false))
-    foreach ($path in @($tempSqlPath)) {
-        $fileAcl = Get-Acl -LiteralPath $path
-        $fileAcl.SetAccessRuleProtection($true, $false)
-        $fileAcl.SetAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
-                $currentSid,
-                [Security.AccessControl.FileSystemRights]::FullControl,
-                [Security.AccessControl.AccessControlType]::Allow
-            )))
-        Set-Acl -LiteralPath $path -AclObject $fileAcl
-    }
+    Assert-QaPrivateAcl -Path $tempSqlPath
 
     Write-Host 'Setting QA-only Edge Function secrets from an ACL-protected temporary env file...'
     & npx --yes supabase secrets set --env-file $tempEnvPath --project-ref $qaRef
