@@ -223,8 +223,8 @@ automated tests cover the deterministic path.
 
 Build 17's device-test instructions are historical and must not be used as a
 current install recipe. Build 28 (`0.9.0+28`) is the latest public QA release.
-Build 29 (`0.9.0+29`) is the nearby/media reliability candidate; do not install
-or update a phone from this workspace. The owner should install the signed QA
+Build 30 (`0.9.0+30`) is the trusted reconnect stability candidate; do not
+install or update a phone from this workspace. The owner should install the signed QA
 build on both test phones only after the remote artifact gate passes.
 Never uninstall the app or clear its data.
 
@@ -376,13 +376,13 @@ fails. Confirm diagnostics distinguish an app-requested disconnect from a
 native/remote disconnect. The development agent did not install or physically
 test Build 28; automated paired tests are not evidence of radio interoperability.
 
-## S. Build 29 nearby and offline-media retest — HUMAN RUN REQUIRED
+## S. Build 30 trusted reconnect and session stability — HUMAN RUN REQUIRED
 
-Build 29 adds trusted-peer rediscovery, offline media queue flushing, optional
-notification previews, and redacted media-transfer diagnostics. After the
-remote APK is verified, the owner should install it on both phones and confirm
-trusted reconnect after one explicit first-contact approval; send an image in
-each direction with Internet disabled; verify the received image renders after
-restart; and check notification sender names with previews both disabled and
-enabled. Export diagnostics from both phones if transfer stages stall. The
-development agent did not install or physically test Build 29.
+After the remote APK is verified, update both phones to Build 30. For already
+trusted phones, let them discover each other without tapping Connect and
+confirm there is no Accept/Reject prompt. Navigate Nearby → Chat → Settings →
+Diagnostics → Home → Chat and confirm the connection remains alive. Send text
+in both directions and one image; then move out of range and return. Confirm
+trusted automatic reconnect repeats without a prompt. Export diagnostics ZIPs
+from both phones if any step fails. The development agent does not install or
+physically test Build 30.

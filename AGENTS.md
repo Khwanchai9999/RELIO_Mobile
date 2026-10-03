@@ -153,10 +153,11 @@ flutter build apk --flavor prod --debug
 
 QA debug builds must receive the approved updater dart-defines from
 `scripts/public-qa-config.ps1`. Build 28 (`0.9.0+28`) is the latest public QA
-release; Build 29 (`0.9.0+29`) is the nearby/media reliability candidate.
+release; Build 30 (`0.9.0+30`) is the trusted-reconnect stability candidate.
 Android Keystore identity and bidirectional direct Cloud text sync are locally
-automated-tested. Build 29 exercises trusted reconnect, offline media queue
-flush, privacy-aware notifications, and transfer diagnostics. Physical retest
+automated-tested. Build 30 fixes asymmetric identity-hint handling, duplicate
+connection prompts, and Nearby session restarts that could disconnect active
+peers. Physical retest
 remains deferred; do not install builds
 on phones or claim physical behavior without explicit physical-test authorization.
 
@@ -183,8 +184,8 @@ Physical-radio, runtime-permission, GPS, and two-phone relay checks are
 performing them. Build 25 pins cryptographic peer identity and gates automatic
 reconnect on signed challenge-response; Build 26 adds Cloud pull/merge, Build
 27 adds connection diagnostics, Build 28 fixes first-contact identity
-handshake handling, and Build 29 improves trusted reconnect and offline media
-delivery. Unit
+handshake handling, Build 29 improves offline media delivery, and Build 30
+stabilizes trusted reconnect and session lifecycle. Unit
 tests, emulator checks, and signed builds do not prove physical behavior or
 remote policy enforcement.
 

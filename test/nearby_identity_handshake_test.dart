@@ -134,6 +134,85 @@ void main() {
     );
   });
 
+  test(
+    'repeated unhinted incoming requests produce one consent prompt',
+    () async {
+      final pair = await _HandshakePair.create();
+      addTearDown(pair.close);
+
+      pair.transportB.clearDiscoveredFingerprintHint();
+      pair.transportB.discoverPeer();
+      for (var attempt = 0; attempt < 3; attempt++) {
+        pair.transportB.simulateIncomingRequest(
+          name: 'Phone A',
+          fingerprint: null,
+        );
+      }
+      await _waitFor(
+        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
+      );
+      expect(pair.transportB.acceptCalls, hasLength(1));
+      expect(pair.serviceB.pendingConnectionRequests, hasLength(1));
+      expect(
+        pair.serviceB.identityApprovalChangesPinnedKey('endpoint-a'),
+        isFalse,
+      );
+      final events = await _readEvents(pair.logsB);
+      expect(
+        events.map((event) => event['event']),
+        contains('incoming_prompt_suppressed_active_connection'),
+      );
+    },
+  );
+
+  test('changed pinned identity requires a second explicit approval', () async {
+    final pair = await _HandshakePair.create();
+    addTearDown(pair.close);
+
+    await pair.serviceA.connect('endpoint-b');
+    await _waitFor(
+      () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
+    );
+    await pair.serviceB.acceptConnectionRequest('endpoint-a');
+    await _waitFor(
+      () => pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b',
+    );
+    final previous = await pair.repositoriesA.nearbyDevices.getDevice(
+      'device-b',
+    );
+    expect(previous?.publicIdentityKey, 'test-public-key:device-b');
+
+    await pair.serviceA.disconnect('endpoint-b', reason: 'rotate_test_key');
+    pair.cryptoB.rotateIdentity();
+    await pair.serviceB.connect('endpoint-a');
+    await _waitFor(
+      () => pair.serviceA.pendingConnectionRequests.containsKey('endpoint-b'),
+    );
+    await pair.serviceA.acceptConnectionRequest('endpoint-b');
+    await _waitFor(
+      () => pair.serviceA.identityApprovalChangesPinnedKey('endpoint-b'),
+    );
+
+    expect(
+      (await pair.repositoriesA.nearbyDevices.getDevice(
+        'device-b',
+      ))?.publicIdentityKey,
+      'test-public-key:device-b',
+    );
+    expect(pair.serviceA.deviceIdForEndpoint('endpoint-b'), isNull);
+
+    await pair.serviceA.acceptConnectionRequest('endpoint-b');
+    await _waitFor(
+      () => pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b',
+    );
+    expect(
+      (await pair.repositoriesA.nearbyDevices.getDevice(
+        'device-b',
+      ))?.publicIdentityKey,
+      'test-public-key:device-b-rotated',
+    );
+  });
+
   test('trusted reconnect auto-accepts only a uniquely pinned key', () async {
     final pair = await _HandshakePair.create();
     addTearDown(pair.close);
@@ -148,6 +227,16 @@ void main() {
           pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
           pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
     );
+    final savedA = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
+    expect(savedA?.isTrusted, isTrue);
+    expect(savedA?.autoReconnectEnabled, isTrue);
+    if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
+      fail(
+        'initial B pending=${pair.serviceB.pendingConnectionRequests.keys} '
+        'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
+        'name=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name}',
+      );
+    }
 
     await pair.serviceA.disconnect('endpoint-b', reason: 'test_reconnect');
     await _waitFor(
@@ -156,17 +245,77 @@ void main() {
           NearbyConnectionState.disconnected,
     );
 
-    pair.transportA.discoverPeer();
+    pair.transportA.omitIncomingFingerprintHint = true;
     pair.transportB.discoverPeer();
     await _waitFor(
       () =>
           pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+          pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
           pair.serviceA.peerStates['endpoint-b'] ==
+              NearbyConnectionState.connected &&
+          pair.serviceB.peerStates['endpoint-a'] ==
               NearbyConnectionState.connected,
     );
 
     expect(pair.transportA.acceptedConnections, contains('endpoint-b'));
-    expect(pair.serviceA.pendingConnectionRequests, isEmpty);
+    if (pair.serviceA.pendingConnectionRequests.isNotEmpty) {
+      fail(
+        'A pending=${pair.serviceA.pendingConnectionRequests.keys} '
+        'identityChanged=${pair.serviceA.identityApprovalChangesPinnedKey('endpoint-b')} '
+        'peer=${pair.serviceA.pendingConnectionRequests['endpoint-b']?.peer.name}',
+      );
+    }
+    final reconnectEventsB = await _readEvents(pair.logsB);
+    if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
+      fail(
+        'B pending=${pair.serviceB.pendingConnectionRequests.keys} '
+        'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
+        'request=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name} '
+        'events=${reconnectEventsB.where((event) => event['event'].toString().contains('prompt') || event['event'].toString().contains('approval')).map((event) => '${event['event']}:${event['peerAlias']}:${event['reason']}').toList()}',
+      );
+    }
+    expect(
+      pair.serviceA.peerStates['endpoint-b'],
+      NearbyConnectionState.connected,
+    );
+    expect(
+      pair.serviceB.peerStates['endpoint-a'],
+      NearbyConnectionState.connected,
+    );
+    pair.serviceA.peerStates['unrelated-endpoint'] =
+        NearbyConnectionState.connecting;
+    expect(pair.serviceA.applicationState, NearbyApplicationState.connected);
+    pair.serviceA.peerStates.remove('unrelated-endpoint');
+
+    pair.serviceA.isAdvertising = true;
+    pair.serviceA.isDiscovering = true;
+    pair.serviceA.updateLifecycleContext(
+      lifecycleState: 'resumed',
+      route: '/chat/device-b',
+    );
+    final disconnectCountBeforeSessionStop =
+        pair.transportA.disconnectCalls.length;
+    await pair.serviceA.stopSession(
+      reason: 'test_discovery_restart',
+      caller: 'nearby_identity_handshake_test',
+    );
+    expect(
+      pair.serviceA.peerStates['endpoint-b'],
+      NearbyConnectionState.connected,
+    );
+    expect(
+      pair.transportA.disconnectCalls,
+      hasLength(disconnectCountBeforeSessionStop),
+    );
+    expect(pair.transportA.stopDiscoveryCalls, 1);
+    expect(pair.transportA.stopAdvertisingCalls, 1);
+    final stopEvents = await _readEvents(pair.logsA);
+    final stopEvent = stopEvents.firstWhere(
+      (event) => event['event'] == 'nearby_session_stop_requested',
+    );
+    expect(stopEvent['caller'], 'nearby_identity_handshake_test');
+    expect(stopEvent['reason'], 'test_discovery_restart');
+    expect(stopEvent['screenRoute'], '/chat/device-b');
   });
 
   test(
@@ -412,7 +561,8 @@ class _TestIdentityCrypto implements PeerIdentityCrypto {
 
   final String deviceId;
   final bool corruptSignatures;
-  final String _publicKey;
+  String _publicKey;
+  void rotateIdentity() => _publicKey = 'test-public-key:$deviceId-rotated';
   String _signature(Uint8List message, String publicKey) =>
       sha256.convert([...utf8.encode(publicKey), 0, ...message]).toString();
 
@@ -461,6 +611,11 @@ class _LoopbackTransport implements NearbyTransport {
   final _transfers = StreamController<NearbyTransferEvent>.broadcast();
   final List<String> sentPackets = [];
   final Set<String> acceptedConnections = {};
+  final List<String> acceptCalls = [];
+  final List<String> disconnectCalls = [];
+  int stopDiscoveryCalls = 0;
+  int stopAdvertisingCalls = 0;
+  bool omitIncomingFingerprintHint = false;
   late final Map<String, NearbyPeer> _knownPeers = {
     localEndpointId: NearbyPeer(
       id: localEndpointId,
@@ -491,9 +646,14 @@ class _LoopbackTransport implements NearbyTransport {
 
   void discoverPeer() => _peers.add(_knownPeers[localEndpointId]!);
 
+  void clearDiscoveredFingerprintHint() {
+    final peer = _knownPeers[localEndpointId]!;
+    _knownPeers[localEndpointId] = NearbyPeer(id: peer.id, name: peer.name);
+  }
+
   void simulateIncomingRequest({
     required String name,
-    required String fingerprint,
+    required String? fingerprint,
   }) {
     _connections.add(
       NearbyConnectionEvent(
@@ -538,16 +698,19 @@ class _LoopbackTransport implements NearbyTransport {
     String? identityFingerprint,
   }) async {}
   @override
-  Future<void> stopAdvertising() async {}
+  Future<void> stopAdvertising() async => stopAdvertisingCalls++;
   @override
   Future<void> startDiscovery() async {}
   @override
-  Future<void> stopDiscovery() async {}
+  Future<void> stopDiscovery() async => stopDiscoveryCalls++;
   @override
   Future<void> resetSessionOperations() async {}
 
   @override
-  Future<void> requestConnection(String peerId) async {
+  Future<void> requestConnection(
+    String peerId, {
+    String? identityFingerprint,
+  }) async {
     _connections.add(
       NearbyConnectionEvent(
         peer: _knownPeers[peerId]!,
@@ -560,7 +723,9 @@ class _LoopbackTransport implements NearbyTransport {
         peer: NearbyPeer(
           id: remote.localEndpointId,
           name: displayName,
-          identityFingerprintHint: localFingerprint,
+          identityFingerprintHint: remote.omitIncomingFingerprintHint
+              ? null
+              : (identityFingerprint ?? localFingerprint),
         ),
         state: NearbyConnectionState.incomingRequest,
         isIncomingRequest: true,
@@ -570,6 +735,7 @@ class _LoopbackTransport implements NearbyTransport {
 
   @override
   Future<void> acceptConnection(String peerId) async {
+    acceptCalls.add(peerId);
     acceptedConnections.add(peerId);
     _connectedBoth();
   }
@@ -579,6 +745,7 @@ class _LoopbackTransport implements NearbyTransport {
 
   @override
   Future<void> disconnect(String peerId) async {
+    disconnectCalls.add(peerId);
     _connected = false;
     final peer =
         _knownPeers[peerId] ?? NearbyPeer(id: peerId, name: displayName);

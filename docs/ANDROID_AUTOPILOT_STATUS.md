@@ -7,7 +7,7 @@
 - Previous Firebase App Distribution release: `0.8.5+11`
 - Latest public QA release: `0.9.0+28`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+29` / versionCode 29 (unpublished, not installed)
+- Current candidate: `0.9.0+30` / versionCode 30 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current public release tag: `qa-v0.9.0-b27`
@@ -76,9 +76,28 @@
   content or file paths. Automated regressions cover reconnect, offline image
   queue flushing, and preview privacy. These tests do not verify physical radio
   or OEM behavior.
-- Build 29 remains unpublished until the complete validation and release gates
-  pass. Do not install it on phones; owner-run two-device acceptance remains
-  required.
+- Build 29 was not physically retested by the development agent; owner-run
+  two-device acceptance remains required.
+
+## Build 30 — trusted reconnect and session stability candidate
+
+- Advertising and outgoing request endpoint names use the same versioned
+  fingerprint-hint format. Discovery metadata is retained as a safe fallback
+  when an incoming initiation callback omits its endpoint name.
+- Hintless incoming transport is provisional only: RELIO allows identity
+  challenge/proof, verifies the signature and pin, then silently resumes a
+  trusted reconnect only when the saved key matches. First contact still
+  requires one explicit user approval; changed pins are warned and never
+  replaced silently.
+- Incoming requests are deduplicated by endpoint and resolved fingerprint;
+  reconnect lookup rechecks active prompts/attempts after its asynchronous
+  trust lookup. Session reconciliation stops discovery and advertising without
+  disconnecting peers. Diagnostics include stop caller, reason, active
+  connections/handshakes, lifecycle, and route.
+- Paired tests cover missing callback hints, repeated first-contact requests,
+  stable connected state, and session stop preserving an active connection.
+  Build 30 remains unpublished until all gates pass; no phones are modified or
+  claimed tested.
 
 ## Firebase identity
 

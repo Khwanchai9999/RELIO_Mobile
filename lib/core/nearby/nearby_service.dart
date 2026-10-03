@@ -29,6 +29,7 @@ enum NearbyApplicationState {
   advertising,
   discovering,
   connecting,
+  verifyingIdentity,
   connected,
   disconnected,
   failed,
@@ -53,6 +54,26 @@ class _AppDisconnectRequest {
 
   final String reason;
   final DateTime requestedAt;
+}
+
+class _PendingVerifiedIdentity {
+  const _PendingVerifiedIdentity({
+    required this.request,
+    required this.packet,
+    required this.publicKey,
+    required this.fingerprint,
+    required this.wasPinned,
+    required this.pinnedMatches,
+    required this.previousFingerprint,
+  });
+
+  final NearbyConnectionEvent request;
+  final RelioPacket packet;
+  final String publicKey;
+  final String fingerprint;
+  final bool wasPinned;
+  final bool pinnedMatches;
+  final String? previousFingerprint;
 }
 
 class NearbyService extends ChangeNotifier {
@@ -99,6 +120,8 @@ class NearbyService extends ChangeNotifier {
   NearbyApplicationState? _transition;
   bool _sessionFailed = false;
   String? _readinessSignature;
+  String appLifecycleState = 'unknown';
+  String screenRoute = 'unknown';
   Future<void>? _startSessionOperation;
   String? lastDiagnostic;
   int startRetryAttempt = 1;
@@ -119,6 +142,18 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateLifecycleContext({
+    required String lifecycleState,
+    required String route,
+  }) {
+    appLifecycleState = lifecycleState;
+    screenRoute = route;
+  }
+
+  bool identityApprovalChangesPinnedKey(String endpointId) =>
+      _pendingVerifiedIdentityApprovals[endpointId]?.wasPinned == true &&
+      _pendingVerifiedIdentityApprovals[endpointId]?.pinnedMatches == false;
+
   String get statusLabel {
     if (readiness case final current? when !current.ready) {
       return current.summary;
@@ -138,6 +173,7 @@ class NearbyService extends ChangeNotifier {
       NearbyApplicationState.discovering => 'กำลังค้นหาอุปกรณ์',
       NearbyApplicationState.advertising => 'กำลังประกาศอุปกรณ์',
       NearbyApplicationState.connecting => 'กำลังเชื่อมต่อ',
+      NearbyApplicationState.verifyingIdentity => 'กำลังยืนยันอุปกรณ์',
       NearbyApplicationState.connected => 'เชื่อมต่อแล้ว',
       NearbyApplicationState.failed =>
         'เริ่ม Nearby ไม่สำเร็จ กรุณาตรวจสอบสิทธิ์และลองอีกครั้ง',
@@ -158,6 +194,11 @@ class NearbyService extends ChangeNotifier {
   final Map<String, NearbyConnectionState> peerStates = {};
   final Map<String, NearbyConnectionEvent> pendingConnectionRequests = {};
   final Set<String> _approvedConnectionEndpoints = {};
+  final Set<String> _provisionalConnectionEndpoints = {};
+  final Map<String, NearbyConnectionEvent> _provisionalIncomingRequests = {};
+  final Map<String, _PendingVerifiedIdentity>
+  _pendingVerifiedIdentityApprovals = {};
+  final Map<String, String> _pendingIdentityApprovalReasons = {};
   final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
   final Map<String, Timer> _identityHandshakeTimeouts = {};
@@ -168,6 +209,8 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _completedIdentityHandshakes = {};
   final Map<String, _AppDisconnectRequest> _appDisconnectRequests = {};
   final Set<String> _automaticConnectionAttempts = {};
+  final Map<String, String> _reconnectFingerprintByEndpoint = {};
+  final Map<String, String> _fingerprintEndpointReservations = {};
   final Map<String, DateTime> _nextReconnectAt = {};
   final Map<String, int> _reconnectAttemptCounts = {};
   final Map<String, DateTime> _receivedChallengeExpiries = {};
@@ -194,18 +237,24 @@ class NearbyService extends ChangeNotifier {
 
   NearbyApplicationState get applicationState {
     if (!initialized) return NearbyApplicationState.initializing;
-    if (_transition != null) return _transition!;
     if (readiness?.ready == false) return NearbyApplicationState.blocked;
     if (_sessionFailed) {
       return NearbyApplicationState.failed;
     }
+    if (connectedPeers.any(
+      (peer) =>
+          peer.deviceId != null &&
+          _completedIdentityHandshakes.contains(peer.endpointId),
+    )) {
+      return NearbyApplicationState.connected;
+    }
+    if (connectedPeers.isNotEmpty) {
+      return NearbyApplicationState.verifyingIdentity;
+    }
+    if (_transition != null) return _transition!;
     if (peerStates.values.contains(NearbyConnectionState.connecting)) {
       return NearbyApplicationState.connecting;
     }
-    if (connectedPeers.any((peer) => peer.deviceId != null)) {
-      return NearbyApplicationState.connected;
-    }
-    if (connectedPeers.isNotEmpty) return NearbyApplicationState.connecting;
     if (isAdvertising && isDiscovering) return NearbyApplicationState.active;
     if (isDiscovering) return NearbyApplicationState.discovering;
     if (isAdvertising) return NearbyApplicationState.advertising;
@@ -253,12 +302,24 @@ class NearbyService extends ChangeNotifier {
     if (isAdvertising) return;
     try {
       _log('advertising start');
+      final localIdentity = await identityCrypto.getPublicIdentity();
+      diagnostics?.record(
+        'trust',
+        'advertising_identity_hint_generated',
+        operation: 'startAdvertising',
+        fields: {'fingerprintAvailable': localIdentity.fingerprint.isNotEmpty},
+      );
       await transport.startAdvertising(
         displayName: await identity.getDisplayName(),
-        identityFingerprint:
-            (await identityCrypto.getPublicIdentity()).fingerprint,
+        identityFingerprint: localIdentity.fingerprint,
       );
       isAdvertising = true;
+      diagnostics?.record(
+        'trust',
+        'advertising_started_with_trust_hint',
+        operation: 'startAdvertising',
+        fields: {'fingerprintAvailable': true},
+      );
       _log('advertising started');
       notifyListeners();
     } on Object catch (error) {
@@ -309,37 +370,37 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> stopSession() async {
+  Future<void> stopSession({
+    String reason = 'session_reconcile',
+    String caller = 'NearbyService.stopSession',
+  }) async {
     if (_closed) return;
-    if (!isDiscovering &&
-        !isAdvertising &&
-        !discoveredPeers.any(
-          (peer) =>
-              peerStates[peer.endpointId] == NearbyConnectionState.connected ||
-              peerStates[peer.endpointId] == NearbyConnectionState.connecting,
-        )) {
-      return;
-    }
+    _recordSessionStop(caller: caller, reason: reason);
+    if (!isDiscovering && !isAdvertising) return;
     _transition = NearbyApplicationState.stopping;
     notifyListeners();
     await stopDiscovery();
     await stopAdvertising();
-    for (final peer in discoveredPeers.toList()) {
-      if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
-          peerStates[peer.endpointId] == NearbyConnectionState.connecting) {
-        await disconnect(peer.endpointId, reason: 'nearby_session_stopped');
-      }
-    }
-    for (final timer in _identityHandshakeTimeouts.values) {
-      timer.cancel();
-    }
-    _identityHandshakeTimeouts.clear();
-    discoveredPeers.clear();
-    peerStates.clear();
-    endpointToDeviceId.clear();
-    deviceToEndpointId.clear();
     _transition = null;
     notifyListeners();
+  }
+
+  void _recordSessionStop({required String caller, required String reason}) {
+    diagnostics?.record(
+      'lifecycle',
+      'nearby_session_stop_requested',
+      operation: 'stopNearbySession',
+      reason: reason,
+      fields: {
+        'caller': caller,
+        'activeConnections': connectedPeerCount,
+        'activeHandshakes': _identityHandshakeTimeouts.length,
+        'appLifecycleState': appLifecycleState,
+        'screenRoute': screenRoute,
+        'discoveryActive': isDiscovering,
+        'advertisingActive': isAdvertising,
+      },
+    );
   }
 
   Future<void> stopAdvertising() async {
@@ -460,13 +521,20 @@ class NearbyService extends ChangeNotifier {
   Future<void> _connect(String peerId, {required bool userInitiated}) async {
     final currentState = peerStates[peerId];
     if (currentState == NearbyConnectionState.connected ||
-        currentState == NearbyConnectionState.connecting) {
+        currentState == NearbyConnectionState.connecting ||
+        currentState == NearbyConnectionState.incomingRequest ||
+        pendingConnectionRequests.containsKey(peerId)) {
       diagnostics?.record(
         'connection',
         'connect_suppressed',
         peerIdentifier: peerId,
         reason: 'already_${currentState?.name ?? 'active'}',
         fields: {'initiator': userInitiated ? 'manual' : 'automatic'},
+      );
+      _fingerprintEndpointReservations.removeWhere(
+        (_, endpoint) =>
+            endpoint == peerId &&
+            currentState == NearbyConnectionState.connected,
       );
       return;
     }
@@ -495,6 +563,13 @@ class NearbyService extends ChangeNotifier {
       },
     );
     peerStates[peerId] = NearbyConnectionState.connecting;
+    final candidateFingerprint = discoveredPeers
+        .where((peer) => peer.endpointId == peerId)
+        .firstOrNull
+        ?.identityFingerprintHint;
+    if (candidateFingerprint != null) {
+      _fingerprintEndpointReservations[candidateFingerprint] = peerId;
+    }
     if (userInitiated) _userInitiatedEndpoints.add(peerId);
     unawaited(_recordCandidateTrust(peerId, traceId));
     _connectionTimeouts.remove(peerId)?.cancel();
@@ -504,7 +579,21 @@ class NearbyService extends ChangeNotifier {
     });
     notifyListeners();
     try {
-      await transport.requestConnection(peerId);
+      final localIdentity = await identityCrypto.getPublicIdentity();
+      diagnostics?.record(
+        'trust',
+        localIdentity.fingerprint.isEmpty
+            ? 'advertising_identity_hint_missing'
+            : 'connection_request_identity_hint_generated',
+        connectionTraceId: traceId,
+        operation: 'requestConnection',
+        peerIdentifier: peerId,
+        fields: {'fingerprintAvailable': localIdentity.fingerprint.isNotEmpty},
+      );
+      await transport.requestConnection(
+        peerId,
+        identityFingerprint: localIdentity.fingerprint,
+      );
       diagnostics?.record(
         'connection',
         'request_connection_returned',
@@ -516,6 +605,9 @@ class NearbyService extends ChangeNotifier {
     } on Object catch (error) {
       _connectionTimeouts.remove(peerId)?.cancel();
       peerStates[peerId] = NearbyConnectionState.failed;
+      _fingerprintEndpointReservations.removeWhere(
+        (_, endpoint) => endpoint == peerId,
+      );
       peerErrors[peerId] = _safeError(error);
       diagnostics?.record(
         'connection',
@@ -614,6 +706,25 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> acceptConnectionRequest(String endpointId) async {
+    final pendingIdentity = _pendingVerifiedIdentityApprovals.remove(
+      endpointId,
+    );
+    if (pendingIdentity != null) {
+      pendingConnectionRequests.remove(endpointId);
+      _pendingIdentityApprovalReasons.remove(endpointId);
+      _approvedConnectionEndpoints.add(endpointId);
+      _recordIdentityStage(
+        endpointId,
+        'identity_approval_accepted',
+        fields: {
+          'identityChanged':
+              pendingIdentity.wasPinned && !pendingIdentity.pinnedMatches,
+        },
+      );
+      await _finalizeVerifiedIdentity(endpointId, pendingIdentity);
+      notifyListeners();
+      return;
+    }
     final isAutomaticTrustedReconnect =
         !pendingConnectionRequests.containsKey(endpointId) &&
         _approvedConnectionEndpoints.contains(endpointId);
@@ -680,9 +791,20 @@ class NearbyService extends ChangeNotifier {
       operation: 'rejectConnection',
       peerIdentifier: endpointId,
     );
+    final wasIdentityApproval =
+        _pendingVerifiedIdentityApprovals.remove(endpointId) != null;
+    _pendingIdentityApprovalReasons.remove(endpointId);
+    _provisionalIncomingRequests.remove(endpointId);
+    _provisionalConnectionEndpoints.remove(endpointId);
     pendingConnectionRequests.remove(endpointId);
-    peerStates[endpointId] = NearbyConnectionState.disconnected;
+    if (wasIdentityApproval ||
+        peerStates[endpointId] == NearbyConnectionState.connected) {
+      await disconnect(endpointId, reason: 'identity_approval_rejected');
+    } else {
+      peerStates[endpointId] = NearbyConnectionState.disconnected;
+    }
     notifyListeners();
+    if (wasIdentityApproval) return;
     try {
       await transport.rejectConnection(endpointId);
       diagnostics?.record(
@@ -1094,6 +1216,14 @@ class NearbyService extends ChangeNotifier {
       return;
     }
     final index = discoveredPeers.indexWhere((item) => item.id == peer.id);
+    diagnostics?.record(
+      'trust',
+      peer.identityFingerprintHint == null
+          ? 'discovered_peer_hint_missing'
+          : 'discovered_peer_hint_present',
+      operation: 'onEndpointFound',
+      peerIdentifier: peer.endpointId,
+    );
     if (index == -1) {
       discoveredPeers.add(peer);
     } else {
@@ -1111,6 +1241,19 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _maybeReconnect(NearbyPeer peer) async {
+    if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
+        peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
+        peerStates[peer.endpointId] == NearbyConnectionState.incomingRequest ||
+        pendingConnectionRequests.containsKey(peer.endpointId)) {
+      diagnostics?.record(
+        'trust',
+        'auto_reconnect_suppressed',
+        operation: 'candidateLookup',
+        peerIdentifier: peer.endpointId,
+        reason: 'active_connection_or_prompt',
+      );
+      return;
+    }
     final hint = peer.identityFingerprintHint;
     if (hint == null || !RegExp(r'^[a-f0-9]{64}$').hasMatch(hint)) {
       diagnostics?.record(
@@ -1173,6 +1316,19 @@ class NearbyService extends ChangeNotifier {
       );
       return;
     }
+    if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
+        peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
+        peerStates[peer.endpointId] == NearbyConnectionState.incomingRequest ||
+        pendingConnectionRequests.containsKey(peer.endpointId)) {
+      diagnostics?.record(
+        'trust',
+        'auto_reconnect_suppressed',
+        operation: 'candidateLookup',
+        peerIdentifier: peer.endpointId,
+        reason: 'connection_became_active_during_lookup',
+      );
+      return;
+    }
     final retryAt = _nextReconnectAt[hint];
     if (retryAt != null && retryAt.isAfter(DateTime.now().toUtc())) {
       diagnostics?.record(
@@ -1194,6 +1350,7 @@ class NearbyService extends ChangeNotifier {
       );
       return;
     }
+    _reconnectFingerprintByEndpoint[peer.endpointId] = hint;
     final attempts = _reconnectAttemptCounts.update(
       hint,
       (count) => (count + 1).clamp(1, 5).toInt(),
@@ -1240,27 +1397,142 @@ class NearbyService extends ChangeNotifier {
           'fingerprintHintAvailable':
               event.peer.identityFingerprintHint != null,
           'authenticationCodeAvailable': event.authenticationToken != null,
+          'isIncomingConnection': event.isIncomingRequest,
         },
       );
-      final fingerprint = event.peer.identityFingerprintHint;
+      final existingPeer = discoveredPeers
+          .where((peer) => peer.endpointId == endpointId)
+          .firstOrNull;
+      final fingerprint =
+          event.peer.identityFingerprintHint ??
+          existingPeer?.identityFingerprintHint;
+      final resolvedEvent = NearbyConnectionEvent(
+        peer: NearbyPeer(
+          id: endpointId,
+          name: event.peer.name == 'RELIO' && existingPeer != null
+              ? existingPeer.name
+              : event.peer.name,
+          identityFingerprintHint: fingerprint,
+        ),
+        state: event.state,
+        authenticationToken: event.authenticationToken,
+        isIncomingRequest: event.isIncomingRequest,
+      );
+      diagnostics?.record(
+        'trust',
+        fingerprint == null
+            ? 'discovered_peer_hint_missing'
+            : 'discovered_peer_hint_present',
+        connectionTraceId: traceId,
+        operation: 'incomingCandidateResolution',
+        peerIdentifier: endpointId,
+        fields: {
+          'callbackHintAvailable': event.peer.identityFingerprintHint != null,
+          'cachedHintAvailable': existingPeer?.identityFingerprintHint != null,
+          'resolvedHintAvailable': fingerprint != null,
+        },
+      );
       if (fingerprint != null) {
-        _track(_acceptKnownPeerRequest(event, fingerprint));
+        final reservedEndpoint = _fingerprintEndpointReservations[fingerprint];
+        if (reservedEndpoint != null && reservedEndpoint != endpointId) {
+          _recordIncomingPromptSuppressed(
+            endpointId,
+            peerStates[reservedEndpoint] == NearbyConnectionState.connected
+                ? 'already_connected'
+                : 'active_connection',
+            traceId: traceId,
+          );
+          if (event.isIncomingRequest) {
+            unawaited(transport.rejectConnection(endpointId));
+          }
+          peerStates[endpointId] = NearbyConnectionState.disconnected;
+          return;
+        }
+        _fingerprintEndpointReservations[fingerprint] = endpointId;
+      }
+      if (!event.isIncomingRequest &&
+          (_userInitiatedEndpoints.contains(endpointId) ||
+              peerStates[endpointId] == NearbyConnectionState.connecting)) {
+        _recordIncomingPromptSuppressed(
+          endpointId,
+          'active_connection',
+          traceId: traceId,
+        );
         return;
       }
-      _queueIncomingRequest(event);
+      if (pendingConnectionRequests.containsKey(endpointId)) {
+        _recordIncomingPromptSuppressed(
+          endpointId,
+          'existing_prompt',
+          traceId: traceId,
+        );
+        if (event.isIncomingRequest) {
+          unawaited(transport.rejectConnection(endpointId));
+        }
+        return;
+      }
+      if (peerStates[endpointId] == NearbyConnectionState.connected) {
+        _recordIncomingPromptSuppressed(
+          endpointId,
+          _completedIdentityHandshakes.contains(endpointId)
+              ? 'already_connected'
+              : 'trusted_verification',
+          traceId: traceId,
+        );
+        if (event.isIncomingRequest) {
+          unawaited(transport.rejectConnection(endpointId));
+        }
+        return;
+      }
+      if (peerStates[endpointId] == NearbyConnectionState.connecting ||
+          _identityHandshakeTimeouts.containsKey(endpointId) ||
+          _provisionalConnectionEndpoints.contains(endpointId)) {
+        _recordIncomingPromptSuppressed(
+          endpointId,
+          _identityHandshakeTimeouts.containsKey(endpointId)
+              ? 'trusted_verification'
+              : 'active_connection',
+          traceId: traceId,
+        );
+        if (event.isIncomingRequest) {
+          unawaited(transport.rejectConnection(endpointId));
+        }
+        return;
+      }
+      if (fingerprint != null) {
+        _track(_acceptKnownPeerRequest(resolvedEvent, fingerprint));
+        return;
+      }
+      if (event.isIncomingRequest &&
+          identityCrypto is! MockPeerIdentityCrypto) {
+        _track(_acceptProvisionalIncoming(resolvedEvent));
+      } else {
+        _queueIncomingRequest(resolvedEvent);
+      }
       return;
     }
-    final eventFingerprint = event.peer.identityFingerprintHint;
-    if (eventFingerprint != null &&
-        (event.state == NearbyConnectionState.failed ||
-            event.state == NearbyConnectionState.disconnected)) {
-      _automaticConnectionAttempts.remove(eventFingerprint);
+    final eventFingerprint =
+        event.peer.identityFingerprintHint ??
+        _reconnectFingerprintByEndpoint[endpointId];
+    if (event.state == NearbyConnectionState.failed ||
+        event.state == NearbyConnectionState.disconnected) {
+      if (eventFingerprint != null) {
+        _automaticConnectionAttempts.remove(eventFingerprint);
+      }
       if (event.state == NearbyConnectionState.failed) {
-        _scheduleReconnect(
-          event.peer,
-          eventFingerprint,
-          _reconnectAttemptCounts[eventFingerprint] ?? 5,
-        );
+        final fingerprint = eventFingerprint;
+        if (fingerprint != null) {
+          final peer = NearbyPeer(
+            id: endpointId,
+            name: event.peer.name,
+            identityFingerprintHint: fingerprint,
+          );
+          _scheduleReconnect(
+            peer,
+            fingerprint,
+            _reconnectAttemptCounts[fingerprint] ?? 5,
+          );
+        }
       }
     }
     if (event.state == NearbyConnectionState.disconnected) {
@@ -1349,9 +1621,25 @@ class NearbyService extends ChangeNotifier {
       _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       final deviceId = endpointToDeviceId.remove(endpointId);
       if (deviceId != null) deviceToEndpointId.remove(deviceId);
+      _fingerprintEndpointReservations.removeWhere(
+        (_, reservedEndpoint) => reservedEndpoint == endpointId,
+      );
     } else if (event.state == NearbyConnectionState.failed) {
       _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       peerErrors[endpointId] = event.error ?? 'connection failed';
+    }
+    if (event.state == NearbyConnectionState.failed ||
+        event.state == NearbyConnectionState.disconnected) {
+      _approvedConnectionEndpoints.remove(endpointId);
+      _provisionalConnectionEndpoints.remove(endpointId);
+      _provisionalIncomingRequests.remove(endpointId);
+      _pendingVerifiedIdentityApprovals.remove(endpointId);
+      _pendingIdentityApprovalReasons.remove(endpointId);
+      _userInitiatedEndpoints.remove(endpointId);
+      _identityChallenges.remove(endpointId);
+      _fingerprintEndpointReservations.removeWhere(
+        (_, reservedEndpoint) => reservedEndpoint == endpointId,
+      );
     }
     if (event.error != null) peerErrors[endpointId] = event.error!;
     _log(
@@ -1364,6 +1652,79 @@ class NearbyService extends ChangeNotifier {
       _connectionStartedAt.remove(endpointId);
     }
     notifyListeners();
+  }
+
+  void _recordIncomingPromptSuppressed(
+    String endpointId,
+    String reason, {
+    required String traceId,
+  }) {
+    diagnostics?.record(
+      'connection',
+      'incoming_prompt_suppressed_$reason',
+      connectionTraceId: traceId,
+      operation: 'onConnectionInitiated',
+      peerIdentifier: endpointId,
+      reason: reason,
+      fields: {
+        'activeConnections': connectedPeerCount,
+        'activeHandshakes': _identityHandshakeTimeouts.length,
+        'appLifecycleState': appLifecycleState,
+        'screenRoute': screenRoute,
+      },
+    );
+  }
+
+  Future<void> _acceptProvisionalIncoming(NearbyConnectionEvent event) async {
+    final endpointId = event.peer.endpointId;
+    if (_provisionalConnectionEndpoints.contains(endpointId) ||
+        pendingConnectionRequests.containsKey(endpointId) ||
+        peerStates[endpointId] == NearbyConnectionState.connected) {
+      _recordIncomingPromptSuppressed(
+        endpointId,
+        'active_connection',
+        traceId: _connectionTraces[endpointId]!,
+      );
+      return;
+    }
+    _provisionalConnectionEndpoints.add(endpointId);
+    _provisionalIncomingRequests[endpointId] = event;
+    peerStates[endpointId] = NearbyConnectionState.connecting;
+    _connectionTimeouts.remove(endpointId)?.cancel();
+    _connectionTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
+      if (peerStates[endpointId] == NearbyConnectionState.connecting) {
+        unawaited(_expireConnectionAttempt(endpointId));
+      }
+    });
+    diagnostics?.record(
+      'trust',
+      'trusted_transport_auto_accepted',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'acceptProvisionalTransport',
+      peerIdentifier: endpointId,
+      reason: 'fingerprint_hint_unavailable_identity_proof_required',
+      fields: {
+        'trustedCandidatePendingVerification': true,
+        'privateOperationsAllowed': false,
+      },
+    );
+    diagnostics?.record(
+      'trust',
+      'trusted_candidate_pending_verification',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'identityHandshake',
+      peerIdentifier: endpointId,
+    );
+    notifyListeners();
+    try {
+      await transport.acceptConnection(endpointId);
+    } on Object catch (error) {
+      _provisionalConnectionEndpoints.remove(endpointId);
+      _provisionalIncomingRequests.remove(endpointId);
+      _connectionTimeouts.remove(endpointId)?.cancel();
+      peerStates[endpointId] = NearbyConnectionState.failed;
+      _fail('ยอมรับคำขอชั่วคราวไม่สำเร็จ: $error', code: _errorCode(error));
+    }
   }
 
   Future<void> _handshakeAndShareActiveSos(String endpointId) async {
@@ -1516,6 +1877,26 @@ class NearbyService extends ChangeNotifier {
     if (device.isBlocked) {
       peerStates[endpointId] = NearbyConnectionState.disconnected;
       await transport.rejectConnection(endpointId);
+      return;
+    }
+    final activeEndpoint = deviceToEndpointId[device.deviceId];
+    if (activeEndpoint != null &&
+        activeEndpoint != endpointId &&
+        (peerStates[activeEndpoint] == NearbyConnectionState.connected ||
+            peerStates[activeEndpoint] == NearbyConnectionState.connecting)) {
+      _recordIncomingPromptSuppressed(
+        endpointId,
+        peerStates[activeEndpoint] == NearbyConnectionState.connected
+            ? 'already_connected'
+            : 'active_connection',
+        traceId: _connectionTraces[endpointId]!,
+      );
+      try {
+        await transport.rejectConnection(endpointId);
+      } on Object {
+        // Duplicate endpoint cleanup must not disturb the active peer session.
+      }
+      peerStates[endpointId] = NearbyConnectionState.disconnected;
       return;
     }
     if (!device.isTrusted ||
@@ -1756,46 +2137,128 @@ class NearbyService extends ChangeNotifier {
     final consented =
         _approvedConnectionEndpoints.contains(endpointId) ||
         _userInitiatedEndpoints.contains(endpointId);
-    if (wasPinned && !pinnedMatches && !consented) {
-      peerErrors[endpointId] = 'identity_changed';
-      _recordIdentityStage(
-        endpointId,
-        'identity_handshake_failed',
-        severity: 'error',
-        reason: 'pinned_identity_changed',
-      );
-      await disconnect(endpointId, reason: 'pinned_identity_changed');
-      return;
-    }
-    if (!pinnedMatches && !consented) {
-      peerErrors[endpointId] = 'approval_required';
-      _recordIdentityStage(
-        endpointId,
-        'identity_handshake_failed',
-        severity: 'error',
-        reason: 'approval_required',
-      );
-      await disconnect(endpointId, reason: 'manual_approval_required');
-      return;
-    }
     _recordIdentityStage(
       endpointId,
       'identity_proof_verified',
       fields: {'pinnedIdentityMatched': pinnedMatches},
     );
+    final pendingIdentity = _PendingVerifiedIdentity(
+      request:
+          _provisionalIncomingRequests[endpointId] ??
+          NearbyConnectionEvent(
+            peer: NearbyPeer(
+              id: endpointId,
+              name: payload['displayName']! as String,
+              identityFingerprintHint: fingerprint,
+            ),
+            state: NearbyConnectionState.incomingRequest,
+            isIncomingRequest: true,
+          ),
+      packet: packet,
+      publicKey: publicKey,
+      fingerprint: fingerprint,
+      wasPinned: wasPinned,
+      pinnedMatches: pinnedMatches,
+      previousFingerprint: saved?.publicIdentityFingerprint,
+    );
+    final trustedAutoReconnect =
+        pinnedMatches && saved.isTrusted && saved.autoReconnectEnabled;
+    if (trustedAutoReconnect || (consented && (!wasPinned || pinnedMatches))) {
+      diagnostics?.record(
+        'trust',
+        'trusted_candidate_verified',
+        connectionTraceId: _connectionTraces[endpointId],
+        operation: 'identityProof',
+        peerIdentifier: endpointId,
+        fields: {'automaticTrustedReconnect': trustedAutoReconnect},
+      );
+      await _finalizeVerifiedIdentity(endpointId, pendingIdentity);
+      return;
+    }
+    _queueVerifiedIdentityApproval(endpointId, pendingIdentity);
+  }
+
+  void _queueVerifiedIdentityApproval(
+    String endpointId,
+    _PendingVerifiedIdentity pending,
+  ) {
+    if (_pendingVerifiedIdentityApprovals.containsKey(endpointId)) {
+      _recordIncomingPromptSuppressed(
+        endpointId,
+        'existing_prompt',
+        traceId: _connectionTraces[endpointId]!,
+      );
+      return;
+    }
+    final payload = pending.packet.payload;
+    final request = NearbyConnectionEvent(
+      peer: NearbyPeer(
+        id: endpointId,
+        name: payload['displayName']! as String,
+        identityFingerprintHint: pending.fingerprint,
+      ),
+      state: NearbyConnectionState.incomingRequest,
+      authenticationToken: pending.request.authenticationToken,
+      isIncomingRequest: true,
+    );
+    _pendingVerifiedIdentityApprovals[endpointId] = pending;
+    _pendingIdentityApprovalReasons[endpointId] =
+        pending.wasPinned && !pending.pinnedMatches
+        ? 'pinned_identity_changed'
+        : 'first_contact_consent_required';
+    pendingConnectionRequests[endpointId] = request;
+    diagnostics?.record(
+      'trust',
+      pending.wasPinned && !pending.pinnedMatches
+          ? 'trusted_candidate_rejected_identity_mismatch'
+          : 'identity_approval_pending',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'identityProof',
+      peerIdentifier: endpointId,
+      reason: _pendingIdentityApprovalReasons[endpointId],
+      fields: {
+        'pinnedIdentityMatched': pending.pinnedMatches,
+        'firstContactConsentRequired': !pending.wasPinned,
+      },
+    );
+    notifyListeners();
+  }
+
+  Future<void> _finalizeVerifiedIdentity(
+    String endpointId,
+    _PendingVerifiedIdentity pending,
+  ) async {
+    final packet = pending.packet;
+    final payload = packet.payload;
+    final deviceId = packet.senderDeviceId;
+    final saved = await nearbyDevices.getDevice(deviceId);
+    if (saved?.isBlocked == true) {
+      await disconnect(endpointId, reason: 'peer_blocked');
+      return;
+    }
+    final currentFingerprint = saved?.publicIdentityFingerprint;
+    final pinUnchanged = currentFingerprint == pending.previousFingerprint;
+    final explicitIdentityApproval =
+        _approvedConnectionEndpoints.contains(endpointId) &&
+        _pendingVerifiedIdentityApprovals.containsKey(endpointId);
+    if (!pinUnchanged && !explicitIdentityApproval) {
+      peerErrors[endpointId] = 'identity_changed_during_approval';
+      await disconnect(endpointId, reason: 'pinned_identity_changed');
+      return;
+    }
+    final status = _statusFrom(payload['status']! as String);
     _updatePeerIdentity(
       endpointId,
       deviceId,
       displayName: payload['displayName']! as String,
       capabilities: _capabilitiesFrom(payload['capabilities']),
     );
-    final status = _statusFrom(payload['status']! as String);
     peerStatuses[deviceId] = status;
-    if (!pinnedMatches) {
+    if (!pending.pinnedMatches) {
       _recordIdentityStage(
         endpointId,
         'identity_enrollment_started',
-        fields: {'wasPreviouslyPinned': wasPinned},
+        fields: {'wasPreviouslyPinned': pending.wasPinned},
       );
     }
     await nearbyDevices.upsert(
@@ -1803,19 +2266,29 @@ class NearbyService extends ChangeNotifier {
       displayName: payload['displayName']! as String,
       status: status,
     );
-    if (!pinnedMatches) {
+    if (!pending.pinnedMatches) {
       await nearbyDevices.setTrustedIdentity(
         deviceId: deviceId,
-        publicIdentityKey: publicKey,
-        fingerprint: fingerprint,
+        publicIdentityKey: pending.publicKey,
+        fingerprint: pending.fingerprint,
       );
       _recordIdentityStage(
         endpointId,
         'identity_fingerprint_pinned',
-        fields: {'fingerprintPrefix': fingerprint.substring(0, 12)},
+        fields: {'fingerprintPrefix': pending.fingerprint.substring(0, 12)},
       );
       _recordIdentityStage(endpointId, 'identity_enrollment_completed');
     }
+    endpointToDeviceId[endpointId] = deviceId;
+    deviceToEndpointId[deviceId] = endpointId;
+    _approvedConnectionEndpoints.add(endpointId);
+    _provisionalConnectionEndpoints.remove(endpointId);
+    _provisionalIncomingRequests.remove(endpointId);
+    _pendingVerifiedIdentityApprovals.remove(endpointId);
+    _pendingIdentityApprovalReasons.remove(endpointId);
+    peerStates[endpointId] = NearbyConnectionState.connected;
+    _reconnectFingerprintByEndpoint.remove(endpointId);
+    final fingerprint = pending.fingerprint;
     _automaticConnectionAttempts.remove(fingerprint);
     _reconnectTimers.remove(fingerprint)?.cancel();
     _nextReconnectAt.remove(fingerprint);
@@ -1913,6 +2386,18 @@ class NearbyService extends ChangeNotifier {
       final isIdentityHandshake =
           packet.type == RelioPacketType.identityChallenge ||
           packet.type == RelioPacketType.identityProof;
+      if (identityCrypto is! MockPeerIdentityCrypto &&
+          !_completedIdentityHandshakes.contains(event.peerId) &&
+          !isIdentityHandshake) {
+        protocolErrorCount++;
+        _recordIdentityStage(
+          event.peerId,
+          'application_packet_blocked_before_identity_approval',
+          severity: 'warning',
+          reason: packet.type.name,
+        );
+        return;
+      }
       if (!isIdentityHandshake &&
           packet.type != RelioPacketType.hello &&
           mappedDeviceId != packet.senderDeviceId) {
@@ -2006,6 +2491,12 @@ class NearbyService extends ChangeNotifier {
         file == null ||
         attachments == null ||
         mediaStorage == null) {
+      return;
+    }
+    if (identityCrypto is! MockPeerIdentityCrypto &&
+        !_completedIdentityHandshakes.contains(
+          _mediaFilesByPayload[payloadId]!.peerId,
+        )) {
       return;
     }
     final payload = packet.payload;
@@ -2624,6 +3115,10 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> close() async {
     if (_closed) return;
+    _recordSessionStop(
+      caller: 'NearbyService.close',
+      reason: 'service_dispose',
+    );
     _closed = true;
     for (final timer in _identityHandshakeTimeouts.values) {
       timer.cancel();

@@ -124,6 +124,8 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _themeController.addListener(_handleThemeChanged);
     _dependencies = widget.dependencies ?? RelioDependencies();
     _ownsDependencies = widget.dependencies == null;
+    _router.routerDelegate.addListener(_updateNearbyLifecycleContext);
+    _updateNearbyLifecycleContext();
     unawaited(_themeController.load());
     unawaited(_dependencies.initialize());
   }
@@ -135,6 +137,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _router.routerDelegate.removeListener(_updateNearbyLifecycleContext);
     _router.dispose();
     _themeController.removeListener(_handleThemeChanged);
     if (_ownsThemeController) _themeController.dispose();
@@ -144,6 +147,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _updateNearbyLifecycleContext(lifecycleState: state.name);
     if (state == AppLifecycleState.resumed) {
       // เมื่อกลับมา foreground ให้ลองซิงก์คิวที่เป็นของบัญชีปัจจุบันอีกครั้ง
       unawaited(_dependencies.syncEngine.run());
@@ -157,6 +161,16 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
       // รวม start/stop ในคิวเดียว ป้องกัน resume ชนกับการหยุด session
       unawaited(_dependencies.setNearbyForeground(false));
     }
+  }
+
+  void _updateNearbyLifecycleContext({String? lifecycleState}) {
+    _dependencies.nearbyService.updateLifecycleContext(
+      lifecycleState:
+          lifecycleState ??
+          WidgetsBinding.instance.lifecycleState?.name ??
+          'unknown',
+      route: _router.routerDelegate.currentConfiguration.uri.path,
+    );
   }
 
   @override
@@ -327,6 +341,13 @@ class _IncomingConnectionPromptHostState
                       ? '${request.peer.name} ต้องการเชื่อมต่อกับคุณ'
                       : 'กำลังเชื่อมต่อกับ ${request.peer.name}',
                 ),
+                if (service.identityApprovalChangesPinnedKey(entry.key)) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'คำเตือน: กุญแจอุปกรณ์นี้ไม่ตรงกับ RELIO ที่บันทึกไว้ '
+                    'การยอมรับจะเปลี่ยนกุญแจที่เชื่อถือ โปรดยืนยันตัวตนผ่านรหัส Nearby ก่อน',
+                  ),
+                ],
                 if (request.authenticationToken case final token?) ...[
                   const SizedBox(height: 16),
                   const Text('รหัสยืนยัน Nearby'),
@@ -349,7 +370,11 @@ class _IncomingConnectionPromptHostState
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
                 child: Text(
-                  request.isIncomingRequest ? 'ยอมรับ' : 'ยืนยันรหัส',
+                  service.identityApprovalChangesPinnedKey(entry.key)
+                      ? 'ยอมรับและเปลี่ยนกุญแจ'
+                      : request.isIncomingRequest
+                      ? 'ยอมรับ'
+                      : 'ยืนยันรหัส',
                 ),
               ),
             ],

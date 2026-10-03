@@ -160,7 +160,7 @@ abstract interface class NearbyTransport {
   Future<void> resetSessionOperations();
   Future<void> acceptConnection(String peerId);
   Future<void> rejectConnection(String peerId);
-  Future<void> requestConnection(String peerId);
+  Future<void> requestConnection(String peerId, {String? identityFingerprint});
   Future<void> disconnect(String peerId);
   Future<void> sendBytes(Uint8List bytes, {String? peerId});
   Future<String> sendFile(String filePath, {String? peerId});
@@ -271,7 +271,10 @@ class MockNearbyTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> requestConnection(String peerId) async {
+  Future<void> requestConnection(
+    String peerId, {
+    String? identityFingerprint,
+  }) async {
     connectionRequestCount++;
     final peer = peers[peerId];
     if (peer == null) {

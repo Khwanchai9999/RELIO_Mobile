@@ -223,7 +223,10 @@ class RelioDependencies {
       _nearbyRetryTimer?.cancel();
       _nearbyRetryTimer = null;
       _nearbyRetryBackoff.reset();
-      await nearbyService.stopSession();
+      await nearbyService.stopSession(
+        reason: !ready ? 'nearby_readiness_unavailable' : 'app_backgrounded',
+        caller: 'RelioDependencies._syncNearbySession',
+      );
       return false;
     }
     if (readinessChanged && readiness.ready) {
@@ -244,7 +247,10 @@ class RelioDependencies {
     }
     if (_nearbyRestart) {
       _nearbyRestart = false;
-      await nearbyService.stopSession();
+      await nearbyService.stopSession(
+        reason: 'foreground_or_readiness_restart',
+        caller: 'RelioDependencies._syncNearbySession',
+      );
     }
     nearbyService.startRetryAttempt = _nearbyRetryBackoff.attempt + 1;
     await nearbyService.startSession();
