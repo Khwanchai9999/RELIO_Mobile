@@ -223,9 +223,9 @@ automated tests cover the deterministic path.
 
 Build 17's device-test instructions are historical and must not be used as a
 current install recipe. Build 28 (`0.9.0+28`) is the latest public QA release.
-Build 30 (`0.9.0+30`) is the trusted reconnect stability candidate; do not
-install or update a phone from this workspace. The owner should install the signed QA
-build on both test phones only after the remote artifact gate passes.
+Build 31 (`0.9.0+31`) is the native Nearby candidate; do not install or update
+a phone from this workspace. The owner should install the signed QA build on
+both test phones only after the remote artifact gate passes.
 Never uninstall the app or clear its data.
 
 The acceptance steps below remain applicable only after that authorization.
@@ -376,7 +376,7 @@ fails. Confirm diagnostics distinguish an app-requested disconnect from a
 native/remote disconnect. The development agent did not install or physically
 test Build 28; automated paired tests are not evidence of radio interoperability.
 
-## S. Build 30 trusted reconnect and session stability — HUMAN RUN REQUIRED
+## S. Build 30 trusted reconnect and session stability — HISTORICAL
 
 After the remote APK is verified, update both phones to Build 30. For already
 trusted phones, let them discover each other without tapping Connect and
@@ -386,3 +386,17 @@ in both directions and one image; then move out of range and return. Confirm
 trusted automatic reconnect repeats without a prompt. Export diagnostics ZIPs
 from both phones if any step fails. The development agent does not install or
 physically test Build 30.
+
+## T. Build 31 native Nearby transport — HUMAN RUN REQUIRED
+
+After the immutable Build 31 GitHub release APK and live QA manifest are
+verified, update only the Huawei API 29 and realme API 35 test phones. Keep
+Wi-Fi and Bluetooth on, do not require Internet, and do not alter Location or
+permissions unless the phone itself reports a denied permission. Test one
+fresh first-contact attempt: discover → Connect → accept once on the receiver.
+Confirm both devices reach Connected and then complete the existing identity
+consent/enrollment flow. If transport fails, stop after this stage; export the
+redacted diagnostics ZIP from both devices and retain the reported native status
+code/name, role, strategy, elapsed time, and Google Play Services version. Do
+not continue into chat/media/reconnect testing until native transport succeeds.
+The development agent does not install or physically test Build 31.

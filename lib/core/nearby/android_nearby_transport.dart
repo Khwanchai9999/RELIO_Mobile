@@ -10,7 +10,9 @@ import 'package:uuid/uuid.dart';
 import 'nearby_transport.dart';
 
 class AndroidNearbyTransport implements NearbyTransport {
-  AndroidNearbyTransport({this.serviceId = relioNearbyServiceId});
+  AndroidNearbyTransport({this.serviceId = relioNearbyServiceId}) {
+    _nearby.setNativeDiagnosticListener(_onNativeDiagnostic);
+  }
 
   @override
   final String serviceId;
@@ -20,6 +22,9 @@ class AndroidNearbyTransport implements NearbyTransport {
   final _files = StreamController<NearbyFilePayloadEvent>.broadcast();
   final _transfers = StreamController<NearbyTransferEvent>.broadcast();
   final _connections = StreamController<NearbyConnectionEvent>.broadcast();
+  final _nativeDiagnostics =
+      StreamController<NearbyNativeDiagnostic>.broadcast();
+  final Map<String, NativeConnectionResult> _rawConnectionResults = {};
   final Set<String> _connectedPeers = {};
   final Set<String> _connectionRequests = {};
   final Set<String> _pendingConnectionRequests = {};
@@ -52,6 +57,16 @@ class AndroidNearbyTransport implements NearbyTransport {
   Stream<NearbyConnectionEvent> get connectionEvents => _connections.stream;
 
   @override
+  Stream<NearbyNativeDiagnostic> get nativeDiagnostics =>
+      _nativeDiagnostics.stream;
+
+  @override
+  Future<Map<String, Object?>> diagnosticSnapshot() async {
+    final snapshot = await _nearby.getNativeDiagnostics();
+    return snapshot?.map((key, value) => MapEntry('$key', value)) ?? const {};
+  }
+
+  @override
   Future<void> startAdvertising({
     required String displayName,
     String? identityFingerprint,
@@ -65,6 +80,7 @@ class AndroidNearbyTransport implements NearbyTransport {
         serviceId: serviceId,
         onConnectionInitiated: _connectionInitiated,
         onConnectionResult: _connectionResult,
+        onRawConnectionResult: _rawConnectionResult,
         onDisconnected: _disconnected,
       );
       if (!started) {
@@ -180,13 +196,17 @@ class AndroidNearbyTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> acceptConnection(String peerId) async {
+  Future<void> acceptConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {
     if (!_pendingConnectionRequests.remove(peerId)) return;
     try {
       await _nearby.acceptConnection(
         peerId,
         onPayLoadRecieved: _payloadReceived,
         onPayloadTransferUpdate: _payloadTransferUpdated,
+        connectionTraceId: connectionTraceId,
       );
     } on PlatformException catch (error) {
       throw _platformFailure('acceptConnection', error);
@@ -200,11 +220,17 @@ class AndroidNearbyTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> rejectConnection(String peerId) async {
+  Future<void> rejectConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {
     _pendingConnectionRequests.remove(peerId);
     _connectionRequests.remove(peerId);
     try {
-      await _nearby.rejectConnection(peerId);
+      await _nearby.rejectConnection(
+        peerId,
+        connectionTraceId: connectionTraceId,
+      );
     } on PlatformException catch (error) {
       throw _platformFailure('rejectConnection', error);
     } on Object catch (error) {
@@ -226,6 +252,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   Future<void> requestConnection(
     String peerId, {
     String? identityFingerprint,
+    String? connectionTraceId,
   }) async {
     if (_disposed || _connectedPeers.contains(peerId)) return;
     if (!_connectionRequests.add(peerId)) return;
@@ -241,7 +268,9 @@ class AndroidNearbyTransport implements NearbyTransport {
         peerId,
         onConnectionInitiated: _connectionInitiated,
         onConnectionResult: _connectionResult,
+        onRawConnectionResult: _rawConnectionResult,
         onDisconnected: _disconnected,
+        connectionTraceId: connectionTraceId,
       );
       if (!requested) {
         throw const NearbyTransportException(
@@ -416,7 +445,21 @@ class AndroidNearbyTransport implements NearbyTransport {
     }
   }
 
+  void _rawConnectionResult(String endpointId, NativeConnectionResult result) {
+    _rawConnectionResults[endpointId] = result;
+  }
+
+  void _onNativeDiagnostic(NativeDiagnosticEvent event) {
+    _nativeDiagnostics.add(
+      NearbyNativeDiagnostic(
+        name: event.name,
+        fields: event.fields.map((key, value) => MapEntry('$key', value)),
+      ),
+    );
+  }
+
   void _connectionResult(String endpointId, Status status) {
+    final raw = _rawConnectionResults.remove(endpointId);
     _connectionRequests.remove(endpointId);
     final peer = NearbyPeer(
       id: endpointId,
@@ -434,6 +477,20 @@ class AndroidNearbyTransport implements NearbyTransport {
         NearbyConnectionEvent(
           peer: peer,
           state: NearbyConnectionState.connected,
+          rawStatusCode: raw?.rawStatusCode,
+          rawStatusName: raw?.rawStatusName,
+          rawStatusMessage: raw?.rawStatusMessage,
+          operation: raw?.operation,
+          role: raw?.role,
+          elapsedMs: raw?.elapsedMs,
+          strategy: raw?.strategy,
+          connectionTraceId: raw?.connectionTraceId,
+          androidApi: raw?.androidApi,
+          googlePlayServicesVersionName: raw?.googlePlayServicesVersionName,
+          googlePlayServicesVersionCode: raw?.googlePlayServicesVersionCode,
+          nearbyLibraryVersion: raw?.nearbyLibraryVersion,
+          playServicesNearbyDependencyVersion:
+              raw?.playServicesNearbyDependencyVersion,
         ),
       );
     } else {
@@ -442,6 +499,20 @@ class AndroidNearbyTransport implements NearbyTransport {
           peer: peer,
           state: NearbyConnectionState.failed,
           error: status.name,
+          rawStatusCode: raw?.rawStatusCode,
+          rawStatusName: raw?.rawStatusName,
+          rawStatusMessage: raw?.rawStatusMessage,
+          operation: raw?.operation,
+          role: raw?.role,
+          elapsedMs: raw?.elapsedMs,
+          strategy: raw?.strategy,
+          connectionTraceId: raw?.connectionTraceId,
+          androidApi: raw?.androidApi,
+          googlePlayServicesVersionName: raw?.googlePlayServicesVersionName,
+          googlePlayServicesVersionCode: raw?.googlePlayServicesVersionCode,
+          nearbyLibraryVersion: raw?.nearbyLibraryVersion,
+          playServicesNearbyDependencyVersion:
+              raw?.playServicesNearbyDependencyVersion,
         ),
       );
     }
@@ -488,7 +559,11 @@ class AndroidNearbyTransport implements NearbyTransport {
     final detailsStatus = error.details is Map
         ? (error.details! as Map)['statusCode']
         : null;
+    final rawDetails = error.details is Map
+        ? error.details! as Map
+        : const <Object?, Object?>{};
     final statusCode =
+        int.tryParse('${rawDetails['rawStatusCode']}') ??
         int.tryParse(status?.group(1) ?? '') ??
         int.tryParse('$detailsStatus') ??
         int.tryParse(
@@ -497,14 +572,18 @@ class AndroidNearbyTransport implements NearbyTransport {
               ).firstMatch(nativeText)?.group(1) ??
               '',
         );
-    final statusName = status?.group(2) ?? _statusName(statusCode);
+    final statusName =
+        rawDetails['rawStatusName'] as String? ??
+        status?.group(2) ??
+        _statusName(statusCode);
     return NearbyTransportException(
       'PlatformException during $operation.',
       code: statusName ?? error.code,
       operation: operation,
       exceptionType: error.runtimeType.toString(),
       platformCode: error.code,
-      platformMessage: error.message,
+      platformMessage:
+          rawDetails['rawStatusMessage'] as String? ?? error.message,
       platformDetails: error.details,
       apiStatusCode: statusCode,
       apiStatusName: statusName,
@@ -537,6 +616,7 @@ class AndroidNearbyTransport implements NearbyTransport {
       _peers.close(),
       _payloads.close(),
       _connections.close(),
+      _nativeDiagnostics.close(),
       _files.close(),
       _transfers.close(),
     ]);

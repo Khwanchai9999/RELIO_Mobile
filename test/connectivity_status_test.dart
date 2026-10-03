@@ -433,6 +433,208 @@ void main() {
   );
 
   test(
+    'brief inactive/resume keeps an in-flight native attempt alive',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 35,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+          'android.permission.ACCESS_WIFI_STATE': true,
+          'android.permission.CHANGE_WIFI_STATE': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport()..holdConnectionRequests = true;
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: ConnectivityStatusService(
+          source: source,
+          probe: _FakeProbe(0),
+        ),
+        connectionAttemptTimeout: const Duration(milliseconds: 400),
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      transport.simulatePeer(id: 'active-negotiation', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+      await dependencies.nearbyService.connect('active-negotiation');
+      expect(dependencies.nearbyService.hasActiveConnectionAttempts, isTrue);
+
+      await dependencies.setNearbyForeground(false);
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+      await dependencies.setNearbyForeground(true);
+      await dependencies.startNearbySessionIfPermitted(force: true);
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+      expect(transport.resetSessionOperationsCount, 0);
+      expect(transport.advertisingStartCount, 1);
+      expect(transport.discoveryStartCount, 1);
+
+      transport.resolveConnectionRequest('active-negotiation', connected: true);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(
+        dependencies.nearbyService.peerStates['active-negotiation'],
+        NearbyConnectionState.connected,
+      );
+    },
+  );
+
+  test(
+    'readiness refresh defers radio restart during native negotiation',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 35,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.BLUETOOTH_SCAN': true,
+          'android.permission.BLUETOOTH_CONNECT': true,
+          'android.permission.BLUETOOTH_ADVERTISE': true,
+          'android.permission.NEARBY_WIFI_DEVICES': true,
+          'android.permission.ACCESS_WIFI_STATE': true,
+          'android.permission.CHANGE_WIFI_STATE': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport()..holdConnectionRequests = true;
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: ConnectivityStatusService(
+          source: source,
+          probe: _FakeProbe(0),
+        ),
+        connectionAttemptTimeout: const Duration(milliseconds: 400),
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      transport.simulatePeer(id: 'readiness-refresh-active', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+      await dependencies.nearbyService.connect('readiness-refresh-active');
+
+      source.emit(
+        const RuntimeConnectivitySnapshot(
+          hasInternetRoute: false,
+          androidSdk: 35,
+          bluetoothAvailable: true,
+          bluetoothEnabled: false,
+          wifiAvailable: true,
+          wifiEnabled: true,
+          playServicesStatus: 'available',
+          permissions: {
+            'android.permission.BLUETOOTH_SCAN': true,
+            'android.permission.BLUETOOTH_CONNECT': true,
+            'android.permission.BLUETOOTH_ADVERTISE': true,
+            'android.permission.NEARBY_WIFI_DEVICES': true,
+            'android.permission.ACCESS_WIFI_STATE': true,
+            'android.permission.CHANGE_WIFI_STATE': true,
+          },
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(dependencies.nearbyService.hasActiveConnectionAttempts, isTrue);
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
+      expect(transport.resetSessionOperationsCount, 0);
+      expect(transport.advertisingStartCount, 1);
+      expect(transport.discoveryStartCount, 1);
+
+      transport.resolveConnectionRequest(
+        'readiness-refresh-active',
+        connected: true,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(
+        dependencies.nearbyService.peerStates['readiness-refresh-active'],
+        NearbyConnectionState.connected,
+      );
+    },
+  );
+
+  test(
+    'long pause expires an unresolved attempt and stops the session',
+    () async {
+      const ready = RuntimeConnectivitySnapshot(
+        hasInternetRoute: false,
+        androidSdk: 29,
+        bluetoothAvailable: true,
+        bluetoothEnabled: true,
+        wifiAvailable: true,
+        wifiEnabled: true,
+        locationEnabled: true,
+        playServicesStatus: 'available',
+        permissions: {
+          'android.permission.ACCESS_COARSE_LOCATION': true,
+          'android.permission.ACCESS_FINE_LOCATION': true,
+        },
+      );
+      final source = _FakeRuntimeSource(ready);
+      final transport = MockNearbyTransport()..holdConnectionRequests = true;
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: transport,
+        useMockTransport: false,
+        androidPlatformOverride: true,
+        permissionService: PermissionService(isAndroid: false),
+        connectivityStatusService: ConnectivityStatusService(
+          source: source,
+          probe: _FakeProbe(0),
+        ),
+        connectionAttemptTimeout: const Duration(milliseconds: 30),
+      );
+      addTearDown(() async {
+        await dependencies.dispose();
+        await source.close();
+      });
+
+      await dependencies.initialize();
+      transport.simulatePeer(id: 'paused-negotiation', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+      await dependencies.nearbyService.connect('paused-negotiation');
+      await dependencies.setNearbyForeground(false);
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      expect(
+        dependencies.nearbyService.peerStates['paused-negotiation'],
+        NearbyConnectionState.failed,
+      );
+      expect(transport.isAdvertising, isFalse);
+      expect(transport.isDiscovering, isFalse);
+      expect(transport.resetSessionOperationsCount, 0);
+    },
+  );
+
+  test(
     'automatic readiness events respect retry backoff after native failure',
     () async {
       const ready = RuntimeConnectivitySnapshot(

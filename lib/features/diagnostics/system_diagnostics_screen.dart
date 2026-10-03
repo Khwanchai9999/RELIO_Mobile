@@ -78,6 +78,8 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
     final lastFailure = service.peerErrors.isNotEmpty
         ? service.peerErrors.values.last
         : service.lastErrorCode;
+    final nativeFailure = service.lastNativeConnectionFailure;
+    final transportSnapshot = service.nativeTransportSnapshot;
     return {
       'bluetoothEnabled': runtime.bluetoothEnabled,
       'wifiEnabled': runtime.wifiEnabled,
@@ -97,6 +99,19 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
           .length,
       'lastFailure': lastFailure,
       'lastNearbyNativeError': service.lastDiagnostic,
+      'activeNegotiation': service.hasActiveConnectionAttempts,
+      'nativeStatusCode': nativeFailure?.rawStatusCode,
+      'nativeStatusName': nativeFailure?.rawStatusName,
+      'nativeStatusMessage': nativeFailure?.rawStatusMessage,
+      'nativeOperation': nativeFailure?.operation,
+      'nativeRole': nativeFailure?.role,
+      'nativeElapsedMs': nativeFailure?.elapsedMs,
+      'nativeStrategy': nativeFailure?.strategy,
+      'googlePlayServicesVersionName':
+          transportSnapshot['googlePlayServicesVersionName'],
+      'googlePlayServicesVersionCode':
+          transportSnapshot['googlePlayServicesVersionCode'],
+      'nearbyLibraryVersion': transportSnapshot['nearbyLibraryVersion'],
       'identityHandshake':
           service.peerErrors.values.any((value) => value.contains('identity'))
           ? 'failed_or_rejected'
@@ -119,6 +134,9 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
         'Nearby readiness: ${state['nearbyReadiness']}',
         'Bluetooth/Wi-Fi/Location: ${state['bluetoothEnabled']} / ${state['wifiEnabled']} / ${state['locationEnabled']}',
         'Connection: ${state['applicationState']}; discovered ${state['discoveredPeers']}; connected ${state['connectedPeers']}; incoming ${state['pendingIncomingRequests']}',
+        'Active negotiation: ${state['activeNegotiation']}',
+        'Google Play Services: ${state['googlePlayServicesVersionName'] ?? 'unknown'} (${state['googlePlayServicesVersionCode'] ?? 'unknown'})',
+        'Last native failure: ${state['nativeStatusCode'] ?? 'none'} ${state['nativeStatusName'] ?? ''}; operation ${state['nativeOperation'] ?? '—'}; elapsed ${state['nativeElapsedMs'] ?? '—'}ms; role ${state['nativeRole'] ?? '—'}; strategy ${state['nativeStrategy'] ?? '—'}',
         'Last failure: ${state['lastFailure'] ?? 'none'}',
         'Last native diagnostic: ${state['lastNearbyNativeError'] ?? 'none'}',
         'Events: ${_dependencies.diagnostics.eventCount}; oldest ${_dependencies.diagnostics.oldestEvent?.toIso8601String() ?? 'unknown'}; newest ${_dependencies.diagnostics.newestEvent?.toIso8601String() ?? 'unknown'}',
@@ -182,6 +200,19 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
             'Location: ${_status(readiness?.locationEnabled)}',
             'สิทธิ์: ${readiness?.missingPermissions.isEmpty ?? true ? 'ครบ' : 'ขาด ${readiness!.missingPermissions.join(', ')}'}',
             readiness?.summary ?? 'ยังไม่มีข้อมูล readiness',
+          ]),
+          _section('Native Nearby', [
+            'Active negotiation: ${service.hasActiveConnectionAttempts ? 'yes' : 'no'}',
+            'Google Play Services: ${service.nativeTransportSnapshot['googlePlayServicesVersionName'] ?? 'กำลังอ่าน'} (${service.nativeTransportSnapshot['googlePlayServicesVersionCode'] ?? '—'})',
+            'Nearby library: ${service.nativeTransportSnapshot['nearbyLibraryVersion'] ?? '—'} • play-services-nearby ${service.nativeTransportSnapshot['playServicesNearbyDependencyVersion'] ?? '—'}',
+            'กลยุทธ์: Advertising ${service.nativeTransportSnapshot['advertisingStrategy'] ?? '—'} • Discovery ${service.nativeTransportSnapshot['discoveryStrategy'] ?? '—'}',
+            if (service.lastNativeConnectionFailure case final failure?)
+              'ครั้งล่าสุด: ${failure.rawStatusCode ?? '—'} • ${failure.rawStatusName ?? '—'} • ${failure.operation ?? '—'} • ${failure.elapsedMs ?? '—'}ms • ${failure.role ?? '—'} • ${failure.strategy ?? '—'}',
+            if (service.lastNativeConnectionFailure?.rawStatusMessage
+                case final message?)
+              'รายละเอียด: $message',
+            if (service.lastNativeConnectionFailure == null)
+              'ความล้มเหลว Native ล่าสุด: ยังไม่มี',
           ]),
           _section('การเชื่อมต่อและ Trust', [
             'ค้นพบ ${service.discoveredPeers.length} • เชื่อมต่อ ${service.connectedPeerCount} • คำขอเข้า ${service.pendingConnectionRequests.length}',

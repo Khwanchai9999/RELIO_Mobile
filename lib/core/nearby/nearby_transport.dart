@@ -87,6 +87,19 @@ class NearbyConnectionEvent {
     this.error,
     this.authenticationToken,
     this.isIncomingRequest = false,
+    this.rawStatusCode,
+    this.rawStatusName,
+    this.rawStatusMessage,
+    this.operation,
+    this.role,
+    this.elapsedMs,
+    this.strategy,
+    this.connectionTraceId,
+    this.androidApi,
+    this.googlePlayServicesVersionName,
+    this.googlePlayServicesVersionCode,
+    this.nearbyLibraryVersion,
+    this.playServicesNearbyDependencyVersion,
   });
 
   final NearbyPeer peer;
@@ -94,6 +107,26 @@ class NearbyConnectionEvent {
   final String? error;
   final String? authenticationToken;
   final bool isIncomingRequest;
+  final int? rawStatusCode;
+  final String? rawStatusName;
+  final String? rawStatusMessage;
+  final String? operation;
+  final String? role;
+  final int? elapsedMs;
+  final String? strategy;
+  final String? connectionTraceId;
+  final int? androidApi;
+  final String? googlePlayServicesVersionName;
+  final int? googlePlayServicesVersionCode;
+  final String? nearbyLibraryVersion;
+  final String? playServicesNearbyDependencyVersion;
+}
+
+class NearbyNativeDiagnostic {
+  const NearbyNativeDiagnostic({required this.name, this.fields = const {}});
+
+  final String name;
+  final Map<String, Object?> fields;
 }
 
 const relioNearbyServiceId = 'com.relio.relio_mobile';
@@ -150,6 +183,8 @@ abstract interface class NearbyTransport {
   Stream<NearbyFilePayloadEvent> get incomingFilePayloads;
   Stream<NearbyTransferEvent> get transferEvents;
   Stream<NearbyConnectionEvent> get connectionEvents;
+  Stream<NearbyNativeDiagnostic> get nativeDiagnostics;
+  Future<Map<String, Object?>> diagnosticSnapshot();
   Future<void> startAdvertising({
     required String displayName,
     String? identityFingerprint,
@@ -158,9 +193,13 @@ abstract interface class NearbyTransport {
   Future<void> startDiscovery();
   Future<void> stopDiscovery();
   Future<void> resetSessionOperations();
-  Future<void> acceptConnection(String peerId);
-  Future<void> rejectConnection(String peerId);
-  Future<void> requestConnection(String peerId, {String? identityFingerprint});
+  Future<void> acceptConnection(String peerId, {String? connectionTraceId});
+  Future<void> rejectConnection(String peerId, {String? connectionTraceId});
+  Future<void> requestConnection(
+    String peerId, {
+    String? identityFingerprint,
+    String? connectionTraceId,
+  });
   Future<void> disconnect(String peerId);
   Future<void> sendBytes(Uint8List bytes, {String? peerId});
   Future<String> sendFile(String filePath, {String? peerId});
@@ -181,6 +220,8 @@ class MockNearbyTransport implements NearbyTransport {
   final _peers = StreamController<NearbyPeer>.broadcast();
   final _payloads = StreamController<NearbyPayloadEvent>.broadcast();
   final _connections = StreamController<NearbyConnectionEvent>.broadcast();
+  final _nativeDiagnostics =
+      StreamController<NearbyNativeDiagnostic>.broadcast();
   final _files = StreamController<NearbyFilePayloadEvent>.broadcast();
   final _transfers = StreamController<NearbyTransferEvent>.broadcast();
   final List<Uint8List> sentPayloads = [];
@@ -199,6 +240,31 @@ class MockNearbyTransport implements NearbyTransport {
   bool isAdvertising = false;
   bool isDiscovering = false;
   bool isDisposed = false;
+
+  void resolveConnectionRequest(String peerId, {required bool connected}) {
+    final peer = peers[peerId];
+    if (peer == null) return;
+    if (connected) {
+      final established = NearbyPeer(
+        id: peer.id,
+        name: peer.name,
+        connected: true,
+        deviceId: peer.deviceId,
+        identityFingerprintHint: peer.identityFingerprintHint,
+      );
+      peers[peerId] = established;
+      _connections.add(
+        NearbyConnectionEvent(
+          peer: established,
+          state: NearbyConnectionState.connected,
+        ),
+      );
+      return;
+    }
+    _connections.add(
+      NearbyConnectionEvent(peer: peer, state: NearbyConnectionState.failed),
+    );
+  }
 
   @override
   String get implementationName => 'MockNearbyTransport';
@@ -223,6 +289,18 @@ class MockNearbyTransport implements NearbyTransport {
 
   @override
   Stream<NearbyConnectionEvent> get connectionEvents => _connections.stream;
+
+  @override
+  Stream<NearbyNativeDiagnostic> get nativeDiagnostics =>
+      _nativeDiagnostics.stream;
+
+  @override
+  Future<Map<String, Object?>> diagnosticSnapshot() async => {
+    'strategy': strategyName,
+    'nearbyLibraryVersion': 'mock',
+    'googlePlayServicesVersionName': 'not_applicable',
+    'googlePlayServicesVersionCode': null,
+  };
 
   @override
   Future<void> startAdvertising({
@@ -261,12 +339,18 @@ class MockNearbyTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> acceptConnection(String peerId) async {
+  Future<void> acceptConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {
     acceptedConnections.add(peerId);
   }
 
   @override
-  Future<void> rejectConnection(String peerId) async {
+  Future<void> rejectConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {
     rejectedConnections.add(peerId);
   }
 
@@ -274,6 +358,7 @@ class MockNearbyTransport implements NearbyTransport {
   Future<void> requestConnection(
     String peerId, {
     String? identityFingerprint,
+    String? connectionTraceId,
   }) async {
     connectionRequestCount++;
     final peer = peers[peerId];
@@ -451,6 +536,7 @@ class MockNearbyTransport implements NearbyTransport {
       _peers.close(),
       _payloads.close(),
       _connections.close(),
+      _nativeDiagnostics.close(),
       _files.close(),
       _transfers.close(),
     ]);

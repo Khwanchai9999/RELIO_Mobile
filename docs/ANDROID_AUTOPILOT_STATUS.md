@@ -7,7 +7,7 @@
 - Previous Firebase App Distribution release: `0.8.5+11`
 - Latest public QA release: `0.9.0+28`
 - Build 24 checkpoint: `0.9.0+24` / versionCode 24 (not published or installed)
-- Current candidate: `0.9.0+30` / versionCode 30 (unpublished, not installed)
+- Current candidate: `0.9.0+31` / versionCode 31 (unpublished, not installed)
 - Build 23 Nearby fix: published and remotely verified; physical retest pending
 - Previous public QA release: `0.8.6+21`
 - Current public release tag: `qa-v0.9.0-b27`
@@ -98,6 +98,30 @@
   stable connected state, and session stop preserving an active connection.
   Build 30 remains unpublished until all gates pass; no phones are modified or
   claimed tested.
+
+## Build 31 — native Nearby resolution and negotiation ownership candidate
+
+- Physical Build 30 evidence from Huawei/API 29 and realme/API 35 shows
+  discovery, incoming request, and consent succeeded, but Google Nearby did not
+  complete transport; identity verification was never reached. Permissions and
+  readiness are not presumed to be the cause.
+- Audited `nearby_connections` 4.3.0 and its Android bridge: Google
+  `ConnectionResolution` status was collapsed to legacy 0/1/2 values before
+  Dart could retain the actual status code/message. Build 31 uses a minimal
+  repository-local plugin source subset with additive raw-status and trace
+  events; Google Nearby remains 19.2.0 and strategy remains P2P_CLUSTER for
+  both advertising and discovery.
+- Diagnostics include raw resolution status, operation/role, elapsed time,
+  Android API, installed Google Play Services version, dependency version,
+  strategy, and safe endpoint alias. Detailed diagnostics remain DEV/QA only.
+- Active negotiations own lifecycle state through a bounded grace period using
+  the existing 35-second timeout. Session stop/restart and readiness
+  reconciliation defer while an attempt is active; no background service or
+  aggressive retries are added.
+- Automated lifecycle, readiness-refresh, raw-status propagation, and the
+  existing first-contact/trust regressions are covered. Build 31 is not yet
+  published or installed; Huawei ↔ realme physical verification is still
+  required and is not claimed.
 
 ## Firebase identity
 

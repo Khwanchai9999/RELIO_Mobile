@@ -607,6 +607,8 @@ class _LoopbackTransport implements NearbyTransport {
   final _peers = StreamController<NearbyPeer>.broadcast();
   final _payloads = StreamController<NearbyPayloadEvent>.broadcast();
   final _connections = StreamController<NearbyConnectionEvent>.broadcast();
+  final _nativeDiagnostics =
+      StreamController<NearbyNativeDiagnostic>.broadcast();
   final _files = StreamController<NearbyFilePayloadEvent>.broadcast();
   final _transfers = StreamController<NearbyTransferEvent>.broadcast();
   final List<String> sentPackets = [];
@@ -643,6 +645,11 @@ class _LoopbackTransport implements NearbyTransport {
   Stream<NearbyTransferEvent> get transferEvents => _transfers.stream;
   @override
   Stream<NearbyConnectionEvent> get connectionEvents => _connections.stream;
+  @override
+  Stream<NearbyNativeDiagnostic> get nativeDiagnostics =>
+      _nativeDiagnostics.stream;
+  @override
+  Future<Map<String, Object?>> diagnosticSnapshot() async => const {};
 
   void discoverPeer() => _peers.add(_knownPeers[localEndpointId]!);
 
@@ -710,6 +717,7 @@ class _LoopbackTransport implements NearbyTransport {
   Future<void> requestConnection(
     String peerId, {
     String? identityFingerprint,
+    String? connectionTraceId,
   }) async {
     _connections.add(
       NearbyConnectionEvent(
@@ -734,14 +742,20 @@ class _LoopbackTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> acceptConnection(String peerId) async {
+  Future<void> acceptConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {
     acceptCalls.add(peerId);
     acceptedConnections.add(peerId);
     _connectedBoth();
   }
 
   @override
-  Future<void> rejectConnection(String peerId) async {}
+  Future<void> rejectConnection(
+    String peerId, {
+    String? connectionTraceId,
+  }) async {}
 
   @override
   Future<void> disconnect(String peerId) async {
@@ -788,6 +802,7 @@ class _LoopbackTransport implements NearbyTransport {
       _peers.close(),
       _payloads.close(),
       _connections.close(),
+      _nativeDiagnostics.close(),
       _files.close(),
       _transfers.close(),
     ]);

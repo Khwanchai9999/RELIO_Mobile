@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/environment.dart';
 import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
 import '../diagnostics/diagnostics_log_service.dart';
@@ -230,6 +231,25 @@ class NearbyService extends ChangeNotifier {
   int protocolErrorCount = 0;
   int transportErrorCount = 0;
   String? activeConversationId;
+  final Map<String, Object?> nativeTransportSnapshot = {};
+  NearbyConnectionEvent? lastNativeConnectionFailure;
+  bool _sessionRestartDeferred = false;
+
+  int get activeConnectionAttempts => peerStates.entries
+      .where(
+        (entry) =>
+            entry.value == NearbyConnectionState.connecting ||
+            entry.value == NearbyConnectionState.incomingRequest,
+      )
+      .map((entry) => entry.key)
+      .toSet()
+      .union(pendingConnectionRequests.keys.toSet())
+      .union(_provisionalConnectionEndpoints)
+      .length;
+
+  bool get hasActiveConnectionAttempts => activeConnectionAttempts > 0;
+
+  bool get sessionRestartDeferred => _sessionRestartDeferred;
 
   void setActiveConversation(String? conversationId) {
     activeConversationId = conversationId;
@@ -294,12 +314,71 @@ class NearbyService extends ChangeNotifier {
     _subscriptions.add(transport.incomingFilePayloads.listen(_onFilePayload));
     _subscriptions.add(transport.transferEvents.listen(_onTransfer));
     _subscriptions.add(transport.connectionEvents.listen(_onConnection));
+    _subscriptions.add(transport.nativeDiagnostics.listen(_onNativeDiagnostic));
     _log('transport initialize name=${transport.implementationName}');
+    unawaited(_captureTransportSnapshot());
     notifyListeners();
+  }
+
+  Future<void> _captureTransportSnapshot() async {
+    if (!RelioBuildInfo.developerDiagnosticsEnabled) return;
+    try {
+      final snapshot = await transport.diagnosticSnapshot();
+      nativeTransportSnapshot
+        ..clear()
+        ..addAll(snapshot);
+      diagnostics?.record(
+        'nearby',
+        'nearby_strategy_snapshot',
+        fields: snapshot,
+      );
+      diagnostics?.record(
+        'nearby',
+        'google_play_services_snapshot',
+        fields: {
+          'googlePlayServicesAvailable':
+              snapshot['googlePlayServicesAvailable'],
+          'googlePlayServicesVersionName':
+              snapshot['googlePlayServicesVersionName'],
+          'googlePlayServicesVersionCode':
+              snapshot['googlePlayServicesVersionCode'],
+          'androidApi': snapshot['androidApi'],
+        },
+      );
+      notifyListeners();
+    } on Object catch (error) {
+      diagnostics?.record(
+        'nearby',
+        'nearby_strategy_snapshot_unavailable',
+        severity: 'warning',
+        fields: {'exceptionClass': error.runtimeType.toString()},
+      );
+    }
+  }
+
+  void _onNativeDiagnostic(NearbyNativeDiagnostic event) {
+    if (!RelioBuildInfo.developerDiagnosticsEnabled) return;
+    final fields = Map<String, Object?>.from(event.fields);
+    diagnostics?.record(
+      'native_nearby',
+      event.name,
+      connectionTraceId: fields['connectionTraceId'] as String?,
+      operation: fields['operation'] as String?,
+      nativeCode: fields['rawStatusCode'],
+      nativeMessage: fields['rawStatusMessage'] as String?,
+      fields: fields,
+    );
   }
 
   Future<void> startAdvertising() async {
     if (isAdvertising) return;
+    if (hasActiveConnectionAttempts) {
+      _sessionRestartDeferred = true;
+      _recordDeferredSessionOperation(
+        'session_restart_deferred_active_connection',
+      );
+      return;
+    }
     try {
       _log('advertising start');
       final localIdentity = await identityCrypto.getPublicIdentity();
@@ -339,6 +418,13 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> startSession() {
     if (_closed || (isAdvertising && isDiscovering)) return Future.value();
+    if (hasActiveConnectionAttempts) {
+      _sessionRestartDeferred = true;
+      _recordDeferredSessionOperation(
+        'session_restart_deferred_active_connection',
+      );
+      return Future.value();
+    }
     final current = _startSessionOperation;
     if (current != null) return current;
     final operation = _startSession();
@@ -376,6 +462,22 @@ class NearbyService extends ChangeNotifier {
   }) async {
     if (_closed) return;
     _recordSessionStop(caller: caller, reason: reason);
+    if (hasActiveConnectionAttempts) {
+      _sessionRestartDeferred = true;
+      diagnostics?.record(
+        'lifecycle',
+        'session_stop_deferred_active_connection',
+        operation: 'stopNearbySession',
+        reason: reason,
+        fields: {
+          'caller': caller,
+          'activeConnectionAttempts': activeConnectionAttempts,
+          'appLifecycleState': appLifecycleState,
+          'screenRoute': screenRoute,
+        },
+      );
+      return;
+    }
     if (!isDiscovering && !isAdvertising) return;
     _transition = NearbyApplicationState.stopping;
     notifyListeners();
@@ -383,6 +485,19 @@ class NearbyService extends ChangeNotifier {
     await stopAdvertising();
     _transition = null;
     notifyListeners();
+  }
+
+  void _recordDeferredSessionOperation(String event) {
+    diagnostics?.record(
+      'lifecycle',
+      event,
+      operation: 'startNearbySession',
+      fields: {
+        'activeConnectionAttempts': activeConnectionAttempts,
+        'appLifecycleState': appLifecycleState,
+        'screenRoute': screenRoute,
+      },
+    );
   }
 
   void _recordSessionStop({required String caller, required String reason}) {
@@ -417,6 +532,13 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> startDiscovery() async {
     if (isDiscovering) return;
+    if (hasActiveConnectionAttempts) {
+      _sessionRestartDeferred = true;
+      _recordDeferredSessionOperation(
+        'session_restart_deferred_active_connection',
+      );
+      return;
+    }
     try {
       _log('discovery start');
       await transport.startDiscovery();
@@ -452,6 +574,13 @@ class NearbyService extends ChangeNotifier {
     final status = error.apiStatusCode ?? int.tryParse(error.code);
     final name = error.apiStatusName ?? error.code;
     if (status != 8009 && !name.contains('OUT_OF_ORDER')) return;
+    if (hasActiveConnectionAttempts) {
+      _sessionRestartDeferred = true;
+      _recordDeferredSessionOperation(
+        'session_restart_deferred_active_connection',
+      );
+      return;
+    }
     try {
       await transport.resetSessionOperations();
       isAdvertising = false;
@@ -538,6 +667,33 @@ class NearbyService extends ChangeNotifier {
       );
       return;
     }
+    final candidateFingerprint = discoveredPeers
+        .where((peer) => peer.endpointId == peerId)
+        .firstOrNull
+        ?.identityFingerprintHint;
+    final reservedEndpoint = candidateFingerprint == null
+        ? null
+        : _fingerprintEndpointReservations[candidateFingerprint];
+    if (reservedEndpoint != null &&
+        reservedEndpoint != peerId &&
+        (peerStates[reservedEndpoint] == NearbyConnectionState.connecting ||
+            peerStates[reservedEndpoint] ==
+                NearbyConnectionState.incomingRequest ||
+            peerStates[reservedEndpoint] == NearbyConnectionState.connected)) {
+      diagnostics?.record(
+        'connection',
+        'connection_attempt_suppressed_single_flight',
+        peerIdentifier: peerId,
+        reason: 'same_stable_peer_already_active',
+        fields: {
+          'reservedPeerAlias': DiagnosticsLogService.peerAlias(
+            reservedEndpoint,
+          ),
+          'initiator': userInitiated ? 'manual' : 'automatic',
+        },
+      );
+      return;
+    }
     final previousState = currentState?.name ?? 'discovered';
     final traceId = const Uuid().v4();
     _connectionTraces[peerId] = traceId;
@@ -562,11 +718,16 @@ class NearbyService extends ChangeNotifier {
         'missingPermissionCount': readiness?.missingPermissions.length,
       },
     );
+    diagnostics?.record(
+      'connection',
+      'connection_negotiation_started',
+      connectionTraceId: traceId,
+      operation: 'requestConnection',
+      stateFrom: previousState,
+      stateTo: 'connecting',
+      peerIdentifier: peerId,
+    );
     peerStates[peerId] = NearbyConnectionState.connecting;
-    final candidateFingerprint = discoveredPeers
-        .where((peer) => peer.endpointId == peerId)
-        .firstOrNull
-        ?.identityFingerprintHint;
     if (candidateFingerprint != null) {
       _fingerprintEndpointReservations[candidateFingerprint] = peerId;
     }
@@ -593,6 +754,7 @@ class NearbyService extends ChangeNotifier {
       await transport.requestConnection(
         peerId,
         identityFingerprint: localIdentity.fingerprint,
+        connectionTraceId: traceId,
       );
       diagnostics?.record(
         'connection',
@@ -677,6 +839,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _expireConnectionAttempt(String endpointId) async {
+    final traceId = _connectionTraces[endpointId];
     final operation = _approvedConnectionEndpoints.contains(endpointId)
         ? 'acceptConnection'
         : 'requestConnection';
@@ -695,13 +858,70 @@ class NearbyService extends ChangeNotifier {
       'connection',
       'connection_timeout',
       severity: 'error',
-      connectionTraceId: _connectionTraces[endpointId],
+      connectionTraceId: traceId,
       operation: operation,
       stateFrom: 'connecting',
       stateTo: 'failed',
       peerIdentifier: endpointId,
-      reason: 'native_result_timeout',
+      reason: 'RELIO_APPLICATION_TIMEOUT',
+      fields: {
+        'failureSource': 'RELIO_APPLICATION_TIMEOUT',
+        'timeoutMs': connectionAttemptTimeout.inMilliseconds,
+        'appLifecycleState': appLifecycleState,
+      },
     );
+    diagnostics?.record(
+      'connection',
+      'connection_negotiation_timeout',
+      severity: 'error',
+      connectionTraceId: traceId,
+      operation: operation,
+      peerIdentifier: endpointId,
+      reason: 'RELIO_APPLICATION_TIMEOUT',
+      fields: {'timeoutMs': connectionAttemptTimeout.inMilliseconds},
+    );
+    notifyListeners();
+  }
+
+  void expireActiveConnectionAttemptsForBackground() {
+    final endpoints = peerStates.entries
+        .where(
+          (entry) =>
+              entry.value == NearbyConnectionState.connecting ||
+              entry.value == NearbyConnectionState.incomingRequest,
+        )
+        .map((entry) => entry.key)
+        .toSet()
+        .union(pendingConnectionRequests.keys.toSet())
+        .union(_provisionalConnectionEndpoints);
+    for (final endpointId in endpoints) {
+      final traceId = _connectionTraces[endpointId];
+      final hadIncomingPrompt =
+          pendingConnectionRequests.remove(endpointId) != null;
+      _connectionTimeouts.remove(endpointId)?.cancel();
+      _approvedConnectionEndpoints.remove(endpointId);
+      _provisionalConnectionEndpoints.remove(endpointId);
+      _provisionalIncomingRequests.remove(endpointId);
+      peerStates[endpointId] = NearbyConnectionState.failed;
+      peerErrors[endpointId] = 'app_background_stop';
+      diagnostics?.record(
+        'connection',
+        'connection_negotiation_failed',
+        severity: 'warning',
+        connectionTraceId: traceId,
+        operation: hadIncomingPrompt ? 'rejectConnection' : 'disconnect',
+        stateFrom: 'negotiating',
+        stateTo: 'failed',
+        peerIdentifier: endpointId,
+        reason: 'APP_BACKGROUND_STOP',
+        fields: {'appLifecycleState': appLifecycleState},
+      );
+      if (hadIncomingPrompt) {
+        unawaited(_rejectEndpoint(endpointId));
+      } else {
+        unawaited(transport.disconnect(endpointId).catchError((Object _) {}));
+      }
+    }
     notifyListeners();
   }
 
@@ -755,7 +975,10 @@ class NearbyService extends ChangeNotifier {
     });
     notifyListeners();
     try {
-      await transport.acceptConnection(endpointId);
+      await transport.acceptConnection(
+        endpointId,
+        connectionTraceId: _connectionTraces[endpointId],
+      );
       diagnostics?.record(
         'connection',
         'accept_connection_returned',
@@ -806,7 +1029,10 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
     if (wasIdentityApproval) return;
     try {
-      await transport.rejectConnection(endpointId);
+      await transport.rejectConnection(
+        endpointId,
+        connectionTraceId: _connectionTraces[endpointId],
+      );
       diagnostics?.record(
         'connection',
         'reject_connection_returned',
@@ -1199,6 +1425,33 @@ class NearbyService extends ChangeNotifier {
 
   void _onPeer(NearbyPeer peer) {
     if (peer.isLost) {
+      if (peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
+          peerStates[peer.endpointId] ==
+              NearbyConnectionState.incomingRequest) {
+        diagnostics?.record(
+          'connection',
+          'endpoint_lost_during_negotiation',
+          severity: 'warning',
+          connectionTraceId: _connectionTraces[peer.endpointId],
+          operation: 'onEndpointLost',
+          peerIdentifier: peer.endpointId,
+          fields: {
+            'appLifecycleState': appLifecycleState,
+            'screenRoute': screenRoute,
+          },
+        );
+        diagnostics?.record(
+          'connection',
+          'connection_negotiation_failed',
+          severity: 'warning',
+          connectionTraceId: _connectionTraces[peer.endpointId],
+          operation: 'onEndpointLost',
+          stateFrom: peerStates[peer.endpointId]?.name,
+          stateTo: 'disconnected',
+          peerIdentifier: peer.endpointId,
+          nativeCode: 'ENDPOINT_LOST',
+        );
+      }
       if (peerStates[peer.endpointId] != NearbyConnectionState.connected) {
         _identityHandshakeTimeouts.remove(peer.endpointId)?.cancel();
         _connectionTimeouts.remove(peer.endpointId)?.cancel();
@@ -1356,6 +1609,14 @@ class NearbyService extends ChangeNotifier {
       (count) => (count + 1).clamp(1, 5).toInt(),
       ifAbsent: () => 1,
     );
+    diagnostics?.record(
+      'trust',
+      'retry_started',
+      connectionTraceId: _connectionTraces[peer.endpointId],
+      operation: 'autoReconnect',
+      peerIdentifier: peer.endpointId,
+      fields: {'attempt': attempts},
+    );
     _nextReconnectAt[hint] = DateTime.now().toUtc().add(
       Duration(seconds: 1 << attempts),
     );
@@ -1367,9 +1628,25 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _scheduleReconnect(NearbyPeer peer, String fingerprint, int attempts) {
-    if (attempts >= 5 || _closed) return;
+    if (attempts >= 5 || _closed) {
+      diagnostics?.record(
+        'trust',
+        'retry_exhausted',
+        operation: 'autoReconnect',
+        peerIdentifier: peer.endpointId,
+        fields: {'attempt': attempts, 'closed': _closed},
+      );
+      return;
+    }
     _reconnectTimers.remove(fingerprint)?.cancel();
     final delay = Duration(seconds: 1 << attempts);
+    diagnostics?.record(
+      'trust',
+      'retry_scheduled',
+      operation: 'autoReconnect',
+      peerIdentifier: peer.endpointId,
+      fields: {'attempt': attempts + 1, 'delayMs': delay.inMilliseconds},
+    );
     _reconnectTimers[fingerprint] = Timer(delay, () {
       _reconnectTimers.remove(fingerprint);
       _nextReconnectAt.remove(fingerprint);
@@ -1379,6 +1656,9 @@ class NearbyService extends ChangeNotifier {
 
   void _onConnection(NearbyConnectionEvent event) {
     final endpointId = event.peer.endpointId;
+    if (event.connectionTraceId != null) {
+      _connectionTraces.putIfAbsent(endpointId, () => event.connectionTraceId!);
+    }
     if (event.state == NearbyConnectionState.incomingRequest) {
       final traceId = _connectionTraces.putIfAbsent(
         endpointId,
@@ -1399,6 +1679,15 @@ class NearbyService extends ChangeNotifier {
           'authenticationCodeAvailable': event.authenticationToken != null,
           'isIncomingConnection': event.isIncomingRequest,
         },
+      );
+      diagnostics?.record(
+        'connection',
+        'connection_negotiation_started',
+        connectionTraceId: traceId,
+        operation: 'acceptConnection',
+        stateFrom: 'discovered',
+        stateTo: 'incomingRequest',
+        peerIdentifier: endpointId,
       );
       final existingPeer = discoveredPeers
           .where((peer) => peer.endpointId == endpointId)
@@ -1443,7 +1732,7 @@ class NearbyService extends ChangeNotifier {
             traceId: traceId,
           );
           if (event.isIncomingRequest) {
-            unawaited(transport.rejectConnection(endpointId));
+            unawaited(_rejectEndpoint(endpointId));
           }
           peerStates[endpointId] = NearbyConnectionState.disconnected;
           return;
@@ -1467,7 +1756,7 @@ class NearbyService extends ChangeNotifier {
           traceId: traceId,
         );
         if (event.isIncomingRequest) {
-          unawaited(transport.rejectConnection(endpointId));
+          unawaited(_rejectEndpoint(endpointId));
         }
         return;
       }
@@ -1480,7 +1769,7 @@ class NearbyService extends ChangeNotifier {
           traceId: traceId,
         );
         if (event.isIncomingRequest) {
-          unawaited(transport.rejectConnection(endpointId));
+          unawaited(_rejectEndpoint(endpointId));
         }
         return;
       }
@@ -1495,7 +1784,7 @@ class NearbyService extends ChangeNotifier {
           traceId: traceId,
         );
         if (event.isIncomingRequest) {
-          unawaited(transport.rejectConnection(endpointId));
+          unawaited(_rejectEndpoint(endpointId));
         }
         return;
       }
@@ -1554,19 +1843,63 @@ class NearbyService extends ChangeNotifier {
       );
     }
     peerStates[endpointId] = event.state;
+    if (event.state == NearbyConnectionState.failed &&
+        RelioBuildInfo.developerDiagnosticsEnabled) {
+      lastNativeConnectionFailure = event;
+      lastDiagnostic = event.rawStatusName ?? event.error;
+    }
     diagnostics?.record(
       'connection',
-      'native_connection_result',
-      connectionTraceId: _connectionTraces[endpointId],
-      operation: 'onConnectionResult',
+      event.state == NearbyConnectionState.failed
+          ? 'native_connection_resolution_failed'
+          : 'native_connection_result',
+      connectionTraceId:
+          event.connectionTraceId ?? _connectionTraces[endpointId],
+      operation: event.operation ?? 'onConnectionResult',
       stateFrom: event.state == NearbyConnectionState.connected
           ? 'connecting'
           : 'connecting',
       stateTo: event.state.name,
       peerIdentifier: endpointId,
-      nativeCode: event.error == null ? 'success' : _errorCode(event.error!),
-      nativeMessage: event.error,
+      nativeCode:
+          (RelioBuildInfo.developerDiagnosticsEnabled
+              ? event.rawStatusCode
+              : null) ??
+          (event.error == null ? 'success' : _errorCode(event.error!)),
+      nativeMessage:
+          (RelioBuildInfo.developerDiagnosticsEnabled
+              ? event.rawStatusMessage
+              : null) ??
+          event.error,
       fields: {
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.rawStatusCode != null)
+          'rawStatusCode': event.rawStatusCode,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.rawStatusName != null)
+          'rawStatusName': event.rawStatusName,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.rawStatusMessage != null)
+          'rawStatusMessage': event.rawStatusMessage,
+        if (event.role != null) 'role': event.role,
+        if (event.strategy != null) 'strategy': event.strategy,
+        if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.androidApi != null)
+          'androidApi': event.androidApi,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.googlePlayServicesVersionName != null)
+          'googlePlayServicesVersionName': event.googlePlayServicesVersionName,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.googlePlayServicesVersionCode != null)
+          'googlePlayServicesVersionCode': event.googlePlayServicesVersionCode,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.nearbyLibraryVersion != null)
+          'nearbyLibraryVersion': event.nearbyLibraryVersion,
+        if (RelioBuildInfo.developerDiagnosticsEnabled &&
+            event.playServicesNearbyDependencyVersion != null)
+          'playServicesNearbyDependencyVersion':
+              event.playServicesNearbyDependencyVersion,
         if (_connectionStartedAt[endpointId] case final start?)
           'durationMs': DateTime.now().toUtc().difference(start).inMilliseconds,
       },
@@ -1576,6 +1909,34 @@ class NearbyService extends ChangeNotifier {
         event.state == NearbyConnectionState.disconnected) {
       _connectionTimeouts.remove(endpointId)?.cancel();
       _connectionStartedAt.remove(endpointId);
+    }
+    if (event.state == NearbyConnectionState.connected ||
+        event.state == NearbyConnectionState.failed) {
+      diagnostics?.record(
+        'connection',
+        event.state == NearbyConnectionState.connected
+            ? 'connection_negotiation_completed'
+            : 'connection_negotiation_failed',
+        severity: event.state == NearbyConnectionState.failed
+            ? 'warning'
+            : 'info',
+        connectionTraceId:
+            event.connectionTraceId ?? _connectionTraces[endpointId],
+        operation: event.operation ?? 'onConnectionResult',
+        stateFrom: 'negotiating',
+        stateTo: event.state.name,
+        peerIdentifier: endpointId,
+        nativeCode: event.rawStatusCode ?? event.error,
+        nativeMessage: event.rawStatusMessage ?? event.error,
+        reason: event.state == NearbyConnectionState.failed
+            ? 'GOOGLE_NEARBY_NATIVE_FAILURE'
+            : null,
+        fields: {
+          if (event.role != null) 'role': event.role,
+          if (event.strategy != null) 'strategy': event.strategy,
+          if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
+        },
+      );
     }
     if (event.state == NearbyConnectionState.connected) {
       pendingConnectionRequests.remove(endpointId);
@@ -1651,6 +2012,7 @@ class NearbyService extends ChangeNotifier {
       _connectionTraces.remove(endpointId);
       _connectionStartedAt.remove(endpointId);
     }
+    if (!hasActiveConnectionAttempts) _sessionRestartDeferred = false;
     notifyListeners();
   }
 
@@ -1717,7 +2079,10 @@ class NearbyService extends ChangeNotifier {
     );
     notifyListeners();
     try {
-      await transport.acceptConnection(endpointId);
+      await transport.acceptConnection(
+        endpointId,
+        connectionTraceId: _connectionTraces[endpointId],
+      );
     } on Object catch (error) {
       _provisionalConnectionEndpoints.remove(endpointId);
       _provisionalIncomingRequests.remove(endpointId);
@@ -1827,12 +2192,20 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _rejectEndpoint(String endpointId) => transport.rejectConnection(
+    endpointId,
+    connectionTraceId: _connectionTraces[endpointId],
+  );
+
   Future<void> _expireIncomingRequest(String endpointId) async {
     final event = pendingConnectionRequests.remove(endpointId);
     _connectionTimeouts.remove(endpointId)?.cancel();
     if (event == null || _closed) return;
     try {
-      await transport.rejectConnection(endpointId);
+      await transport.rejectConnection(
+        endpointId,
+        connectionTraceId: _connectionTraces[endpointId],
+      );
     } on Object {
       // Best-effort native cleanup; a stale request must not retain local state.
     }
@@ -1876,7 +2249,7 @@ class NearbyService extends ChangeNotifier {
     final device = matches.single;
     if (device.isBlocked) {
       peerStates[endpointId] = NearbyConnectionState.disconnected;
-      await transport.rejectConnection(endpointId);
+      await _rejectEndpoint(endpointId);
       return;
     }
     final activeEndpoint = deviceToEndpointId[device.deviceId];
@@ -1892,7 +2265,7 @@ class NearbyService extends ChangeNotifier {
         traceId: _connectionTraces[endpointId]!,
       );
       try {
-        await transport.rejectConnection(endpointId);
+        await _rejectEndpoint(endpointId);
       } on Object {
         // Duplicate endpoint cleanup must not disturb the active peer session.
       }

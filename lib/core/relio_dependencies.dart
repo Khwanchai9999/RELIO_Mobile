@@ -38,6 +38,7 @@ class RelioDependencies {
     ConnectivityStatusService? connectivityStatusService,
     PermissionService? permissionService,
     bool? androidPlatformOverride,
+    Duration connectionAttemptTimeout = const Duration(seconds: 35),
   }) : database = database ?? AppDatabase(),
        _isAndroid = androidPlatformOverride ?? Platform.isAndroid,
        useMockTransport = useMockTransport ?? _defaultMockTransport,
@@ -100,6 +101,7 @@ class RelioDependencies {
       localNotifications: localNotificationService,
       relayEngine: relayEngine,
       diagnostics: diagnostics,
+      connectionAttemptTimeout: connectionAttemptTimeout,
     );
     syncEngine = SyncEngine(
       repositories: repositories,
@@ -137,9 +139,13 @@ class RelioDependencies {
   Future<bool>? _nearbySyncOperation;
   bool _nearbyForeground = true;
   bool _nearbyRestart = false;
+  bool _nearbySessionSyncDeferred = false;
+  bool _backgroundStopDeferred = false;
+  bool _nearbyServiceListenerAttached = false;
   bool _disposed = false;
   Timer? _nearbyHealthCheck;
   Timer? _nearbyRetryTimer;
+  Timer? _backgroundNegotiationGraceTimer;
   final NearbyRetryBackoff _nearbyRetryBackoff = NearbyRetryBackoff();
   String? _lastNearbyReadinessSignature;
 
@@ -202,6 +208,51 @@ class RelioDependencies {
     final changed = _nearbyForeground != foreground;
     if (changed && foreground) _nearbyRestart = true;
     _nearbyForeground = foreground;
+    if (changed && nearbyService.hasActiveConnectionAttempts) {
+      diagnostics.record(
+        'lifecycle',
+        'app_lifecycle_changed_during_negotiation',
+        operation: 'setNearbyForeground',
+        fields: {
+          'foreground': foreground,
+          'activeConnectionAttempts': nearbyService.activeConnectionAttempts,
+          'appLifecycleState': nearbyService.appLifecycleState,
+        },
+      );
+    }
+    if (changed && !foreground && nearbyService.hasActiveConnectionAttempts) {
+      _backgroundStopDeferred = true;
+      _backgroundNegotiationGraceTimer?.cancel();
+      diagnostics.record(
+        'lifecycle',
+        'session_stop_deferred_active_connection',
+        operation: 'setNearbyForeground',
+        fields: {
+          'activeConnectionAttempts': nearbyService.activeConnectionAttempts,
+          'graceMs': nearbyService.connectionAttemptTimeout.inMilliseconds,
+          'appLifecycleState': nearbyService.appLifecycleState,
+          'screenRoute': nearbyService.screenRoute,
+        },
+      );
+      _backgroundNegotiationGraceTimer = Timer(
+        nearbyService.connectionAttemptTimeout +
+            const Duration(milliseconds: 250),
+        () {
+          if (_disposed || _nearbyForeground) return;
+          if (nearbyService.hasActiveConnectionAttempts) {
+            nearbyService.expireActiveConnectionAttemptsForBackground();
+          } else {
+            _onNearbyServiceChanged();
+          }
+        },
+      );
+      return Future.value(true);
+    }
+    if (changed && foreground) {
+      _backgroundNegotiationGraceTimer?.cancel();
+      _backgroundNegotiationGraceTimer = null;
+      _backgroundStopDeferred = false;
+    }
     final active = _nearbySyncOperation;
     if (active != null && changed) {
       return active.then((_) => startNearbySessionIfPermitted());
@@ -219,7 +270,56 @@ class RelioDependencies {
     nearbyService.updateDeviceModel(runtime.deviceModel);
     nearbyService.updateReadiness(readiness);
     final ready = useMockTransport || readiness.ready;
+    if (nearbyService.hasActiveConnectionAttempts) {
+      final mustDefer =
+          !ready ||
+          !_nearbyForeground ||
+          !nearbyService.isAdvertising ||
+          !nearbyService.isDiscovering ||
+          (_nearbyRestart && !(_nearbyForeground && ready));
+      if (mustDefer) {
+        if (!_nearbySessionSyncDeferred) {
+          diagnostics.record(
+            !ready || !_nearbyForeground ? 'lifecycle' : 'nearby',
+            !ready || !_nearbyForeground
+                ? 'session_stop_deferred_active_connection'
+                : 'session_restart_deferred_active_connection',
+            operation: 'RelioDependencies._syncNearbySession',
+            fields: {
+              'activeConnectionAttempts':
+                  nearbyService.activeConnectionAttempts,
+              'ready': ready,
+              'foreground': _nearbyForeground,
+              'advertisingActive': nearbyService.isAdvertising,
+              'discoveryActive': nearbyService.isDiscovering,
+              'appLifecycleState': nearbyService.appLifecycleState,
+            },
+          );
+        }
+        _nearbySessionSyncDeferred = true;
+        return nearbyService.isAdvertising && nearbyService.isDiscovering;
+      }
+      if (_nearbyRestart &&
+          _nearbyForeground &&
+          ready &&
+          nearbyService.isAdvertising &&
+          nearbyService.isDiscovering) {
+        _nearbyRestart = false;
+      }
+    }
+    _nearbySessionSyncDeferred = false;
     if (!ready || !_nearbyForeground) {
+      if (_nearbyRetryTimer?.isActive == true) {
+        diagnostics.record(
+          'nearby',
+          'retry_cancelled',
+          operation: 'sessionStart',
+          fields: {
+            'reason': !ready ? 'readiness_unavailable' : 'app_backgrounded',
+            'attempt': _nearbyRetryBackoff.attempt,
+          },
+        );
+      }
       _nearbyRetryTimer?.cancel();
       _nearbyRetryTimer = null;
       _nearbyRetryBackoff.reset();
@@ -230,6 +330,17 @@ class RelioDependencies {
       return false;
     }
     if (readinessChanged && readiness.ready) {
+      if (_nearbyRetryTimer?.isActive == true) {
+        diagnostics.record(
+          'nearby',
+          'retry_cancelled',
+          operation: 'sessionStart',
+          fields: {
+            'reason': 'readiness_changed',
+            'attempt': _nearbyRetryBackoff.attempt,
+          },
+        );
+      }
       _nearbyRetryTimer?.cancel();
       _nearbyRetryTimer = null;
       _nearbyRetryBackoff.reset();
@@ -262,9 +373,24 @@ class RelioDependencies {
     } else {
       final delay = _nearbyRetryBackoff.registerFailure();
       nearbyService.logRetryScheduled(_nearbyRetryBackoff.attempt, delay);
+      diagnostics.record(
+        'nearby',
+        'retry_scheduled',
+        operation: 'sessionStart',
+        fields: {
+          'attempt': _nearbyRetryBackoff.attempt + 1,
+          'delayMs': delay.inMilliseconds,
+        },
+      );
       _nearbyRetryTimer?.cancel();
       _nearbyRetryTimer = Timer(delay, () {
         if (!_disposed && _nearbyForeground) {
+          diagnostics.record(
+            'nearby',
+            'retry_started',
+            operation: 'sessionStart',
+            fields: {'attempt': _nearbyRetryBackoff.attempt + 1},
+          );
           unawaited(startNearbySessionIfPermitted(force: true));
         }
       });
@@ -300,6 +426,8 @@ class RelioDependencies {
     await identity.getDisplayName();
     await repositories.seedPrototypeData();
     await nearbyService.initialize();
+    nearbyService.addListener(_onNearbyServiceChanged);
+    _nearbyServiceListenerAttached = true;
     if (_isAndroid && !useMockTransport) {
       await startNearbySessionIfPermitted();
       // ตรวจซ้ำเฉพาะ foreground เพื่อจับสิทธิ์/GMS ที่ไม่ส่ง radio broadcast
@@ -325,10 +453,25 @@ class RelioDependencies {
     unawaited(appUpdateService.checkForUpdate());
   }
 
+  void _onNearbyServiceChanged() {
+    if (_disposed || nearbyService.hasActiveConnectionAttempts) return;
+    if (_backgroundStopDeferred || _nearbySessionSyncDeferred) {
+      _backgroundNegotiationGraceTimer?.cancel();
+      _backgroundNegotiationGraceTimer = null;
+      _backgroundStopDeferred = false;
+      _nearbySessionSyncDeferred = false;
+      unawaited(startNearbySessionIfPermitted(force: true));
+    }
+  }
+
   Future<void> dispose() async {
     _disposed = true;
     _nearbyHealthCheck?.cancel();
     _nearbyRetryTimer?.cancel();
+    _backgroundNegotiationGraceTimer?.cancel();
+    if (_nearbyServiceListenerAttached) {
+      nearbyService.removeListener(_onNearbyServiceChanged);
+    }
     await _readinessSubscription?.cancel();
     await _nearbySyncOperation;
     await connectivityStatus.dispose();
