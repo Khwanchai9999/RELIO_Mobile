@@ -30,12 +30,21 @@ class AndroidNearbyTransport implements NearbyTransport {
   final Set<String> _pendingConnectionRequests = {};
   final Map<String, String> _peerNames = {};
   final Map<String, String> _peerFingerprintHints = {};
+  final Map<String, NearbyPeer> _discoveredEndpoints = {};
   bool _advertising = false;
   bool _discovering = false;
   bool _disposed = false;
+  int _discoveryEpoch = 0;
+  NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
 
   @override
-  String get strategyName => relioNearbyStrategyName;
+  String get strategyName => _testMode.strategyName;
+
+  @override
+  NearbyTransportTestMode get testMode => _testMode;
+
+  @override
+  int get discoveryEpoch => _discoveryEpoch;
 
   @override
   String get implementationName =>
@@ -63,7 +72,22 @@ class AndroidNearbyTransport implements NearbyTransport {
   @override
   Future<Map<String, Object?>> diagnosticSnapshot() async {
     final snapshot = await _nearby.getNativeDiagnostics();
-    return snapshot?.map((key, value) => MapEntry('$key', value)) ?? const {};
+    return {
+      ...?snapshot?.map((key, value) => MapEntry('$key', value)),
+      'transportTestMode': _testMode.diagnosticName,
+      'discoveryEpoch': _discoveryEpoch,
+      'discoveryActive': _discovering,
+      'advertisingActive': _advertising,
+      'strategy': strategyName,
+    };
+  }
+
+  @override
+  Future<void> configureTestMode(NearbyTransportTestMode mode) async {
+    if (_advertising || _discovering) {
+      throw StateError('Stop the Nearby session before changing test mode.');
+    }
+    _testMode = mode;
   }
 
   @override
@@ -76,7 +100,7 @@ class AndroidNearbyTransport implements NearbyTransport {
     try {
       final started = await _nearby.startAdvertising(
         endpointName,
-        Strategy.P2P_CLUSTER,
+        _strategy,
         serviceId: serviceId,
         onConnectionInitiated: _connectionInitiated,
         onConnectionResult: _connectionResult,
@@ -117,12 +141,15 @@ class AndroidNearbyTransport implements NearbyTransport {
   @override
   Future<void> startDiscovery() async {
     if (_disposed || _discovering) return;
+    final callbackEpoch = ++_discoveryEpoch;
     try {
       final started = await _nearby.startDiscovery(
         serviceId,
-        Strategy.P2P_CLUSTER,
+        _strategy,
         serviceId: serviceId,
         onEndpointFound: (id, name, _) {
+          if (callbackEpoch != _discoveryEpoch) return;
+          final now = DateTime.now().toUtc();
           _peerNames[id] = name;
           final hint = _identityFingerprintHint(name);
           if (hint == null) {
@@ -130,26 +157,40 @@ class AndroidNearbyTransport implements NearbyTransport {
           } else {
             _peerFingerprintHints[id] = hint;
           }
-          _peers.add(
-            NearbyPeer(
-              id: id,
-              name: hint == null ? name : 'RELIO ${hint.substring(0, 8)}',
-              identityFingerprintHint: hint,
-            ),
+          final previous = _discoveredEndpoints[id];
+          final peer = NearbyPeer(
+            id: id,
+            name: hint == null ? name : 'RELIO ${hint.substring(0, 8)}',
+            identityFingerprintHint: hint,
+            discoveryEpoch: callbackEpoch,
+            foundAt: previous?.discoveryEpoch == callbackEpoch
+                ? previous?.foundAt
+                : now,
+            lastSeenAt: now,
+            isCurrent: true,
           );
+          _discoveredEndpoints[id] = peer;
+          _peers.add(peer);
         },
         onEndpointLost: (id) {
-          if (id != null) {
+          if (id != null && callbackEpoch == _discoveryEpoch) {
             final name = _peerNames.remove(id) ?? id;
             final hint =
                 _peerFingerprintHints.remove(id) ??
                 _identityFingerprintHint(name);
+            final previous = _discoveredEndpoints.remove(id);
+            final now = DateTime.now().toUtc();
             _peers.add(
               NearbyPeer(
                 id: id,
                 name: hint == null ? name : 'RELIO ${hint.substring(0, 8)}',
                 identityFingerprintHint: hint,
                 isLost: true,
+                discoveryEpoch: previous?.discoveryEpoch ?? callbackEpoch,
+                foundAt: previous?.foundAt,
+                lastSeenAt: previous?.lastSeenAt,
+                lostAt: now,
+                isCurrent: false,
               ),
             );
           }
@@ -182,18 +223,29 @@ class AndroidNearbyTransport implements NearbyTransport {
   @override
   Future<void> stopDiscovery() async {
     if (!_discovering) return;
+    _discoveryEpoch++;
     await _nearby.stopDiscovery();
     _discovering = false;
+    _discoveredEndpoints.clear();
   }
 
   @override
   Future<void> resetSessionOperations() async {
     // หยุดเฉพาะ advertise/discovery ที่อาจค้าง; ไม่ตัด endpoint ที่เชื่อมต่อแล้ว
+    _discoveryEpoch++;
     await _nearby.stopDiscovery();
     await _nearby.stopAdvertising();
     _discovering = false;
     _advertising = false;
+    _discoveredEndpoints.clear();
   }
+
+  Strategy get _strategy => switch (_testMode) {
+    NearbyTransportTestMode.clusterBaseline ||
+    NearbyTransportTestMode.clusterPauseDiscovery => Strategy.P2P_CLUSTER,
+    NearbyTransportTestMode.pointToPointDiagnostic =>
+      Strategy.P2P_POINT_TO_POINT,
+  };
 
   @override
   Future<void> acceptConnection(
@@ -609,6 +661,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _discoveryEpoch++;
     await _nearby.stopAdvertising();
     await _nearby.stopDiscovery();
     await _nearby.stopAllEndpoints();

@@ -191,7 +191,11 @@ reconnect on signed challenge-response; Build 26 adds Cloud pull/merge, Build
 handshake handling, Build 29 improves offline media delivery, Build 30
 stabilizes trusted reconnect, Build 31 adds native connection resolution
 diagnostics, and Build 32 adds soft/hard negotiation ownership with a local
-two-peer delayed-resolution harness. Unit
+two-peer delayed-resolution harness. Build 35 adds discovery-epoch endpoint
+freshness, bounded fresh-endpoint recovery for STATUS_ENDPOINT_UNKNOWN, and
+DEV/QA-only Cluster baseline, Cluster pause-discovery, and Point-to-Point
+diagnostic modes with bounded attempt diagnostics. These modes do not change
+PROD strategy. Unit
 tests, emulator checks, and signed builds do not prove physical behavior or
 remote policy enforcement.
 

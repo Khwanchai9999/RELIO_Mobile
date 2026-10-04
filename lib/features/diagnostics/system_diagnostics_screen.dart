@@ -106,7 +106,14 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
       'activeNegotiation': service.hasActiveConnectionAttempts,
       'relioBuild': RelioBuildInfo.buildLabel,
       'protocolVersion': 2,
-      'nearbyDiagnosticVersion': '1',
+      'nearbyDiagnosticVersion': '2',
+      'transportTestMode': service.transportTestMode.diagnosticName,
+      'discoveryEpoch': service.transport.discoveryEpoch,
+      'discoveryActive': service.isDiscovering,
+      'advertisingActive': service.isAdvertising,
+      'strategy': service.transport.strategyName,
+      'endpointLifecycle': service.endpointLifecycleSnapshot,
+      'transportAttemptResults': service.transportAttemptResults,
       'nativeStatusCode': nativeFailure?.rawStatusCode,
       'nativeStatusName': nativeFailure?.rawStatusName,
       'nativeStatusMessage': nativeFailure?.rawStatusMessage,
@@ -143,6 +150,7 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
         'Bluetooth/Wi-Fi/Location: ${state['bluetoothEnabled']} / ${state['wifiEnabled']} / ${state['locationEnabled']}',
         'Connection: ${state['applicationState']}; discovered ${state['discoveredPeers']}; connected ${state['connectedPeers']}; incoming ${state['pendingIncomingRequests']}',
         'Active negotiation: ${state['activeNegotiation']}',
+        'Nearby transport mode: ${state['transportTestMode']}; strategy ${state['strategy']}; discovery epoch ${state['discoveryEpoch']}',
         'Google Play Services: ${state['googlePlayServicesVersionName'] ?? 'unknown'} (${state['googlePlayServicesVersionCode'] ?? 'unknown'})',
         'Last native failure: ${state['nativeStatusCode'] ?? 'none'} ${state['nativeStatusName'] ?? ''}; operation ${state['nativeOperation'] ?? '—'}; elapsed ${state['nativeElapsedMs'] ?? '—'}ms; role ${state['nativeRole'] ?? '—'}; strategy ${state['nativeStrategy'] ?? '—'}',
         'Last failure: ${state['lastFailure'] ?? 'none'}',
@@ -159,7 +167,8 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
           'build': _device['versionCode'] ?? RelioBuildInfo.buildNumber,
           'relioBuild': RelioBuildInfo.buildLabel,
           'protocolVersion': 2,
-          'nearbyDiagnosticVersion': '1',
+          'nearbyDiagnosticVersion': '2',
+          'transportTestMode': state['transportTestMode'],
           'package': _device['package'] ?? 'unknown',
           'flavor': _device['flavor'] ?? RelioBuildInfo.environmentLabel,
         },
@@ -199,6 +208,18 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (RelioBuildInfo.developerDiagnosticsEnabled)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.bluetooth_searching),
+                title: const Text('ทดสอบ Nearby Transport'),
+                subtitle: Text(
+                  '${service.transportTestMode.diagnosticName} • Epoch ${service.transport.discoveryEpoch}',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push('/diagnostics/nearby-transport'),
+              ),
+            ),
           _section('แอป', [
             'RELIO ${_device['versionName'] ?? RelioBuildInfo.versionName}+${_device['versionCode'] ?? RelioBuildInfo.buildNumber}',
             'RELIO Build: ${_device['versionCode'] ?? RelioBuildInfo.buildNumber}',
@@ -218,6 +239,8 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
             readiness?.summary ?? 'ยังไม่มีข้อมูล readiness',
           ]),
           _section('Native Nearby', [
+            'Transport mode: ${service.transportTestMode.diagnosticName} • epoch ${service.transport.discoveryEpoch}',
+            'Discovery ${service.isDiscovering ? 'active' : 'paused'} • Advertising ${service.isAdvertising ? 'active' : 'stopped'}',
             'Active negotiation: ${service.hasActiveConnectionAttempts ? 'yes' : 'no'}',
             'Google Play Services: ${service.nativeTransportSnapshot['googlePlayServicesVersionName'] ?? 'กำลังอ่าน'} (${service.nativeTransportSnapshot['googlePlayServicesVersionCode'] ?? '—'})',
             'Nearby library: ${service.nativeTransportSnapshot['nearbyLibraryVersion'] ?? '—'} • play-services-nearby ${service.nativeTransportSnapshot['playServicesNearbyDependencyVersion'] ?? '—'}',
@@ -241,6 +264,20 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
                 : service.connectedPeers.isEmpty
                 ? 'ยังไม่เริ่ม'
                 : 'กำลังดำเนินการ/สำเร็จ'}',
+          ]),
+          _section('Nearby endpoint lifecycle', [
+            if (service.endpointLifecycleSnapshot.isEmpty)
+              'ยังไม่มีข้อมูล endpoint'
+            else
+              for (final endpoint in service.endpointLifecycleSnapshot.take(8))
+                '${endpoint['endpointAlias']} • epoch ${endpoint['discoveryEpoch']} • age ${endpoint['endpointAgeMs'] ?? '—'}ms • current ${endpoint['isCurrent']} • lost ${endpoint['isMarkedLost']}',
+          ]),
+          _section('Nearby transport attempts', [
+            if (service.transportAttemptResults.isEmpty)
+              'ยังไม่มีผลการเชื่อมต่อ'
+            else
+              for (final result in service.transportAttemptResults)
+                'Attempt ${result['attemptId']} • ${result['transportTestMode']} • ${result['connected'] == true ? 'connected' : 'failed'} • native ${result['nativeStatusCode'] ?? '—'} ${result['nativeStatusName'] ?? ''} • ${result['elapsedMs'] ?? '—'}ms',
           ]),
           FutureBuilder<int>(
             future: diagnostic.storageBytes,

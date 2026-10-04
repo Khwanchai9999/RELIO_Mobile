@@ -43,6 +43,159 @@ void main() {
     expect(await rig.logText(), contains('connection_soft_timeout'));
   });
 
+  test('old discovery epoch is rejected before native request', () async {
+    await rig.service.startDiscovery();
+    final oldEpoch = rig.transport.discoveryEpoch;
+    rig.transport.simulatePeer(
+      id: 'old-endpoint',
+      name: 'Peer',
+      epoch: oldEpoch,
+    );
+    await Future<void>.delayed(Duration.zero);
+    await rig.service.stopDiscovery();
+    await rig.service.startDiscovery();
+
+    await rig.service.connect('old-endpoint');
+
+    expect(rig.transport.connectionRequestCount, 0);
+    expect(
+      rig.service.peerErrors['old-endpoint'],
+      'waiting_for_fresh_endpoint',
+    );
+  });
+
+  test('lost endpoint cannot be reused from the old visible row', () async {
+    rig.transport.simulatePeer(id: 'lost-before-tap', name: 'Peer');
+    await Future<void>.delayed(Duration.zero);
+    rig.transport.simulateEndpointLoss('lost-before-tap');
+    await Future<void>.delayed(Duration.zero);
+
+    await rig.service.connect('lost-before-tap');
+
+    expect(rig.transport.connectionRequestCount, 0);
+    expect(rig.service.isEndpointCurrent('lost-before-tap'), isFalse);
+  });
+
+  test(
+    'Nearby event log exposes endpoint aliases rather than raw ids',
+    () async {
+      const endpointId = 'private-endpoint-identifier';
+      rig.transport.simulatePeer(id: endpointId, name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+
+      final events = rig.service.eventLog.join('\n');
+      expect(events, isNot(contains(endpointId)));
+      expect(events, contains(DiagnosticsLogService.peerAlias(endpointId)));
+    },
+  );
+
+  test('duplicate endpoint aliases share one stable-peer flight', () async {
+    rig.transport.holdConnectionRequests = true;
+    final fingerprint = List.filled(64, 'b').join();
+    rig.transport.simulatePeer(
+      id: 'alias-x',
+      name: 'Peer',
+      identityFingerprintHint: fingerprint,
+    );
+    rig.transport.simulatePeer(
+      id: 'alias-y',
+      name: 'Peer',
+      identityFingerprintHint: fingerprint,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    await rig.service.connect('alias-x');
+    await rig.service.connect('alias-y');
+
+    expect(rig.transport.connectionRequestCount, 1);
+    expect(rig.service.peerStates['alias-x'], NearbyConnectionState.connecting);
+    expect(
+      rig.service.peerStates['alias-y'],
+      isNot(NearbyConnectionState.connecting),
+    );
+  });
+
+  test('8011 waits for one fresh endpoint and never retries old id', () async {
+    rig.transport.holdConnectionRequests = true;
+    final fingerprint = List.filled(64, 'a').join();
+    rig.transport.simulatePeer(
+      id: 'endpoint-x',
+      name: 'Peer',
+      identityFingerprintHint: fingerprint,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    await rig.service.connect('endpoint-x');
+    rig.transport.resolveConnectionRequest(
+      'endpoint-x',
+      connected: false,
+      rawStatusCode: 8011,
+      rawStatusName: 'STATUS_ENDPOINT_UNKNOWN',
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(rig.transport.connectionRequestCount, 1);
+    expect(rig.service.isEndpointCurrent('endpoint-x'), isFalse);
+
+    rig.transport.simulatePeer(
+      id: 'endpoint-y',
+      name: 'Peer',
+      identityFingerprintHint: fingerprint,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(rig.transport.connectionRequestCount, 2);
+    expect(
+      rig.service.peerStates['endpoint-y'],
+      NearbyConnectionState.connecting,
+    );
+    expect(rig.service.transportAttemptResults, hasLength(1));
+
+    rig.transport.resolveConnectionRequest(
+      'endpoint-y',
+      connected: false,
+      rawStatusCode: 8011,
+      rawStatusName: 'STATUS_ENDPOINT_UNKNOWN',
+    );
+    await Future<void>.delayed(Duration.zero);
+    rig.transport.simulatePeer(
+      id: 'endpoint-z',
+      name: 'Peer',
+      identityFingerprintHint: fingerprint,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(rig.transport.connectionRequestCount, 2);
+  });
+
+  test(
+    'pause-discovery mode pauses only discovery and resumes after failure',
+    () async {
+      await rig.service.configureTransportTestMode(
+        NearbyTransportTestMode.clusterPauseDiscovery,
+      );
+      await rig.service.startSession();
+      rig.transport.holdConnectionRequests = true;
+      rig.transport.simulatePeer(id: 'pause-peer', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('pause-peer');
+      expect(rig.service.isDiscovering, isFalse);
+      expect(rig.service.isAdvertising, isTrue);
+      expect(rig.transport.disconnectCount, 0);
+
+      rig.transport.resolveConnectionRequest(
+        'pause-peer',
+        connected: false,
+        rawStatusCode: 13,
+        rawStatusName: 'ERROR',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(rig.service.isDiscovering, isTrue);
+      expect(rig.service.isAdvertising, isTrue);
+      expect(rig.transport.disconnectCount, 0);
+    },
+  );
+
   test('native failure wins over a pending application timeout', () async {
     rig.transport.holdConnectionRequests = true;
     rig.transport.simulatePeer(id: 'peer-failure', name: 'Peer');
@@ -382,13 +535,21 @@ class _TwoPeerTransport implements NearbyTransport {
   bool connected = false;
   bool resultScheduled = false;
   int requestCount = 0;
+  int _discoveryEpoch = 0;
+  bool isDiscovering = false;
+  bool isAdvertising = false;
+  NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
 
   @override
   String get implementationName => 'TwoPeerNativeHarness';
   @override
   String get serviceId => relioNearbyServiceId;
   @override
-  String get strategyName => relioNearbyStrategyName;
+  String get strategyName => _testMode.strategyName;
+  @override
+  NearbyTransportTestMode get testMode => _testMode;
+  @override
+  int get discoveryEpoch => _discoveryEpoch;
   @override
   Stream<NearbyPeer> get discoveredPeers => _peers.stream;
   @override
@@ -404,12 +565,19 @@ class _TwoPeerTransport implements NearbyTransport {
       _nativeDiagnostics.stream;
   @override
   Future<Map<String, Object?>> diagnosticSnapshot() async => const {};
+  @override
+  Future<void> configureTestMode(NearbyTransportTestMode mode) async {
+    _testMode = mode;
+  }
 
   void discoverPeer() => _peers.add(
     NearbyPeer(
       id: remoteEndpointId,
       name: remoteName,
       identityFingerprintHint: remoteFingerprint,
+      discoveryEpoch: _discoveryEpoch,
+      foundAt: DateTime.now().toUtc(),
+      lastSeenAt: DateTime.now().toUtc(),
     ),
   );
 
@@ -452,13 +620,27 @@ class _TwoPeerTransport implements NearbyTransport {
   Future<void> startAdvertising({
     required String displayName,
     String? identityFingerprint,
-  }) async {}
+  }) async {
+    isAdvertising = true;
+  }
+
   @override
-  Future<void> stopAdvertising() async {}
+  Future<void> stopAdvertising() async {
+    isAdvertising = false;
+  }
+
   @override
-  Future<void> startDiscovery() async {}
+  Future<void> startDiscovery() async {
+    if (!isDiscovering) _discoveryEpoch++;
+    isDiscovering = true;
+  }
+
   @override
-  Future<void> stopDiscovery() async {}
+  Future<void> stopDiscovery() async {
+    if (isDiscovering) _discoveryEpoch++;
+    isDiscovering = false;
+  }
+
   @override
   Future<void> resetSessionOperations() async {}
 

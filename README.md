@@ -126,9 +126,10 @@ Instructor-facing references: [architecture](docs/architecture.md),
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 34 (`0.9.0+34`) is the current public QA
-physical-test candidate. Its automated release gates passed, but physical
-Huawei/realme Nearby radio retest is still pending; publication does not prove
+overrides use Mock transport. Build 35 (`0.9.0+35`) adds current-discovery
+endpoint validation and DEV/QA-only Nearby isolation modes. Build 34 remains
+the public QA release until Build 35 passes its release gates and is published.
+Physical radio behavior is still deferred; automated checks do not prove
 real-device behavior.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
@@ -216,6 +217,13 @@ interoperability remains pending an authorized two-phone retest. Release
 publication alone does not establish device behavior. PROD remains
 `com.relio.relio_mobile`.
 
+Build 35 prepares one QA diagnostic APK with three selectable Nearby modes:
+P2P_CLUSTER baseline, P2P_CLUSTER with discovery paused during negotiation,
+and diagnostic-only P2P_POINT_TO_POINT. The DEV/QA-only test page records
+current discovery epochs, endpoint aliases and freshness, native results, and
+the latest five bounded attempt summaries. PROD retains the established
+transport configuration and does not register the diagnostic route.
+
 ## Public QA distribution and wireless updates (v0.9.0)
 
 RELIO Test uses the internal Android flavor `qa` (the TEST environment name), application ID
@@ -260,7 +268,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 34 is the current public QA physical-test candidate. Neither
+releases. Build 35 is the current QA physical-test candidate; Build 34 remains
+the last published release until the Build 35 publisher completes. Neither
 source changes nor automated simulations establish physical radio behavior;
 two-phone verification remains pending.
 

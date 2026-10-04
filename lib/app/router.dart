@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../features/auth/auth_screens.dart';
 import '../features/chat/chat_screens.dart';
 import '../features/developer/nearby_diagnostics_screen.dart';
+import '../features/developer/nearby_transport_test_screen.dart';
 import '../features/developer/cloud_diagnostics_screen.dart';
 import '../features/developer/relay_diagnostics_screen.dart';
 import '../features/diagnostics/system_diagnostics_screen.dart';
@@ -69,6 +70,10 @@ GoRouter createRelioRouter() {
         GoRoute(
           path: '/developer/nearby',
           builder: (_, _) => const NearbyDiagnosticsScreen(),
+        ),
+        GoRoute(
+          path: '/diagnostics/nearby-transport',
+          builder: (_, _) => const NearbyTransportTestScreen(),
         ),
         GoRoute(
           path: '/developer/cloud',

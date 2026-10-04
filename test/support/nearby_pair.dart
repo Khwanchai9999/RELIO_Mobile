@@ -149,8 +149,10 @@ class HandshakePair {
     transportB.incomingDirectory = logsB.directory!;
     await serviceA.initialize();
     await serviceB.initialize();
+    // Pair creation represents endpoints already visible in this test harness.
     transportA.discoverPeer();
     transportB.discoverPeer();
+    await Future<void>.delayed(Duration.zero);
     return HandshakePair._(
       databaseA: databaseA,
       databaseB: databaseB,
@@ -297,6 +299,9 @@ class LoopbackTransport implements NearbyTransport {
   final List<String> acceptCalls = [];
   final List<String> disconnectCalls = [];
   int stopDiscoveryCalls = 0;
+  int startDiscoveryCalls = 0;
+  int _discoveryEpoch = 0;
+  NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
   int stopAdvertisingCalls = 0;
   bool omitIncomingFingerprintHint = false;
   late final Map<String, NearbyPeer> _knownPeers = {
@@ -309,13 +314,19 @@ class LoopbackTransport implements NearbyTransport {
   LoopbackTransport? other;
   bool _connected = false;
   bool _disposed = false;
+  bool isDiscovering = false;
+  bool isAdvertising = false;
 
   @override
   String get implementationName => 'IdentityHandshakeLoopback';
   @override
   String get serviceId => relioNearbyServiceId;
   @override
-  String get strategyName => relioNearbyStrategyName;
+  String get strategyName => _testMode.strategyName;
+  @override
+  NearbyTransportTestMode get testMode => _testMode;
+  @override
+  int get discoveryEpoch => _discoveryEpoch;
   @override
   Stream<NearbyPeer> get discoveredPeers => _peers.stream;
   @override
@@ -332,7 +343,28 @@ class LoopbackTransport implements NearbyTransport {
   @override
   Future<Map<String, Object?>> diagnosticSnapshot() async => const {};
 
-  void discoverPeer() => _peers.add(_knownPeers[localEndpointId]!);
+  @override
+  Future<void> configureTestMode(NearbyTransportTestMode mode) async {
+    _testMode = mode;
+  }
+
+  void discoverPeer() {
+    final now = DateTime.now().toUtc();
+    final previous = _knownPeers[localEndpointId]!;
+    final refreshed = NearbyPeer(
+      id: previous.id,
+      name: previous.name,
+      identityFingerprintHint: previous.identityFingerprintHint,
+      discoveryEpoch: _discoveryEpoch,
+      foundAt: previous.discoveryEpoch == _discoveryEpoch
+          ? previous.foundAt ?? now
+          : now,
+      lastSeenAt: now,
+      isCurrent: true,
+    );
+    _knownPeers[localEndpointId] = refreshed;
+    _peers.add(refreshed);
+  }
 
   void clearDiscoveredFingerprintHint() {
     final peer = _knownPeers[localEndpointId]!;
@@ -384,15 +416,37 @@ class LoopbackTransport implements NearbyTransport {
   Future<void> startAdvertising({
     required String displayName,
     String? identityFingerprint,
-  }) async {}
+  }) async {
+    isAdvertising = true;
+  }
+
   @override
-  Future<void> stopAdvertising() async => stopAdvertisingCalls++;
+  Future<void> stopAdvertising() async {
+    stopAdvertisingCalls++;
+    isAdvertising = false;
+  }
+
   @override
-  Future<void> startDiscovery() async {}
+  Future<void> startDiscovery() async {
+    if (isDiscovering) return;
+    _discoveryEpoch++;
+    startDiscoveryCalls++;
+    isDiscovering = true;
+  }
+
   @override
-  Future<void> stopDiscovery() async => stopDiscoveryCalls++;
+  Future<void> stopDiscovery() async {
+    stopDiscoveryCalls++;
+    _discoveryEpoch++;
+    isDiscovering = false;
+  }
+
   @override
-  Future<void> resetSessionOperations() async {}
+  Future<void> resetSessionOperations() async {
+    _discoveryEpoch++;
+    isDiscovering = false;
+    isAdvertising = false;
+  }
 
   @override
   Future<void> requestConnection(

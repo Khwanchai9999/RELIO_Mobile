@@ -166,6 +166,11 @@ class NearbyService extends ChangeNotifier {
     required String lifecycleState,
     required String route,
   }) {
+    if (appLifecycleState != lifecycleState) {
+      for (final record in _activeTransportAttempts.values) {
+        record['lifecycleChanged'] = true;
+      }
+    }
     appLifecycleState = lifecycleState;
     screenRoute = route;
   }
@@ -239,6 +244,11 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _automaticConnectionAttempts = {};
   final Map<String, String> _reconnectFingerprintByEndpoint = {};
   final Map<String, String> _fingerprintEndpointReservations = {};
+  final Map<String, NearbyPeer> _endpointLifecycle = {};
+  final Map<String, bool> _freshEndpointRetryByFingerprint = {};
+  final Set<String> _freshEndpointRetryEndpoints = {};
+  final List<Map<String, Object?>> _transportAttemptResults = [];
+  final Map<String, Map<String, Object?>> _activeTransportAttempts = {};
   final Map<String, DateTime> _nextReconnectAt = {};
   final Map<String, int> _reconnectAttemptCounts = {};
   final Map<String, DateTime> _receivedChallengeExpiries = {};
@@ -261,6 +271,176 @@ class NearbyService extends ChangeNotifier {
   final Map<String, Object?> nativeTransportSnapshot = {};
   NearbyConnectionEvent? lastNativeConnectionFailure;
   bool _sessionRestartDeferred = false;
+  bool _discoveryPausedForNegotiation = false;
+
+  NearbyTransportTestMode get transportTestMode => transport.testMode;
+
+  Map<String, Object?> _radioSnapshotFields() => {
+    'bluetoothEnabled': readiness?.bluetoothEnabled,
+    'wifiEnabled': readiness?.wifiEnabled,
+    'locationEnabled': readiness?.locationEnabled,
+    'discoveryActive': isDiscovering,
+    'advertisingActive': isAdvertising,
+    'activeConnectionAttempts': activeConnectionAttempts,
+    'pendingIncomingRequests': pendingConnectionRequests.length,
+    'appLifecycleState': appLifecycleState,
+    'androidApi': readiness?.policy.sdkInt,
+    'googlePlayServicesVersionName':
+        nativeTransportSnapshot['googlePlayServicesVersionName'],
+    'googlePlayServicesVersionCode':
+        nativeTransportSnapshot['googlePlayServicesVersionCode'],
+    'nearbyLibraryVersion': nativeTransportSnapshot['nearbyLibraryVersion'],
+    'strategy': transport.strategyName,
+    'transportTestMode': transport.testMode.diagnosticName,
+    'discoveryEpoch': transport.discoveryEpoch,
+  };
+
+  List<Map<String, Object?>> get endpointLifecycleSnapshot => _endpointLifecycle
+      .values
+      .map((peer) {
+        final age = peer.foundAt == null
+            ? null
+            : DateTime.now().toUtc().difference(peer.foundAt!).inMilliseconds;
+        return {
+          'endpointAlias': DiagnosticsLogService.peerAlias(peer.endpointId),
+          'discoveryEpoch': peer.discoveryEpoch,
+          'foundAt': peer.foundAt?.toIso8601String(),
+          'lastSeenAt': peer.lastSeenAt?.toIso8601String(),
+          'lostAt': peer.lostAt?.toIso8601String(),
+          'endpointAgeMs': age,
+          'isCurrent':
+              peer.isCurrent &&
+              !peer.isLost &&
+              peer.discoveryEpoch == transport.discoveryEpoch,
+          'isMarkedLost': peer.isLost,
+          'stablePeerHintAvailable': peer.identityFingerprintHint != null,
+        };
+      })
+      .toList(growable: false);
+
+  List<Map<String, Object?>> get transportAttemptResults =>
+      _transportAttemptResults
+          .map((record) => Map<String, Object?>.unmodifiable(record))
+          .toList(growable: false);
+
+  void clearTransportTestResults() {
+    _transportAttemptResults.clear();
+    diagnostics?.record('nearby', 'transport_test_results_cleared');
+    notifyListeners();
+  }
+
+  void _beginTransportAttempt(String endpointId, {required String role}) {
+    final traceId = _connectionTraces[endpointId];
+    if (traceId == null) return;
+    final peer =
+        _endpointLifecycle[endpointId] ??
+        discoveredPeers
+            .where((candidate) => candidate.endpointId == endpointId)
+            .firstOrNull;
+    final started = _connectionStartedAt[endpointId] ?? DateTime.now().toUtc();
+    _activeTransportAttempts[endpointId] = <String, Object?>{
+      'attemptId': traceId.substring(0, 4).toUpperCase(),
+      'transportTestMode': transport.testMode.diagnosticName,
+      'startTime': started.toIso8601String(),
+      'endTime': null,
+      'role': role,
+      'endpointAlias': DiagnosticsLogService.peerAlias(endpointId),
+      'endpointEpoch': peer?.discoveryEpoch,
+      'endpointCurrentAtRequest':
+          peer != null &&
+          peer.isCurrent &&
+          !peer.isLost &&
+          peer.discoveryEpoch == transport.discoveryEpoch,
+      'endpointAgeMs': peer?.foundAt == null
+          ? null
+          : started.difference(peer!.foundAt!).inMilliseconds,
+      'requestTaskResult': role == 'initiator' ? 'pending' : 'not_applicable',
+      'acceptTaskResult': role == 'responder' ? 'pending' : 'not_applicable',
+      'nativeStatusCode': null,
+      'nativeStatusName': null,
+      'connected': false,
+      'elapsedMs': null,
+      'endpointLostDuringAttempt': false,
+      'discoveryActiveDuringNegotiation': isDiscovering,
+      'advertisingActiveDuringNegotiation': isAdvertising,
+      'lifecycleChanged': false,
+      'sessionRestarted': false,
+      'timelineMs': <String, int>{'attemptStarted': 0},
+    };
+  }
+
+  void _markTransportPhase(String endpointId, String phase) {
+    final record = _activeTransportAttempts[endpointId];
+    if (record == null) return;
+    final started = DateTime.tryParse(record['startTime']! as String);
+    if (started == null) return;
+    final timeline = record['timelineMs']! as Map<String, int>;
+    timeline[phase] = DateTime.now().toUtc().difference(started).inMilliseconds;
+  }
+
+  void _finishTransportAttempt(
+    String endpointId, {
+    required bool connected,
+    int? nativeStatusCode,
+    String? nativeStatusName,
+    bool endpointLost = false,
+  }) {
+    final record = _activeTransportAttempts.remove(endpointId);
+    if (record == null) return;
+    final start = DateTime.tryParse(record['startTime']! as String);
+    final end = DateTime.now().toUtc();
+    record
+      ..['endTime'] = end.toIso8601String()
+      ..['connected'] = connected
+      ..['nativeStatusCode'] = nativeStatusCode
+      ..['nativeStatusName'] = nativeStatusName
+      ..['endpointLostDuringAttempt'] = endpointLost
+      ..['elapsedMs'] = start == null
+          ? null
+          : end.difference(start).inMilliseconds;
+    _transportAttemptResults.insert(0, Map<String, Object?>.from(record));
+    if (_transportAttemptResults.length > 5) {
+      _transportAttemptResults.removeRange(5, _transportAttemptResults.length);
+    }
+    notifyListeners();
+  }
+
+  bool isEndpointCurrent(String endpointId) {
+    final peer = discoveredPeers
+        .where((candidate) => candidate.endpointId == endpointId)
+        .firstOrNull;
+    return peer != null &&
+        !peer.isLost &&
+        peer.isCurrent &&
+        peer.discoveryEpoch == transport.discoveryEpoch;
+  }
+
+  Future<void> configureTransportTestMode(NearbyTransportTestMode mode) async {
+    if (!NearbyTransportTestMode.isAvailableIn(RelioBuildInfo.environment) ||
+        !RelioBuildInfo.developerDiagnosticsEnabled) {
+      throw StateError('Nearby transport diagnostics are unavailable.');
+    }
+    if (hasActiveConnectionAttempts || connectedPeers.isNotEmpty) {
+      throw StateError('Finish Nearby connections before changing mode.');
+    }
+    final wasAdvertising = isAdvertising;
+    final wasDiscovering = isDiscovering;
+    await stopDiscovery();
+    await stopAdvertising();
+    await transport.configureTestMode(mode);
+    if (wasAdvertising) await startAdvertising();
+    if (wasDiscovering) await startDiscovery();
+    await _captureTransportSnapshot();
+    diagnostics?.record(
+      'nearby',
+      'transport_test_mode_selected',
+      fields: {
+        'transportTestMode': mode.diagnosticName,
+        'strategy': mode.strategyName,
+      },
+    );
+    notifyListeners();
+  }
 
   NearbyConnectionPhase? connectionPhaseForEndpoint(String endpointId) =>
       _connectionPhases[endpointId];
@@ -600,6 +780,15 @@ class NearbyService extends ChangeNotifier {
       _log('discovery start');
       await transport.startDiscovery();
       isDiscovering = true;
+      diagnostics?.record(
+        'nearby',
+        'discovery_epoch_started',
+        fields: {
+          'discoveryEpoch': transport.discoveryEpoch,
+          'transportTestMode': transport.testMode.diagnosticName,
+          'strategy': transport.strategyName,
+        },
+      );
       _log('discovery started');
       notifyListeners();
     } on Object catch (error) {
@@ -693,6 +882,31 @@ class NearbyService extends ChangeNotifier {
     try {
       await transport.stopDiscovery();
       isDiscovering = false;
+      for (var index = 0; index < discoveredPeers.length; index++) {
+        final peer = discoveredPeers[index];
+        discoveredPeers[index] = NearbyPeer(
+          id: peer.id,
+          name: peer.name,
+          deviceId: peer.deviceId,
+          connected: peer.connected,
+          identityFingerprintHint: peer.identityFingerprintHint,
+          capabilities: peer.capabilities,
+          discoveryEpoch: peer.discoveryEpoch,
+          foundAt: peer.foundAt,
+          lastSeenAt: peer.lastSeenAt,
+          lostAt: peer.lostAt,
+          isCurrent: false,
+        );
+        _endpointLifecycle[peer.endpointId] = discoveredPeers[index];
+      }
+      diagnostics?.record(
+        'nearby',
+        'discovery_epoch_ended',
+        fields: {
+          'discoveryEpoch': transport.discoveryEpoch,
+          'transportTestMode': transport.testMode.diagnosticName,
+        },
+      );
       _log('หยุด Discovery แล้ว');
       notifyListeners();
     } on Object catch (error) {
@@ -722,6 +936,27 @@ class NearbyService extends ChangeNotifier {
             endpoint == peerId &&
             currentState == NearbyConnectionState.connected,
       );
+      return;
+    }
+    if (!isEndpointCurrent(peerId)) {
+      diagnostics?.record(
+        'connection',
+        'stale_endpoint_connect_blocked',
+        operation: 'requestConnection',
+        peerIdentifier: peerId,
+        reason: 'waiting_for_fresh_endpoint',
+        fields: {
+          'currentDiscoveryEpoch': transport.discoveryEpoch,
+          'endpoint': endpointLifecycleSnapshot.firstWhere(
+            (entry) =>
+                entry['endpointAlias'] ==
+                DiagnosticsLogService.peerAlias(peerId),
+            orElse: () => const <String, Object?>{},
+          ),
+        },
+      );
+      peerErrors[peerId] = 'waiting_for_fresh_endpoint';
+      notifyListeners();
       return;
     }
     final candidateFingerprint = discoveredPeers
@@ -755,6 +990,8 @@ class NearbyService extends ChangeNotifier {
     final traceId = const Uuid().v4();
     _connectionTraces[peerId] = traceId;
     _connectionStartedAt[peerId] = DateTime.now().toUtc();
+    _beginTransportAttempt(peerId, role: 'initiator');
+    _markTransportPhase(peerId, 'requestConnectionCalled');
     _setConnectionPhase(peerId, NearbyConnectionPhase.requestSubmitted);
     diagnostics?.record(
       'connection',
@@ -774,6 +1011,7 @@ class NearbyService extends ChangeNotifier {
         'locationEnabled': readiness?.locationEnabled,
         'nearbyReady': readiness?.ready,
         'missingPermissionCount': readiness?.missingPermissions.length,
+        ..._radioSnapshotFields(),
       },
     );
     diagnostics?.record(
@@ -794,6 +1032,7 @@ class NearbyService extends ChangeNotifier {
     _startConnectionSoftTimeout(peerId);
     notifyListeners();
     try {
+      await _pauseDiscoveryForNegotiation(peerId);
       final localIdentity = await identityCrypto.getPublicIdentity();
       diagnostics?.record(
         'trust',
@@ -810,6 +1049,8 @@ class NearbyService extends ChangeNotifier {
         identityFingerprint: localIdentity.fingerprint,
         connectionTraceId: traceId,
       );
+      _activeTransportAttempts[peerId]?['requestTaskResult'] = 'success';
+      _markTransportPhase(peerId, 'requestConnectionTaskSuccess');
       diagnostics?.record(
         'connection',
         'request_connection_returned',
@@ -824,6 +1065,13 @@ class NearbyService extends ChangeNotifier {
       );
       _log('ส่งคำขอเชื่อมต่อไปยัง ${DiagnosticsLogService.peerAlias(peerId)}');
     } on Object catch (error) {
+      _activeTransportAttempts[peerId]?['requestTaskResult'] = 'failure';
+      _markTransportPhase(peerId, 'requestConnectionTaskFailure');
+      _finishTransportAttempt(
+        peerId,
+        connected: false,
+        nativeStatusCode: _errorCode(error) == '8011' ? 8011 : null,
+      );
       _cancelConnectionTimers(peerId);
       _connectionPhases[peerId] = NearbyConnectionPhase.nativeResult;
       peerStates[peerId] = NearbyConnectionState.failed;
@@ -849,6 +1097,43 @@ class NearbyService extends ChangeNotifier {
             : null,
       );
       _fail('เชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
+    }
+  }
+
+  Future<void> _pauseDiscoveryForNegotiation(String endpointId) async {
+    if (transport.testMode != NearbyTransportTestMode.clusterPauseDiscovery ||
+        !isDiscovering ||
+        _discoveryPausedForNegotiation) {
+      return;
+    }
+    _discoveryPausedForNegotiation = true;
+    // โหมด B หยุดเฉพาะ Discovery เพื่อคง Advertising และ endpoint ที่กำลัง negotiate
+    diagnostics?.record(
+      'connection',
+      'discovery_paused_for_negotiation',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'stopDiscovery',
+      peerIdentifier: endpointId,
+      fields: {
+        'transportTestMode': transport.testMode.diagnosticName,
+        'advertisingActive': isAdvertising,
+      },
+    );
+    await stopDiscovery();
+  }
+
+  Future<void> _resumeDiscoveryAfterNegotiation(String reason) async {
+    if (!_discoveryPausedForNegotiation || hasActiveConnectionAttempts) return;
+    _discoveryPausedForNegotiation = false;
+    if (isAdvertising && !isDiscovering) {
+      diagnostics?.record(
+        'connection',
+        'discovery_resumed_after_negotiation',
+        operation: 'startDiscovery',
+        reason: reason,
+        fields: {'transportTestMode': transport.testMode.diagnosticName},
+      );
+      await startDiscovery();
     }
   }
 
@@ -1091,8 +1376,13 @@ class NearbyService extends ChangeNotifier {
       connectionTraceId: _connectionTraces[endpointId],
       operation: 'acceptConnection',
       peerIdentifier: endpointId,
-      fields: {'automaticTrustedReconnect': isAutomaticTrustedReconnect},
+      fields: {
+        'automaticTrustedReconnect': isAutomaticTrustedReconnect,
+        ..._radioSnapshotFields(),
+      },
     );
+    _markTransportPhase(endpointId, 'acceptTapped');
+    _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'pending';
     _approvedConnectionEndpoints.add(endpointId);
     pendingConnectionRequests.remove(endpointId);
     peerStates[endpointId] = NearbyConnectionState.connecting;
@@ -1105,10 +1395,14 @@ class NearbyService extends ChangeNotifier {
     _startConnectionSoftTimeout(endpointId);
     notifyListeners();
     try {
+      await _pauseDiscoveryForNegotiation(endpointId);
+      _markTransportPhase(endpointId, 'acceptConnectionCalled');
       await transport.acceptConnection(
         endpointId,
         connectionTraceId: _connectionTraces[endpointId],
       );
+      _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'success';
+      _markTransportPhase(endpointId, 'acceptConnectionTaskSuccess');
       diagnostics?.record(
         'connection',
         'accept_connection_returned',
@@ -1122,6 +1416,13 @@ class NearbyService extends ChangeNotifier {
         operation: 'acceptConnection',
       );
     } on Object catch (error) {
+      _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'failure';
+      _markTransportPhase(endpointId, 'acceptConnectionTaskFailure');
+      _finishTransportAttempt(
+        endpointId,
+        connected: false,
+        nativeStatusCode: _errorCode(error) == '8011' ? 8011 : null,
+      );
       _approvedConnectionEndpoints.remove(endpointId);
       _cancelConnectionTimers(endpointId);
       _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
@@ -1221,7 +1522,7 @@ class NearbyService extends ChangeNotifier {
     try {
       await transport.disconnect(peerId);
       peerStates[peerId] = NearbyConnectionState.disconnected;
-      _log('ตัดการเชื่อมต่อ $peerId');
+      _log('ตัดการเชื่อมต่อ ${DiagnosticsLogService.peerAlias(peerId)}');
     } on Object catch (error) {
       _appDisconnectRequests.remove(peerId);
       _recordIdentityStage(
@@ -1582,7 +1883,34 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _onPeer(NearbyPeer peer) {
+    _endpointLifecycle[peer.endpointId] = peer;
     if (peer.isLost) {
+      final activeAttempt = _activeTransportAttempts[peer.endpointId];
+      if (activeAttempt != null) {
+        activeAttempt['endpointLostDuringAttempt'] = true;
+      }
+      _finishTransportAttempt(
+        peer.endpointId,
+        connected: false,
+        endpointLost: true,
+      );
+      diagnostics?.record(
+        'nearby',
+        'endpoint_lost',
+        connectionTraceId: _connectionTraces[peer.endpointId],
+        operation: 'onEndpointLost',
+        peerIdentifier: peer.endpointId,
+        fields: {
+          'discoveryEpoch': peer.discoveryEpoch,
+          'currentDiscoveryEpoch': transport.discoveryEpoch,
+          'foundAt': peer.foundAt?.toIso8601String(),
+          'lostAt': peer.lostAt?.toIso8601String(),
+          'endpointAgeMs': peer.foundAt == null
+              ? null
+              : DateTime.now().toUtc().difference(peer.foundAt!).inMilliseconds,
+          'isMarkedLost': true,
+        },
+      );
       if (peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
           peerStates[peer.endpointId] ==
               NearbyConnectionState.incomingRequest) {
@@ -1628,11 +1956,28 @@ class NearbyService extends ChangeNotifier {
         final deviceId = endpointToDeviceId.remove(peer.endpointId);
         if (deviceId != null) deviceToEndpointId.remove(deviceId);
       }
-      _log('endpoint lost id=${peer.endpointId}');
+      _log(
+        'endpoint lost alias=${DiagnosticsLogService.peerAlias(peer.endpointId)}',
+      );
       notifyListeners();
       return;
     }
     final index = discoveredPeers.indexWhere((item) => item.id == peer.id);
+    diagnostics?.record(
+      'nearby',
+      index == -1 ? 'endpoint_found' : 'endpoint_refreshed',
+      operation: 'onEndpointFound',
+      peerIdentifier: peer.endpointId,
+      fields: {
+        'discoveryEpoch': peer.discoveryEpoch,
+        'currentDiscoveryEpoch': transport.discoveryEpoch,
+        'foundAt': peer.foundAt?.toIso8601String(),
+        'lastSeenAt': peer.lastSeenAt?.toIso8601String(),
+        'endpointAgeMs': peer.foundAt == null
+            ? null
+            : DateTime.now().toUtc().difference(peer.foundAt!).inMilliseconds,
+      },
+    );
     diagnostics?.record(
       'trust',
       peer.identityFingerprintHint == null
@@ -1652,9 +1997,76 @@ class NearbyService extends ChangeNotifier {
           ? NearbyConnectionState.connected
           : NearbyConnectionState.disconnected,
     );
-    _log('endpoint found id=${peer.endpointId}');
+    _log(
+      'endpoint found alias=${DiagnosticsLogService.peerAlias(peer.endpointId)}',
+    );
     notifyListeners();
+    final fingerprint = peer.identityFingerprintHint;
+    if (fingerprint != null &&
+        _freshEndpointRetryByFingerprint.containsKey(fingerprint) &&
+        isEndpointCurrent(peer.endpointId)) {
+      final automatic = _freshEndpointRetryByFingerprint.remove(fingerprint)!;
+      _freshEndpointRetryEndpoints.add(peer.endpointId);
+      diagnostics?.record(
+        'connection',
+        'fresh_endpoint_retry_started',
+        connectionTraceId: _connectionTraces[peer.endpointId],
+        operation: 'requestConnection',
+        peerIdentifier: peer.endpointId,
+        fields: {'discoveryEpoch': peer.discoveryEpoch},
+      );
+      _track(_connect(peer.endpointId, userInitiated: !automatic));
+      return;
+    }
     _track(_maybeReconnect(peer));
+  }
+
+  void _invalidateEndpoint(String endpointId, {DateTime? lostAt}) {
+    final peer =
+        discoveredPeers
+            .where((candidate) => candidate.endpointId == endpointId)
+            .firstOrNull ??
+        _endpointLifecycle[endpointId];
+    if (peer == null) return;
+    final invalid = NearbyPeer(
+      id: peer.id,
+      name: peer.name,
+      deviceId: peer.deviceId,
+      connected: peer.connected,
+      identityFingerprintHint: peer.identityFingerprintHint,
+      capabilities: peer.capabilities,
+      isLost: true,
+      discoveryEpoch: peer.discoveryEpoch,
+      foundAt: peer.foundAt,
+      lastSeenAt: peer.lastSeenAt,
+      lostAt: lostAt ?? DateTime.now().toUtc(),
+      isCurrent: false,
+    );
+    _endpointLifecycle[endpointId] = invalid;
+    discoveredPeers.removeWhere(
+      (candidate) => candidate.endpointId == endpointId,
+    );
+    diagnostics?.record(
+      'nearby',
+      'endpoint_invalidated',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'endpointLifecycle',
+      peerIdentifier: endpointId,
+      fields: {
+        'discoveryEpoch': invalid.discoveryEpoch,
+        'currentDiscoveryEpoch': transport.discoveryEpoch,
+        'foundAt': invalid.foundAt?.toIso8601String(),
+        'lostAt': invalid.lostAt?.toIso8601String(),
+        'endpointAgeMs': invalid.foundAt == null
+            ? null
+            : DateTime.now()
+                  .toUtc()
+                  .difference(invalid.foundAt!)
+                  .inMilliseconds,
+        'isCurrentEpoch': invalid.discoveryEpoch == transport.discoveryEpoch,
+        'isMarkedLost': true,
+      },
+    );
   }
 
   Future<void> _maybeReconnect(NearbyPeer peer) async {
@@ -1836,6 +2248,13 @@ class NearbyService extends ChangeNotifier {
         () => const Uuid().v4(),
       );
       _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
+      if (!_activeTransportAttempts.containsKey(endpointId)) {
+        _beginTransportAttempt(
+          endpointId,
+          role: event.isIncomingRequest ? 'responder' : 'initiator',
+        );
+      }
+      _markTransportPhase(endpointId, 'onConnectionInitiated');
       _setConnectionPhase(
         endpointId,
         event.isIncomingRequest
@@ -1851,6 +2270,7 @@ class NearbyService extends ChangeNotifier {
         stateTo: 'incomingRequest',
         peerIdentifier: endpointId,
         fields: {
+          ..._radioSnapshotFields(),
           'fingerprintHintAvailable':
               event.peer.identityFingerprintHint != null,
           'authenticationCodeAvailable': event.authenticationToken != null,
@@ -1979,7 +2399,14 @@ class NearbyService extends ChangeNotifier {
     }
     final eventFingerprint =
         event.peer.identityFingerprintHint ??
-        _reconnectFingerprintByEndpoint[endpointId];
+        _reconnectFingerprintByEndpoint[endpointId] ??
+        discoveredPeers
+            .where((peer) => peer.endpointId == endpointId)
+            .firstOrNull
+            ?.identityFingerprintHint;
+    final wasAutomaticInitiator =
+        eventFingerprint != null &&
+        _automaticConnectionAttempts.contains(eventFingerprint);
     if (event.state == NearbyConnectionState.failed ||
         event.state == NearbyConnectionState.disconnected) {
       if (eventFingerprint != null) {
@@ -1987,7 +2414,42 @@ class NearbyService extends ChangeNotifier {
       }
       if (event.state == NearbyConnectionState.failed) {
         final fingerprint = eventFingerprint;
-        if (fingerprint != null) {
+        final rawStatusCode = event.rawStatusCode;
+        if (rawStatusCode == 8011) {
+          final outgoing =
+              _userInitiatedEndpoints.contains(endpointId) ||
+              wasAutomaticInitiator;
+          _invalidateEndpoint(endpointId);
+          final isBoundedRetry = _freshEndpointRetryEndpoints.contains(
+            endpointId,
+          );
+          if (outgoing &&
+              !isBoundedRetry &&
+              fingerprint != null &&
+              !_freshEndpointRetryByFingerprint.containsKey(fingerprint)) {
+            _freshEndpointRetryByFingerprint[fingerprint] =
+                !_userInitiatedEndpoints.contains(endpointId);
+            diagnostics?.record(
+              'connection',
+              'stale_endpoint_invalidated',
+              severity: 'warning',
+              connectionTraceId: _connectionTraces[endpointId],
+              operation: event.operation ?? 'onConnectionResult',
+              peerIdentifier: endpointId,
+              nativeCode: rawStatusCode,
+              fields: {'stablePeerHintAvailable': true},
+            );
+            diagnostics?.record(
+              'connection',
+              'fresh_endpoint_wait_started',
+              connectionTraceId: _connectionTraces[endpointId],
+              operation: 'onEndpointFound',
+              peerIdentifier: endpointId,
+              fields: {'retryLimit': 1},
+            );
+          }
+          _freshEndpointRetryEndpoints.remove(endpointId);
+        } else if (fingerprint != null && rawStatusCode != 13) {
           final peer = NearbyPeer(
             id: endpointId,
             name: event.peer.name,
@@ -2079,11 +2541,21 @@ class NearbyService extends ChangeNotifier {
               event.playServicesNearbyDependencyVersion,
         if (_connectionStartedAt[endpointId] case final start?)
           'durationMs': DateTime.now().toUtc().difference(start).inMilliseconds,
+        ..._radioSnapshotFields(),
       },
     );
     if (event.state == NearbyConnectionState.connected ||
         event.state == NearbyConnectionState.failed ||
         event.state == NearbyConnectionState.disconnected) {
+      if (event.state != NearbyConnectionState.disconnected) {
+        _markTransportPhase(endpointId, 'nativeNegotiationEnded');
+      }
+      _finishTransportAttempt(
+        endpointId,
+        connected: event.state == NearbyConnectionState.connected,
+        nativeStatusCode: event.rawStatusCode,
+        nativeStatusName: event.rawStatusName,
+      );
       _cancelConnectionTimers(endpointId);
       _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
       _connectionStartedAt.remove(endpointId);
@@ -2109,6 +2581,38 @@ class NearbyService extends ChangeNotifier {
             if (event.role != null) 'role': event.role,
             if (event.strategy != null) 'strategy': event.strategy,
             if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
+            'endpointCurrentAtRequest': _transportAttemptResults
+                .where(
+                  (result) =>
+                      result['endpointAlias'] ==
+                          DiagnosticsLogService.peerAlias(endpointId) &&
+                      result['attemptId'] ==
+                          (event.connectionTraceId ??
+                                  _connectionTraces[endpointId])
+                              ?.substring(0, 4)
+                              .toUpperCase(),
+                )
+                .firstOrNull?['endpointCurrentAtRequest'],
+            'endpointEpochMatchesCurrent': isEndpointCurrent(endpointId),
+            'endpointLostDuringAttempt': _transportAttemptResults
+                .where(
+                  (result) =>
+                      result['endpointAlias'] ==
+                          DiagnosticsLogService.peerAlias(endpointId) &&
+                      result['attemptId'] ==
+                          (event.connectionTraceId ??
+                                  _connectionTraces[endpointId])
+                              ?.substring(0, 4)
+                              .toUpperCase(),
+                )
+                .firstOrNull?['endpointLostDuringAttempt'],
+            'discoveryActive': isDiscovering,
+            'advertisingActive': isAdvertising,
+            'configuredStrategy': transport.strategyName,
+            'lifecycleState': appLifecycleState,
+            'sessionRestartDeferred': _sessionRestartDeferred,
+            'googlePlayServicesVersionName':
+                nativeTransportSnapshot['googlePlayServicesVersionName'],
           },
         );
       }
@@ -2207,11 +2711,19 @@ class NearbyService extends ChangeNotifier {
     }
     if (event.error != null) peerErrors[endpointId] = event.error!;
     _log(
-      'connection state=${event.state.name} endpoint=$endpointId'
+      'connection state=${event.state.name} '
+      'endpoint=${DiagnosticsLogService.peerAlias(endpointId)}'
       '${event.error == null ? '' : ' code=${_errorCode(event.error!)}'}',
     );
     if (event.state == NearbyConnectionState.disconnected ||
         event.state == NearbyConnectionState.failed) {
+      _track(
+        _resumeDiscoveryAfterNegotiation(
+          event.state == NearbyConnectionState.failed
+              ? 'failure'
+              : 'disconnected',
+        ),
+      );
       _connectionTraces.remove(endpointId);
       _connectionStartedAt.remove(endpointId);
       _connectionPhases.remove(endpointId);
@@ -2283,16 +2795,28 @@ class NearbyService extends ChangeNotifier {
     );
     notifyListeners();
     try {
+      await _pauseDiscoveryForNegotiation(endpointId);
+      _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'pending';
+      _markTransportPhase(endpointId, 'acceptConnectionCalled');
       await transport.acceptConnection(
         endpointId,
         connectionTraceId: _connectionTraces[endpointId],
       );
+      _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'success';
+      _markTransportPhase(endpointId, 'acceptConnectionTaskSuccess');
       _nativePhaseAccepted(
         endpointId,
         NearbyConnectionPhase.nativeAcceptAccepted,
         operation: 'acceptConnection',
       );
     } on Object catch (error) {
+      _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'failure';
+      _markTransportPhase(endpointId, 'acceptConnectionTaskFailure');
+      _finishTransportAttempt(
+        endpointId,
+        connected: false,
+        nativeStatusCode: _errorCode(error) == '8011' ? 8011 : null,
+      );
       _provisionalConnectionEndpoints.remove(endpointId);
       _provisionalIncomingRequests.remove(endpointId);
       _cancelConnectionTimers(endpointId);
@@ -2303,8 +2827,10 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handshakeAndShareActiveSos(String endpointId) async {
-    _log('connection result=connected endpoint=$endpointId');
-    _log('hello send endpoint=$endpointId');
+    _log(
+      'connection result=connected endpoint=${DiagnosticsLogService.peerAlias(endpointId)}',
+    );
+    _log('hello send endpoint=${DiagnosticsLogService.peerAlias(endpointId)}');
     await sendHello(peerId: endpointId);
     final deviceId = await identity.getDeviceId();
     final active = await sos?.readActive(ownerDeviceId: deviceId);
@@ -2372,6 +2898,9 @@ class NearbyService extends ChangeNotifier {
         ...fields,
       },
     );
+    if (event == 'identity_handshake_completed') {
+      _track(_resumeDiscoveryAfterNegotiation('identity_stabilized'));
+    }
   }
 
   void _queueIncomingRequest(NearbyConnectionEvent event) {
@@ -2992,7 +3521,9 @@ class NearbyService extends ChangeNotifier {
       // Packet อาจมีข้อความ/SOS/พิกัดส่วนตัว จึงเก็บ diagnostics แค่ type กับ ID
       // และไม่เปิดเผย payload ใน log ปกติ
       lastReceivedPacket = _diagnosticPacket(packet);
-      _log('รับ ${packet.type.name} จาก ${event.peerId}');
+      _log(
+        'รับ ${packet.type.name} จาก ${DiagnosticsLogService.peerAlias(event.peerId)}',
+      );
       switch (packet.type) {
         case RelioPacketType.identityChallenge:
           await _handleIdentityChallenge(event.peerId, packet);
@@ -3356,7 +3887,9 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _handleHello(String endpointId, RelioPacket packet) async {
-    _log('hello receive: endpoint $endpointId');
+    _log(
+      'hello receive: endpoint ${DiagnosticsLogService.peerAlias(endpointId)}',
+    );
     final savedPeer = await nearbyDevices.getDevice(packet.senderDeviceId);
     if (savedPeer?.isBlocked == true) {
       _log('blocked peer rejected after identity handshake');
@@ -3417,7 +3950,10 @@ class NearbyService extends ChangeNotifier {
       _recordIdentityStage(endpointId, 'identity_handshake_completed');
     }
     _track(_flushPendingMessages(conversationId));
-    _log('peer established: endpoint $endpointId ↔ ${packet.senderDeviceId}');
+    _log(
+      'peer established: endpoint ${DiagnosticsLogService.peerAlias(endpointId)} '
+      '↔ ${DiagnosticsLogService.peerAlias(packet.senderDeviceId)}',
+    );
   }
 
   Future<void> _flushPendingMessages(String conversationId) async {
@@ -3674,7 +4210,9 @@ class NearbyService extends ChangeNotifier {
       capabilities: capabilities ?? peer.capabilities,
       identityFingerprintHint: peer.identityFingerprintHint,
     );
-    _log('identity established endpoint=$endpointId');
+    _log(
+      'identity established endpoint=${DiagnosticsLogService.peerAlias(endpointId)}',
+    );
   }
 
   List<String> _capabilitiesFrom(Object? value) => value is List

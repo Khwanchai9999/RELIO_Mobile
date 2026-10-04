@@ -2,6 +2,38 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import '../../app/environment.dart';
+
+enum NearbyTransportTestMode {
+  clusterBaseline,
+  clusterPauseDiscovery,
+  pointToPointDiagnostic;
+
+  String get diagnosticName => switch (this) {
+    NearbyTransportTestMode.clusterBaseline => 'CLUSTER_BASELINE',
+    NearbyTransportTestMode.clusterPauseDiscovery => 'CLUSTER_PAUSE_DISCOVERY',
+    NearbyTransportTestMode.pointToPointDiagnostic =>
+      'POINT_TO_POINT_DIAGNOSTIC',
+  };
+
+  String get strategyName => switch (this) {
+    NearbyTransportTestMode.clusterBaseline ||
+    NearbyTransportTestMode.clusterPauseDiscovery => 'P2P_CLUSTER',
+    NearbyTransportTestMode.pointToPointDiagnostic => 'P2P_POINT_TO_POINT',
+  };
+
+  String get label => switch (this) {
+    NearbyTransportTestMode.clusterBaseline => 'A — Cluster ปกติ',
+    NearbyTransportTestMode.clusterPauseDiscovery =>
+      'B — Cluster หยุด Discovery ตอนเชื่อม',
+    NearbyTransportTestMode.pointToPointDiagnostic =>
+      'C — Point-to-Point ทดสอบ',
+  };
+
+  static bool isAvailableIn(RelioEnvironment environment) =>
+      environment != RelioEnvironment.production;
+}
+
 class NearbyPeer {
   const NearbyPeer({
     required this.id,
@@ -11,6 +43,11 @@ class NearbyPeer {
     this.identityFingerprintHint,
     this.capabilities = const [],
     this.isLost = false,
+    this.discoveryEpoch = 0,
+    this.foundAt,
+    this.lastSeenAt,
+    this.lostAt,
+    this.isCurrent = true,
   });
 
   /// Transport endpoint identity. This may change between sessions.
@@ -30,6 +67,11 @@ class NearbyPeer {
 
   /// True when the transport explicitly reports the endpoint is no longer seen.
   final bool isLost;
+  final int discoveryEpoch;
+  final DateTime? foundAt;
+  final DateTime? lastSeenAt;
+  final DateTime? lostAt;
+  final bool isCurrent;
 }
 
 class NearbyPayloadEvent {
@@ -178,6 +220,8 @@ abstract interface class NearbyTransport {
   String get implementationName;
   String get serviceId;
   String get strategyName;
+  NearbyTransportTestMode get testMode;
+  int get discoveryEpoch;
   Stream<NearbyPeer> get discoveredPeers;
   Stream<NearbyPayloadEvent> get incomingPayloads;
   Stream<NearbyFilePayloadEvent> get incomingFilePayloads;
@@ -185,6 +229,7 @@ abstract interface class NearbyTransport {
   Stream<NearbyConnectionEvent> get connectionEvents;
   Stream<NearbyNativeDiagnostic> get nativeDiagnostics;
   Future<Map<String, Object?>> diagnosticSnapshot();
+  Future<void> configureTestMode(NearbyTransportTestMode mode);
   Future<void> startAdvertising({
     required String displayName,
     String? identityFingerprint,
@@ -242,6 +287,8 @@ class MockNearbyTransport implements NearbyTransport {
   bool isAdvertising = false;
   bool isDiscovering = false;
   bool isDisposed = false;
+  NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
+  int _discoveryEpoch = 0;
 
   void resolveConnectionRequest(
     String peerId, {
@@ -293,7 +340,13 @@ class MockNearbyTransport implements NearbyTransport {
   String get serviceId => relioNearbyServiceId;
 
   @override
-  String get strategyName => relioNearbyStrategyName;
+  String get strategyName => _testMode.strategyName;
+
+  @override
+  NearbyTransportTestMode get testMode => _testMode;
+
+  @override
+  int get discoveryEpoch => _discoveryEpoch;
 
   @override
   Stream<NearbyPeer> get discoveredPeers => _peers.stream;
@@ -317,10 +370,19 @@ class MockNearbyTransport implements NearbyTransport {
   @override
   Future<Map<String, Object?>> diagnosticSnapshot() async => {
     'strategy': strategyName,
+    'advertisingStrategy': strategyName,
+    'discoveryStrategy': strategyName,
+    'transportTestMode': _testMode.diagnosticName,
+    'discoveryEpoch': _discoveryEpoch,
     'nearbyLibraryVersion': 'mock',
     'googlePlayServicesVersionName': 'not_applicable',
     'googlePlayServicesVersionCode': null,
   };
+
+  @override
+  Future<void> configureTestMode(NearbyTransportTestMode mode) async {
+    _testMode = mode;
+  }
 
   @override
   Future<void> startAdvertising({
@@ -343,12 +405,15 @@ class MockNearbyTransport implements NearbyTransport {
     discoveryStartCount++;
     if (startDelay > Duration.zero) await Future<void>.delayed(startDelay);
     if (discoveryStartFailure case final failure?) throw failure;
+    if (!isDiscovering) _discoveryEpoch++;
     isDiscovering = true;
   }
 
   @override
   Future<void> stopDiscovery() async {
+    if (!isDiscovering) return;
     isDiscovering = false;
+    _discoveryEpoch++;
   }
 
   @override
@@ -469,16 +534,41 @@ class MockNearbyTransport implements NearbyTransport {
     String? deviceId,
     String? identityFingerprintHint,
     List<String> capabilities = const [],
+    int? epoch,
   }) {
+    final now = DateTime.now().toUtc();
     final peer = NearbyPeer(
       id: id,
       name: name,
       deviceId: deviceId,
       identityFingerprintHint: identityFingerprintHint,
       capabilities: capabilities,
+      discoveryEpoch: epoch ?? _discoveryEpoch,
+      foundAt: peers[id]?.foundAt ?? now,
+      lastSeenAt: now,
+      isCurrent: (epoch ?? _discoveryEpoch) == _discoveryEpoch,
     );
     peers[id] = peer;
     _peers.add(peer);
+  }
+
+  void losePeer(String peerId, {int? epoch}) {
+    final peer = peers[peerId];
+    if (peer == null) return;
+    final now = DateTime.now().toUtc();
+    _peers.add(
+      NearbyPeer(
+        id: peer.id,
+        name: peer.name,
+        identityFingerprintHint: peer.identityFingerprintHint,
+        discoveryEpoch: epoch ?? peer.discoveryEpoch,
+        foundAt: peer.foundAt,
+        lastSeenAt: peer.lastSeenAt,
+        lostAt: now,
+        isLost: true,
+        isCurrent: false,
+      ),
+    );
   }
 
   void simulateIncomingConnection({
