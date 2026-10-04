@@ -114,11 +114,10 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 32 (`0.9.0+32`) is the current public
-physical-test candidate. Source version `0.9.0+33` contains locally verified
-hardening fixes and is not published; Build 32 remains the physical candidate
-until Build 33 passes its full release gates. Physical Huawei/realme radio
-retest is pending.
+overrides use Mock transport. Build 33 (`0.9.0+33`) is the current public QA
+physical-test candidate. Its automated release gates passed, but physical
+Huawei/realme Nearby radio retest is still pending; publication does not prove
+real-device behavior.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -198,12 +197,12 @@ flutter build apk --release
 The PROD Android application ID is `com.relio.relio_mobile`; DEV and QA have
 separate flavor IDs. These IDs and the QA signing identity are preserved.
 
-The public QA release remains `0.9.0+32` (versionCode 32), available from
+The public QA release is `0.9.0+33` (versionCode 33), available from
 [the RELIO QA page](https://relio-17dc0.web.app/qa/) and its linked immutable
-GitHub release. The working source is `0.9.0+33` while automated validation is
-in progress; it is not a public release. Physical interoperability remains
-pending an authorized two-phone retest. Release publication alone does not
-establish device behavior. PROD remains `com.relio.relio_mobile`.
+GitHub release. Build 33 passed automated verification; physical
+interoperability remains pending an authorized two-phone retest. Release
+publication alone does not establish device behavior. PROD remains
+`com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.9.0)
 
@@ -249,9 +248,9 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 32 is the current public QA physical-test candidate; source
-Build 33 is unpublished and awaits release gates. Neither source changes nor
-automated simulations establish physical radio behavior.
+releases. Build 33 is the current public QA physical-test candidate. Neither
+source changes nor automated simulations establish physical radio behavior;
+two-phone verification remains pending.
 
 ## Architecture
 
