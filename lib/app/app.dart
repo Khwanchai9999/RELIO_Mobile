@@ -56,7 +56,13 @@ class RelioThemeController extends ChangeNotifier {
 
   Future<void> _load() async {
     // เก็บค่าเป็น light/dark/system เพื่อไม่ผูก persistence กับข้อความบน UI
-    final saved = await _store.read();
+    String? saved;
+    try {
+      saved = await _store.read();
+    } on Object {
+      // โหลดแอปต่อด้วย ThemeMode.system ได้ แม้ preference store ใช้งานไม่ได้
+      saved = null;
+    }
     final nextMode = switch (saved) {
       'dark' => ThemeMode.dark,
       'light' => ThemeMode.light,
@@ -428,6 +434,9 @@ class RelioShell extends StatelessWidget {
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
+        labelBehavior: MediaQuery.sizeOf(context).width < 380
+            ? NavigationDestinationLabelBehavior.onlyShowSelected
+            : NavigationDestinationLabelBehavior.alwaysShow,
         onDestinationSelected: (index) => context.go(routes[index]),
         destinations: const [
           NavigationDestination(

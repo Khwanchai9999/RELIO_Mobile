@@ -46,18 +46,27 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('สวัสดี 👋', style: Theme.of(context).textTheme.bodySmall),
-                FutureBuilder<String>(
-                  future: _dependencies.identity.getDisplayName(),
-                  builder: (context, snapshot) => Text(
-                    snapshot.data ?? 'ผู้ใช้ RELIO',
-                    style: Theme.of(context).textTheme.titleLarge,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'สวัสดี 👋',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                ),
-              ],
+                  FutureBuilder<String>(
+                    future: _dependencies.identity.getDisplayName(),
+                    builder: (context, snapshot) => Text(
+                      snapshot.data ?? 'ผู้ใช้ RELIO',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -446,7 +455,14 @@ class _LiveStatusLine extends StatelessWidget {
     children: [
       Icon(Icons.circle, size: 9, color: color ?? RelioColors.primary),
       const SizedBox(width: 6),
-      Text('$label: $value', style: Theme.of(context).textTheme.bodySmall),
+      Flexible(
+        child: Text(
+          '$label: $value',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ),
     ],
   );
 }

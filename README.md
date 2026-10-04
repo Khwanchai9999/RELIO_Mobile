@@ -15,6 +15,15 @@ when a temporary transport connection ends.
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
+## Project overview
+
+RELIO addresses the loss of direct communication during an Internet outage.
+Nearby Connections is the direct transport; Drift/SQLite keeps conversations,
+messages, SOS state, and queued work on the device. Optional Supabase sync is a
+separate path that can resume when Internet and an authenticated account are
+available. Offline-first storage does not mean real-radio behavior has been
+physically verified: Build 33 still requires the two-phone checklist.
+
 ## Current scope (v0.9.0 development / Android QA)
 
 - Optional Supabase email/password authentication with guest/offline entry
@@ -22,7 +31,7 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   missing configuration is safe and does not block local use
 - `CloudDataSource`, `CloudAuthService`, `SupabaseCloudDataSource`, and
   deterministic `FakeCloudDataSource`
-- Versioned SQL migrations with normalized tables, RLS policies, and private
+- Versioned Supabase schema with normalized tables, RLS policies, and private
   `relio-media` storage
 - Developer-only `/developer/cloud` diagnostics
 - `SyncEngine` processes only queue items owned by the currently authenticated
@@ -33,14 +42,13 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   and new queue items; manual `ซิงก์ตอนนี้` is also available
 - SQLite remains authoritative. Cloud failures preserve local data and queue
   ownership through retry and crash recovery
-- `FakeCloudDataSource` is the default automated verification path; no live
-  Supabase upload or physical-device sync was performed for v0.6
-- Supabase adapter configuration, error mapping, RLS, and private Storage path
-  hardening are prepared for live verification; credentials remain absent
+- `FakeCloudDataSource` is the deterministic automated test path; routine tests
+  do not upload live user data
 - Public QA update checks use a small HTTPS manifest and are enabled only in
   RELIO Test; APK download and Android installation require explicit user
   actions
-- Firebase App Distribution Build 11 remains an internal/fallback channel
+- Firebase App Distribution is an internal/fallback QA channel; the public QA
+  APK is an immutable GitHub Release asset, not hosted on Firebase
 - Full App Distribution SDK and public QA installation behavior are excluded
   from DEV and PROD
 
@@ -62,7 +70,7 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 5 with conversations, persistent unread/read
+- Drift database schema version 7 with conversations, persistent unread/read
   state, trusted/blocked peer metadata, messages, attachments,
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables
@@ -112,12 +120,18 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 - Physical Android device-to-device verification is deferred; see
   [docs/MANUAL_DEVICE_TESTS.md](docs/MANUAL_DEVICE_TESTS.md)
 
+Instructor-facing references: [architecture](docs/architecture.md),
+[testing](docs/testing.md), [demo checklist](docs/demo-checklist.md), and
+[submission checklist](docs/submission-checklist.md).
+
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
 overrides use Mock transport. Build 33 (`0.9.0+33`) is the current public QA
 physical-test candidate. Its automated release gates passed, but physical
 Huawei/realme Nearby radio retest is still pending; publication does not prove
 real-device behavior.
+The current source hardening candidate is Build 34 (`0.9.0+34`) and is not yet
+released; it must pass all automated and packaging gates before distribution.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase

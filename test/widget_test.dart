@@ -48,6 +48,61 @@ void main() {
     expect(find.text('เข้าสู่ระบบ'), findsOneWidget);
   });
 
+  testWidgets('primary navigation remains usable with larger text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.binding.platformDispatcher.clearTextScaleFactorTestValue();
+    });
+
+    await pumpApp(tester);
+    await tapText(tester, 'ใช้งานแบบออฟไลน์');
+    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byIcon(Icons.radar_outlined));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      1,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byIcon(Icons.chat_bubble_outline));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      2,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byIcon(Icons.warning_amber_outlined));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      3,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byIcon(Icons.person_outline));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+      4,
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('ตั้งค่า'));
+    await tester.pumpAndSettle();
+    expect(find.text('ตั้งค่า'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('offline entry navigates to Home and primary navigation works', (
     tester,
   ) async {

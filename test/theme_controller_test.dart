@@ -23,6 +23,15 @@ class _MemoryThemeStore implements RelioThemePreferenceStore {
   }
 }
 
+class _UnavailableThemeStore implements RelioThemePreferenceStore {
+  @override
+  Future<String?> read() async => throw StateError('preference unavailable');
+
+  @override
+  Future<void> write(String value) async =>
+      throw StateError('preference unavailable');
+}
+
 void main() {
   group('RelioThemeController', () {
     test('defaults to system and unknown values fall back to system', () async {
@@ -38,6 +47,20 @@ void main() {
       await unknownController.load();
       expect(unknownController.mode, ThemeMode.system);
     });
+
+    test(
+      'preference read failure falls back without blocking app startup',
+      () async {
+        final controller = RelioThemeController(
+          store: _UnavailableThemeStore(),
+        );
+
+        await controller.load();
+
+        expect(controller.isLoaded, isTrue);
+        expect(controller.mode, ThemeMode.system);
+      },
+    );
 
     test('loads and saves all supported modes using stable values', () async {
       for (final entry in <ThemeMode, String>{

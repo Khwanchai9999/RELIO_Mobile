@@ -525,12 +525,14 @@ class DriftMessageRepository implements MessageRepository {
     required String text,
     required DateTime createdAt,
   }) async {
-    final exists = await (db.select(
-      db.messages,
-    )..where((row) => row.id.equals(messageId))).getSingleOrNull();
-    if (exists != null) return _map(exists);
-    final now = DateTime.now();
-    await db.transaction(() async {
+    return db.transaction(() async {
+      // ตรวจ UUID ภายใน transaction เพื่อให้ packet ซ้ำพร้อมกันไม่ชน primary key
+      final exists = await (db.select(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+      if (exists != null) return _map(exists);
+
+      final now = DateTime.now();
       await db
           .into(db.messages)
           .insert(
@@ -548,32 +550,20 @@ class DriftMessageRepository implements MessageRepository {
             ),
           );
       await conversations.updateLastActivity(conversationId, createdAt);
-      await (db.update(
-        db.conversations,
-      )..where((row) => row.id.equals(conversationId))).write(
-        ConversationsCompanion(
-          unreadCount: Value(
-            (await (db.select(db.conversations)
-                          ..where((row) => row.id.equals(conversationId)))
-                        .getSingle())
-                    .unreadCount +
-                1,
-          ),
-        ),
+      await _incrementUnread(conversationId);
+      return RelioMessage(
+        id: messageId,
+        conversationId: conversationId,
+        senderId: senderId,
+        senderDeviceId: senderDeviceId,
+        text: text,
+        time: _formatTime(createdAt),
+        createdAt: createdAt,
+        outgoing: false,
+        type: MessageType.text,
+        status: DeliveryStatus.delivered,
       );
     });
-    return RelioMessage(
-      id: messageId,
-      conversationId: conversationId,
-      senderId: senderId,
-      senderDeviceId: senderDeviceId,
-      text: text,
-      time: _formatTime(createdAt),
-      createdAt: createdAt,
-      outgoing: false,
-      type: MessageType.text,
-      status: DeliveryStatus.delivered,
-    );
   }
 
   @override
@@ -628,30 +618,41 @@ class DriftMessageRepository implements MessageRepository {
     required String messageId,
     required LocationData location,
   }) async {
-    final exists = await getMessage(messageId);
-    if (exists != null) return exists;
-    final now = DateTime.now();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: messageId,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: MessageType.location.name,
-            content: 'ตำแหน่งที่แชร์',
-            createdAt: location.capturedAt,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.delivered.name,
-            isOutgoing: false,
-            latitude: Value(location.latitude),
-            longitude: Value(location.longitude),
-          ),
-        );
-    await conversations.updateLastActivity(conversationId, location.capturedAt);
-    await _incrementUnread(conversationId);
-    return (await getMessage(messageId))!;
+    return db.transaction(() async {
+      final exists = await (db.select(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+      if (exists != null) return _map(exists);
+      final now = DateTime.now();
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: messageId,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: MessageType.location.name,
+              content: 'ตำแหน่งที่แชร์',
+              createdAt: location.capturedAt,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.delivered.name,
+              isOutgoing: false,
+              latitude: Value(location.latitude),
+              longitude: Value(location.longitude),
+            ),
+          );
+      await conversations.updateLastActivity(
+        conversationId,
+        location.capturedAt,
+      );
+      await _incrementUnread(conversationId);
+      return _map(
+        await (db.select(
+          db.messages,
+        )..where((row) => row.id.equals(messageId))).getSingle(),
+      );
+    });
   }
 
   @override
@@ -722,29 +723,37 @@ class DriftMessageRepository implements MessageRepository {
     required String fileName,
     required String localPath,
   }) async {
-    final exists = await getMessage(messageId);
-    if (exists != null) return exists;
-    final now = DateTime.now();
-    await db
-        .into(db.messages)
-        .insert(
-          MessagesCompanion.insert(
-            id: messageId,
-            conversationId: conversationId,
-            senderId: senderId,
-            senderDeviceId: Value(senderDeviceId),
-            messageType: type.name,
-            content: fileName,
-            createdAt: now,
-            updatedAt: now,
-            deliveryStatus: DeliveryStatus.delivered.name,
-            isOutgoing: false,
-            localFilePath: Value(localPath),
-          ),
-        );
-    await conversations.updateLastActivity(conversationId, now);
-    await _incrementUnread(conversationId);
-    return (await getMessage(messageId))!;
+    return db.transaction(() async {
+      final exists = await (db.select(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+      if (exists != null) return _map(exists);
+      final now = DateTime.now();
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: messageId,
+              conversationId: conversationId,
+              senderId: senderId,
+              senderDeviceId: Value(senderDeviceId),
+              messageType: type.name,
+              content: fileName,
+              createdAt: now,
+              updatedAt: now,
+              deliveryStatus: DeliveryStatus.delivered.name,
+              isOutgoing: false,
+              localFilePath: Value(localPath),
+            ),
+          );
+      await conversations.updateLastActivity(conversationId, now);
+      await _incrementUnread(conversationId);
+      return _map(
+        await (db.select(
+          db.messages,
+        )..where((row) => row.id.equals(messageId))).getSingle(),
+      );
+    });
   }
 
   @override

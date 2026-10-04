@@ -34,10 +34,12 @@ class RelioAppBar extends StatelessWidget implements PreferredSizeWidget {
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title),
+          Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
           if (subtitle != null)
             Text(
               subtitle!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
@@ -465,22 +467,22 @@ class RelioChatListTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Text(
+                      chat.name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 3,
                       children: [
-                        Flexible(
-                          child: Text(
-                            chat.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 7),
                         RelioStatusChip(status: chat.status, compact: true),
-                        const SizedBox(width: 6),
                         _SourceBadge(label: chat.isDemo ? 'DEMO' : 'REAL'),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       chat.message,
                       maxLines: 1,
@@ -567,19 +569,8 @@ class RelioMessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (message.type == MessageType.image &&
-                message.localFilePath != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.file(
-                  File(message.localFilePath!),
-                  width: 230,
-                  height: 170,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) =>
-                      const Icon(Icons.broken_image_outlined, size: 56),
-                ),
-              ),
+            if (message.type == MessageType.image)
+              _ImageMessagePreview(filePath: message.localFilePath),
             if (message.type == MessageType.video)
               Container(
                 width: 230,
@@ -661,6 +652,86 @@ class RelioMessageBubble extends StatelessWidget {
   }
 }
 
+class _ImageMessagePreview extends StatelessWidget {
+  const _ImageMessagePreview({required this.filePath});
+
+  final String? filePath;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = filePath;
+    if (path == null || path.isEmpty) return _missingImage();
+    return Tooltip(
+      message: 'เปิดรูปภาพเต็มจอ',
+      child: InkWell(
+        onTap: () => _showViewer(context, path),
+        borderRadius: BorderRadius.circular(12),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.file(
+            File(path),
+            width: 230,
+            height: 170,
+            fit: BoxFit.contain,
+            errorBuilder: (_, _, _) => _missingImage(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _missingImage() => const SizedBox(
+    width: 230,
+    height: 100,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.broken_image_outlined, size: 36),
+        SizedBox(height: 4),
+        Text('ไม่พบไฟล์รูปภาพ'),
+      ],
+    ),
+  );
+
+  Future<void> _showViewer(BuildContext context, String path) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        child: Stack(
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(dialogContext).width - 32,
+                maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.8,
+              ),
+              child: InteractiveViewer(
+                child: Image.file(
+                  File(path),
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const Padding(
+                    padding: EdgeInsets.all(32),
+                    child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton(
+                tooltip: 'ปิดรูปภาพ',
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class RelioLocationCard extends StatelessWidget {
   const RelioLocationCard({
     this.title = 'ตำแหน่งล่าสุด',
@@ -692,7 +763,14 @@ class RelioLocationCard extends StatelessWidget {
                   color: RelioColors.primary,
                 ),
                 const SizedBox(width: 8),
-                Text(title, style: Theme.of(context).textTheme.titleMedium),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 12),

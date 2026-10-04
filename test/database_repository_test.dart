@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/cloud/cloud_models.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
+import 'package:relio_mobile/core/domain/relio_entities.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/core/sync/sync_types.dart';
@@ -117,6 +118,136 @@ void main() {
       );
     },
   );
+
+  test(
+    'concurrent duplicate incoming text increments unread only once',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'peer-concurrent-duplicate',
+        participantId: 'peer-concurrent-duplicate',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      final receivedAt = DateTime.utc(2026, 10, 4, 8);
+
+      final results = await Future.wait([
+        repositories.messages.createIncomingText(
+          conversationId: 'peer-concurrent-duplicate',
+          senderId: 'peer-user',
+          senderDeviceId: 'peer-device',
+          messageId: 'duplicate-message',
+          text: 'one logical message',
+          createdAt: receivedAt,
+        ),
+        repositories.messages.createIncomingText(
+          conversationId: 'peer-concurrent-duplicate',
+          senderId: 'peer-user',
+          senderDeviceId: 'peer-device',
+          messageId: 'duplicate-message',
+          text: 'one logical message',
+          createdAt: receivedAt,
+        ),
+      ]);
+
+      expect(results.map((message) => message.id).toSet(), {
+        'duplicate-message',
+      });
+      expect(
+        await repositories.messages.listMessages('peer-concurrent-duplicate'),
+        hasLength(1),
+      );
+      expect(
+        (await repositories.conversations.getConversation(
+          'peer-concurrent-duplicate',
+        ))?.unreadCount,
+        1,
+      );
+    },
+  );
+
+  test(
+    'concurrent duplicate incoming media creates one local message',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'peer-concurrent-media',
+        participantId: 'peer-concurrent-media',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+
+      await Future.wait([
+        repositories.messages.createIncomingMedia(
+          conversationId: 'peer-concurrent-media',
+          senderId: 'peer-user',
+          senderDeviceId: 'peer-device',
+          messageId: 'duplicate-image',
+          type: MessageType.image,
+          fileName: 'photo.png',
+          localPath: 'managed/photo.png',
+        ),
+        repositories.messages.createIncomingMedia(
+          conversationId: 'peer-concurrent-media',
+          senderId: 'peer-user',
+          senderDeviceId: 'peer-device',
+          messageId: 'duplicate-image',
+          type: MessageType.image,
+          fileName: 'photo.png',
+          localPath: 'managed/photo.png',
+        ),
+      ]);
+
+      expect(
+        await repositories.messages.listMessages('peer-concurrent-media'),
+        hasLength(1),
+      );
+      expect(
+        (await repositories.conversations.getConversation(
+          'peer-concurrent-media',
+        ))?.unreadCount,
+        1,
+      );
+    },
+  );
+
+  test('incoming location retains coordinates and deduplicates', () async {
+    await repositories.conversations.ensureConversation(
+      id: 'peer-location',
+      participantId: 'peer-location',
+      displayName: 'Peer',
+      participantStatus: DeviceStatus.normal,
+    );
+    final location = LocationData(
+      latitude: 13.7563,
+      longitude: 100.5018,
+      capturedAt: DateTime.utc(2026, 10, 4, 9),
+      accuracyMeters: 12.5,
+    );
+
+    final first = await repositories.messages.createIncomingLocation(
+      conversationId: 'peer-location',
+      senderId: 'peer-user',
+      senderDeviceId: 'peer-device',
+      messageId: 'location-message',
+      location: location,
+    );
+    final duplicate = await repositories.messages.createIncomingLocation(
+      conversationId: 'peer-location',
+      senderId: 'peer-user',
+      senderDeviceId: 'peer-device',
+      messageId: 'location-message',
+      location: location,
+    );
+
+    expect(first.latitude, 13.7563);
+    expect(first.longitude, 100.5018);
+    expect(duplicate.id, first.id);
+    expect(
+      (await repositories.conversations.getConversation(
+        'peer-location',
+      ))?.unreadCount,
+      1,
+    );
+  });
 
   test(
     'Cloud read receipt merge keeps read state and earliest timestamp',
@@ -419,6 +550,106 @@ void main() {
       );
       expect(upgraded.schemaVersion, 7);
       await upgraded.close();
+    },
+  );
+
+  test(
+    'reopening the current database preserves local state and completed work',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('relio-reopen-');
+      addTearDown(() => directory.delete(recursive: true));
+      final file = File('${directory.path}${Platform.pathSeparator}relio.db');
+      final firstDatabase = AppDatabase.withExecutor(NativeDatabase(file));
+      final firstRepositories = RelioRepositories(
+        firstDatabase,
+        ownerUserIdProvider: () => 'account-a',
+      );
+      await firstRepositories.conversations.ensureConversation(
+        id: 'persistent-peer',
+        participantId: 'persistent-peer',
+        displayName: 'Persistent Peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      await firstRepositories.messages.createIncomingText(
+        conversationId: 'persistent-peer',
+        senderId: 'peer-user',
+        senderDeviceId: 'peer-device',
+        messageId: 'persistent-message',
+        text: 'keep this locally',
+        createdAt: DateTime.utc(2026, 10, 4, 10),
+      );
+      await firstRepositories.nearbyDevices.upsert(
+        deviceId: 'trusted-peer',
+        displayName: 'Trusted Peer',
+        status: DeviceStatus.normal,
+      );
+      await firstRepositories.nearbyDevices.setTrustedIdentity(
+        deviceId: 'trusted-peer',
+        publicIdentityKey: 'pinned-public-key',
+        fingerprint: List.filled(64, 'b').join(),
+      );
+      await firstRepositories.attachments.createPending(
+        id: 'persistent-attachment',
+        messageId: 'persistent-message',
+        transferId: 'persistent-transfer',
+        mediaType: MediaType.image,
+        fileName: 'photo.png',
+        mimeType: 'image/png',
+        localPath: 'managed/photo.png',
+        byteSize: 100,
+      );
+      await firstRepositories.settings.setBool('rescue_mode', true);
+      final completed = await firstRepositories.syncQueue.enqueue(
+        entityType: 'message',
+        entityId: 'already-synced',
+        operation: 'messageUpsert',
+        ownerUserId: 'account-a',
+      );
+      await firstRepositories.syncQueue.markCompleted(completed.id);
+      await firstDatabase.close();
+
+      final reopened = AppDatabase.withExecutor(NativeDatabase(file));
+      addTearDown(reopened.close);
+      final reopenedRepositories = RelioRepositories(
+        reopened,
+        ownerUserIdProvider: () => 'account-a',
+      );
+
+      expect(
+        (await reopenedRepositories.conversations.getConversation(
+          'persistent-peer',
+        ))?.unreadCount,
+        1,
+      );
+      expect(
+        (await reopenedRepositories.messages.getMessage(
+          'persistent-message',
+        ))?.text,
+        'keep this locally',
+      );
+      expect(
+        (await reopenedRepositories.nearbyDevices.getDevice(
+          'trusted-peer',
+        ))?.publicIdentityFingerprint,
+        List.filled(64, 'b').join(),
+      );
+      expect(
+        await reopenedRepositories.attachments.getById('persistent-attachment'),
+        isNotNull,
+      );
+      expect(
+        await reopenedRepositories.settings.getBool(
+          'rescue_mode',
+          defaultValue: false,
+        ),
+        isTrue,
+      );
+      expect(
+        (await reopenedRepositories.syncQueue.listAll())
+            .singleWhere((item) => item.id == completed.id)
+            .status,
+        SyncQueueStatus.completed.value,
+      );
     },
   );
 }

@@ -205,6 +205,88 @@ void main() {
   });
 
   test(
+    'video is bounded, copied locally, and retains failed transfer state',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('relio-video-');
+      addTearDown(() => directory.delete(recursive: true));
+      final root = Directory('${directory.path}/managed');
+      final file = File('${directory.path}/sample.mp4')
+        ..writeAsBytesSync([
+          0,
+          0,
+          0,
+          24,
+          102,
+          116,
+          121,
+          112,
+          105,
+          115,
+          111,
+          109,
+          0,
+          0,
+          0,
+          1,
+        ]);
+      final storage = MediaStorageService(
+        rootDirectory: root,
+        policy: const MediaTransferPolicy(maxVideoBytes: 16),
+      );
+      final metadata = await storage.validateFile(file.path);
+
+      expect(metadata.mimeType, 'video/mp4');
+      expect(metadata.mediaType, 'video');
+      expect(metadata.byteSize, 16);
+      final managedPath = await storage.copySelectedFile(file.path);
+      expect(await storage.isManagedFile(managedPath), isTrue);
+
+      final oversized = File('${directory.path}/oversized.mp4')
+        ..writeAsBytesSync([
+          0,
+          0,
+          0,
+          24,
+          102,
+          116,
+          121,
+          112,
+          105,
+          115,
+          111,
+          109,
+          ...List<int>.filled(5, 0),
+        ]);
+      await expectLater(
+        storage.validateFile(oversized.path),
+        throwsA(isA<MediaStorageException>()),
+      );
+
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      final repositories = RelioRepositories(database);
+      final attachment = await repositories.attachments.createPending(
+        id: 'video-attachment',
+        messageId: 'video-message',
+        transferId: 'video-transfer',
+        mediaType: MediaType.video,
+        fileName: 'sample.mp4',
+        mimeType: metadata.mimeType,
+        localPath: managedPath,
+        byteSize: metadata.byteSize,
+      );
+      await repositories.attachments.markFailed(attachment.id, 'test_failure');
+      final failed = await repositories.attachments.getById(attachment.id);
+
+      expect(failed?.mediaType, MediaType.video);
+      expect(failed?.mimeType, 'video/mp4');
+      expect(failed?.byteSize, 16);
+      expect(failed?.transferStatus, MediaTransferState.failed);
+      expect(failed?.errorCode, 'test_failure');
+    },
+  );
+
+  test(
     'fake location service supports success and unavailable states',
     () async {
       final now = DateTime.utc(2026, 1, 1);
