@@ -23,7 +23,7 @@
 
 ## Current handoff state
 
-- Public QA physical-test candidate: RELIO `0.9.0+33`, versionCode 33.
-- Build 34 hardening work must pass automated and packaging gates before it is
-  described as a distributable candidate.
+- Public QA physical-test candidate: RELIO `0.9.0+34`, versionCode 34.
+- Build 34 automated, flavor, QA/PROD isolation, signer, and updater gates
+  passed; the public GitHub asset and QA Hosting metadata were verified.
 - Two-phone Native Nearby verification remains owner-controlled and pending.

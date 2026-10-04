@@ -126,12 +126,10 @@ Instructor-facing references: [architecture](docs/architecture.md),
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 33 (`0.9.0+33`) is the current public QA
+overrides use Mock transport. Build 34 (`0.9.0+34`) is the current public QA
 physical-test candidate. Its automated release gates passed, but physical
 Huawei/realme Nearby radio retest is still pending; publication does not prove
 real-device behavior.
-The current source hardening candidate is Build 34 (`0.9.0+34`) and is not yet
-released; it must pass all automated and packaging gates before distribution.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -211,9 +209,9 @@ flutter build apk --release
 The PROD Android application ID is `com.relio.relio_mobile`; DEV and QA have
 separate flavor IDs. These IDs and the QA signing identity are preserved.
 
-The public QA release is `0.9.0+33` (versionCode 33), available from
+The public QA release is `0.9.0+34` (versionCode 34), available from
 [the RELIO QA page](https://relio-17dc0.web.app/qa/) and its linked immutable
-GitHub release. Build 33 passed automated verification; physical
+GitHub release. Build 34 passed automated verification; physical
 interoperability remains pending an authorized two-phone retest. Release
 publication alone does not establish device behavior. PROD remains
 `com.relio.relio_mobile`.
@@ -262,7 +260,7 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 33 is the current public QA physical-test candidate. Neither
+releases. Build 34 is the current public QA physical-test candidate. Neither
 source changes nor automated simulations establish physical radio behavior;
 two-phone verification remains pending.
 
