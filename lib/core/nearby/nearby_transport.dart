@@ -234,6 +234,8 @@ class MockNearbyTransport implements NearbyTransport {
   int discoveryStartCount = 0;
   int resetSessionOperationsCount = 0;
   int connectionRequestCount = 0;
+  int disconnectCount = 0;
+  int acceptConnectionCount = 0;
   bool holdConnectionRequests = false;
   final Set<String> acceptedConnections = {};
   final Set<String> rejectedConnections = {};
@@ -241,7 +243,13 @@ class MockNearbyTransport implements NearbyTransport {
   bool isDiscovering = false;
   bool isDisposed = false;
 
-  void resolveConnectionRequest(String peerId, {required bool connected}) {
+  void resolveConnectionRequest(
+    String peerId, {
+    required bool connected,
+    int? rawStatusCode,
+    String? rawStatusName,
+    String? rawStatusMessage,
+  }) {
     final peer = peers[peerId];
     if (peer == null) return;
     if (connected) {
@@ -257,12 +265,24 @@ class MockNearbyTransport implements NearbyTransport {
         NearbyConnectionEvent(
           peer: established,
           state: NearbyConnectionState.connected,
+          rawStatusCode: rawStatusCode,
+          rawStatusName: rawStatusName,
+          rawStatusMessage: rawStatusMessage,
+          operation: 'onConnectionResult',
         ),
       );
       return;
     }
     _connections.add(
-      NearbyConnectionEvent(peer: peer, state: NearbyConnectionState.failed),
+      NearbyConnectionEvent(
+        peer: peer,
+        state: NearbyConnectionState.failed,
+        error: rawStatusName ?? 'native failure',
+        rawStatusCode: rawStatusCode,
+        rawStatusName: rawStatusName,
+        rawStatusMessage: rawStatusMessage,
+        operation: 'onConnectionResult',
+      ),
     );
   }
 
@@ -343,6 +363,7 @@ class MockNearbyTransport implements NearbyTransport {
     String peerId, {
     String? connectionTraceId,
   }) async {
+    acceptConnectionCount++;
     acceptedConnections.add(peerId);
   }
 
@@ -390,6 +411,7 @@ class MockNearbyTransport implements NearbyTransport {
 
   @override
   Future<void> disconnect(String peerId) async {
+    disconnectCount++;
     final peer = peers[peerId];
     if (peer == null) return;
     final disconnected = NearbyPeer(id: peer.id, name: peer.name);
@@ -525,6 +547,19 @@ class MockNearbyTransport implements NearbyTransport {
         peer: NearbyPeer(id: peer.id, name: peer.name),
         state: NearbyConnectionState.disconnected,
         error: 'Mock connection loss',
+      ),
+    );
+  }
+
+  void simulateEndpointLoss(String peerId) {
+    final peer = peers[peerId];
+    if (peer == null) return;
+    _peers.add(
+      NearbyPeer(
+        id: peer.id,
+        name: peer.name,
+        identityFingerprintHint: peer.identityFingerprintHint,
+        isLost: true,
       ),
     );
   }

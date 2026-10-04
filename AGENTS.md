@@ -153,13 +153,15 @@ flutter build apk --flavor prod --debug
 
 QA debug builds must receive the approved updater dart-defines from
 `scripts/public-qa-config.ps1`. Build 28 (`0.9.0+28`) remains the latest public
-QA release; Build 31 (`0.9.0+31`) is the native Nearby transport candidate.
+QA release; Build 32 (`0.9.0+32`) is the local-first Nearby negotiation
+stability candidate.
 Android Keystore identity and bidirectional direct Cloud text sync are locally
 automated-tested. Build 30 fixes asymmetric identity-hint handling, duplicate
 connection prompts, and Nearby session restarts that could disconnect active
-peers. Build 31 captures exact native resolution results and protects active
-negotiation from bounded lifecycle/readiness session reconciliation. Physical
-retest remains deferred; do not install builds
+peers. Build 31 captures exact native resolution results. Build 32 separates
+Nearby negotiation phases, keeps the 35-second application timeout soft, and
+uses a later hard watchdog only for stale native negotiation. Physical retest
+remains deferred; do not install builds
 on phones or claim physical behavior without explicit physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a
@@ -186,8 +188,9 @@ performing them. Build 25 pins cryptographic peer identity and gates automatic
 reconnect on signed challenge-response; Build 26 adds Cloud pull/merge, Build
 27 adds connection diagnostics, Build 28 fixes first-contact identity
 handshake handling, Build 29 improves offline media delivery, Build 30
-stabilizes trusted reconnect, and Build 31 adds native connection resolution
-diagnostics and bounded negotiation lifecycle ownership. Unit
+stabilizes trusted reconnect, Build 31 adds native connection resolution
+diagnostics, and Build 32 adds soft/hard negotiation ownership with a local
+two-peer delayed-resolution harness. Unit
 tests, emulator checks, and signed builds do not prove physical behavior or
 remote policy enforcement.
 

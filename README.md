@@ -109,8 +109,8 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
 overrides use Mock transport. Build 28 (`0.9.0+28`) remains the current public
-QA release. Build 31 (`0.9.0+31`) is the native Nearby diagnostics and
-negotiation-lifecycle candidate; its physical Huawei/realme retest is pending.
+QA release. Build 32 (`0.9.0+32`) is the local-first Nearby negotiation-
+stability candidate; its physical Huawei/realme retest is pending.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -126,11 +126,12 @@ delivery over Nearby and adds privacy-aware previews and transfer diagnostics.
 Build 30 aligns advertising and outgoing-request fingerprint metadata, verifies
 trusted identity after a hintless transport handshake, deduplicates reconnect
 prompts, and preserves active connections across discovery/advertising restarts.
-Build 31 preserves raw Google Nearby resolution status in a repository-local
-Android plugin bridge, records Google Play Services/strategy snapshots, defers
-session reconciliation during active negotiations, and bounds lifecycle grace
-to the existing attempt timeout. Physical retesting remains pending; this
-source/test evidence is not a claim of radio success.
+Build 31 preserved raw Google Nearby resolution status in a repository-local
+Android plugin bridge and added lifecycle/session diagnostics. Build 32 keeps
+that bridge, separates request/accept/result phases, changes the 35-second
+application timeout to a non-destructive soft timeout, and uses a later hard
+watchdog only for stale native negotiations. Physical retesting remains
+pending; this source/test evidence is not a claim of radio success.
 Physical testing across Android versions is still required before claiming
 device-level compatibility; see
 `docs/MANUAL_DEVICE_TESTS.md`.
@@ -235,7 +236,7 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 28 is the current public QA release; Build 31 is the current
+releases. Build 28 is the current public QA release; Build 32 is the current
 unpublished native transport candidate and is not physically verified.
 
 ## Architecture

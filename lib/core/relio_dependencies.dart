@@ -39,6 +39,7 @@ class RelioDependencies {
     PermissionService? permissionService,
     bool? androidPlatformOverride,
     Duration connectionAttemptTimeout = const Duration(seconds: 35),
+    Duration hardNegotiationTimeout = const Duration(seconds: 90),
   }) : database = database ?? AppDatabase(),
        _isAndroid = androidPlatformOverride ?? Platform.isAndroid,
        useMockTransport = useMockTransport ?? _defaultMockTransport,
@@ -102,6 +103,7 @@ class RelioDependencies {
       relayEngine: relayEngine,
       diagnostics: diagnostics,
       connectionAttemptTimeout: connectionAttemptTimeout,
+      hardNegotiationTimeout: hardNegotiationTimeout,
     );
     syncEngine = SyncEngine(
       repositories: repositories,
@@ -222,28 +224,18 @@ class RelioDependencies {
     }
     if (changed && !foreground && nearbyService.hasActiveConnectionAttempts) {
       _backgroundStopDeferred = true;
+      // รักษา native negotiation ไว้ระหว่าง lifecycle สั้น ๆ; hard watchdog
+      // ของ NearbyService เป็นเจ้าของการตัด stale attempt เพียงจุดเดียว
       _backgroundNegotiationGraceTimer?.cancel();
+      _backgroundNegotiationGraceTimer = null;
       diagnostics.record(
         'lifecycle',
         'session_stop_deferred_active_connection',
         operation: 'setNearbyForeground',
         fields: {
           'activeConnectionAttempts': nearbyService.activeConnectionAttempts,
-          'graceMs': nearbyService.connectionAttemptTimeout.inMilliseconds,
+          'hardWatchdogMs': nearbyService.hardNegotiationTimeout.inMilliseconds,
           'appLifecycleState': nearbyService.appLifecycleState,
-          'screenRoute': nearbyService.screenRoute,
-        },
-      );
-      _backgroundNegotiationGraceTimer = Timer(
-        nearbyService.connectionAttemptTimeout +
-            const Duration(milliseconds: 250),
-        () {
-          if (_disposed || _nearbyForeground) return;
-          if (nearbyService.hasActiveConnectionAttempts) {
-            nearbyService.expireActiveConnectionAttemptsForBackground();
-          } else {
-            _onNearbyServiceChanged();
-          }
         },
       );
       return Future.value(true);

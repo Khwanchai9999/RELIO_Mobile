@@ -71,6 +71,10 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
           (entry) => {
             'peerAlias': DiagnosticsLogService.peerAlias(entry.key),
             'state': entry.value.name,
+            'phase': service.connectionPhaseForEndpoint(entry.key)?.name,
+            'phaseStartedAt': service
+                .connectionPhaseStartedAt(entry.key)
+                ?.toIso8601String(),
             'failure': service.peerErrors[entry.key],
           },
         )
@@ -100,6 +104,9 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
       'lastFailure': lastFailure,
       'lastNearbyNativeError': service.lastDiagnostic,
       'activeNegotiation': service.hasActiveConnectionAttempts,
+      'relioBuild': RelioBuildInfo.buildLabel,
+      'protocolVersion': 2,
+      'nearbyDiagnosticVersion': '1',
       'nativeStatusCode': nativeFailure?.rawStatusCode,
       'nativeStatusName': nativeFailure?.rawStatusName,
       'nativeStatusMessage': nativeFailure?.rawStatusMessage,
@@ -146,6 +153,9 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
           'app': RelioBuildInfo.appName,
           'version': RelioBuildInfo.versionName,
           'build': RelioBuildInfo.buildNumber,
+          'relioBuild': RelioBuildInfo.buildLabel,
+          'protocolVersion': 2,
+          'nearbyDiagnosticVersion': '1',
           'package': _device['package'] ?? 'unknown',
           'flavor': RelioBuildInfo.environmentLabel,
         },
@@ -187,6 +197,8 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
         children: [
           _section('แอป', [
             'RELIO ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
+            'RELIO Build: ${RelioBuildInfo.buildNumber}',
+            'Protocol / Nearby diagnostic: v2 / v1',
             'Package: ${_device['package'] ?? 'กำลังอ่าน'}',
             'Flavor: ${RelioBuildInfo.environmentLabel}',
           ]),

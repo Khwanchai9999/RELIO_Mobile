@@ -582,7 +582,7 @@ void main() {
   );
 
   test(
-    'long pause expires an unresolved attempt and stops the session',
+    'long pause keeps an unresolved native attempt and defers session work',
     () async {
       const ready = RuntimeConnectivitySnapshot(
         hasInternetRoute: false,
@@ -626,10 +626,10 @@ void main() {
 
       expect(
         dependencies.nearbyService.peerStates['paused-negotiation'],
-        NearbyConnectionState.failed,
+        NearbyConnectionState.connecting,
       );
-      expect(transport.isAdvertising, isFalse);
-      expect(transport.isDiscovering, isFalse);
+      expect(transport.isAdvertising, isTrue);
+      expect(transport.isDiscovering, isTrue);
       expect(transport.resetSessionOperationsCount, 0);
     },
   );

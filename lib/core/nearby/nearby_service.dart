@@ -36,6 +36,20 @@ enum NearbyApplicationState {
   failed,
 }
 
+/// แยก phase ของ Native negotiation จากสถานะบนหน้าจอ เพื่อให้การเชื่อมต่อช้า
+/// แสดงเป็น slow ได้โดยไม่ถูกตัดสินว่า failed
+enum NearbyConnectionPhase {
+  requestSubmitted,
+  nativeRequestAccepted,
+  nativeAcceptAccepted,
+  connectionInitiated,
+  awaitingApproval,
+  awaitingRemoteApproval,
+  nativeNegotiating,
+  nativeResult,
+  identityHandshake,
+}
+
 class _PendingIdentityChallenge {
   const _PendingIdentityChallenge({
     required this.challengeId,
@@ -95,6 +109,7 @@ class NearbyService extends ChangeNotifier {
     PeerIdentityCrypto? identityCrypto,
     this.handshakeTimeout = const Duration(seconds: 30),
     this.connectionAttemptTimeout = const Duration(seconds: 35),
+    this.hardNegotiationTimeout = const Duration(seconds: 90),
   }) : identityCrypto =
            identityCrypto ??
            (transport is MockNearbyTransport
@@ -116,6 +131,10 @@ class NearbyService extends ChangeNotifier {
   final DiagnosticsLogService? diagnostics;
   final PeerIdentityCrypto identityCrypto;
   final Duration handshakeTimeout;
+
+  /// Google ระบุ callback ผลลัพธ์ แต่ไม่ได้กำหนด maximum resolution time
+  /// ค่านี้จึงมีไว้กัน native attempt ค้างถาวร ไม่ใช่ UX timeout
+  final Duration hardNegotiationTimeout;
   final Duration connectionAttemptTimeout;
   NearbyReadiness? readiness;
   NearbyApplicationState? _transition;
@@ -166,6 +185,10 @@ class NearbyService extends ChangeNotifier {
     if (lastErrorCode == '8007' || lastErrorCode == 'STATUS_RADIO_ERROR') {
       return 'วิทยุ Bluetooth/Wi-Fi ยังเริ่ม Nearby ไม่สำเร็จ';
     }
+    if (peerErrors.values.contains('connection_slow') &&
+        hasActiveConnectionAttempts) {
+      return 'กำลังเชื่อมต่อนานกว่าปกติ…';
+    }
     return switch (applicationState) {
       NearbyApplicationState.initializing => 'กำลังตรวจสอบ Nearby',
       NearbyApplicationState.starting => 'กำลังเริ่มค้นหา',
@@ -203,9 +226,12 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
   final Map<String, Timer> _identityHandshakeTimeouts = {};
-  final Map<String, Timer> _connectionTimeouts = {};
+  final Map<String, Timer> _connectionSoftTimeouts = {};
+  final Map<String, Timer> _connectionHardWatchdogs = {};
   final Map<String, String> _connectionTraces = {};
   final Map<String, DateTime> _connectionStartedAt = {};
+  final Map<String, NearbyConnectionPhase> _connectionPhases = {};
+  final Map<String, DateTime> _connectionPhaseStartedAt = {};
   final Map<String, _PendingIdentityChallenge> _identityChallenges = {};
   final Set<String> _completedIdentityHandshakes = {};
   final Map<String, _AppDisconnectRequest> _appDisconnectRequests = {};
@@ -234,6 +260,12 @@ class NearbyService extends ChangeNotifier {
   final Map<String, Object?> nativeTransportSnapshot = {};
   NearbyConnectionEvent? lastNativeConnectionFailure;
   bool _sessionRestartDeferred = false;
+
+  NearbyConnectionPhase? connectionPhaseForEndpoint(String endpointId) =>
+      _connectionPhases[endpointId];
+
+  DateTime? connectionPhaseStartedAt(String endpointId) =>
+      _connectionPhaseStartedAt[endpointId];
 
   int get activeConnectionAttempts => peerStates.entries
       .where(
@@ -357,8 +389,26 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _onNativeDiagnostic(NearbyNativeDiagnostic event) {
-    if (!RelioBuildInfo.developerDiagnosticsEnabled) return;
     final fields = Map<String, Object?>.from(event.fields);
+    final endpointId = fields['endpointId'] as String?;
+    if (endpointId != null) {
+      if (event.name == 'native_request_connection_task_success') {
+        _nativePhaseAccepted(
+          endpointId,
+          NearbyConnectionPhase.nativeRequestAccepted,
+          operation: 'requestConnection',
+        );
+      } else if (event.name == 'native_accept_connection_task_success') {
+        _nativePhaseAccepted(
+          endpointId,
+          NearbyConnectionPhase.nativeAcceptAccepted,
+          operation: 'acceptConnection',
+        );
+      } else if (event.name == 'native_connection_resolution_received') {
+        _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
+      }
+    }
+    if (!RelioBuildInfo.developerDiagnosticsEnabled) return;
     diagnostics?.record(
       'native_nearby',
       event.name,
@@ -698,6 +748,7 @@ class NearbyService extends ChangeNotifier {
     final traceId = const Uuid().v4();
     _connectionTraces[peerId] = traceId;
     _connectionStartedAt[peerId] = DateTime.now().toUtc();
+    _setConnectionPhase(peerId, NearbyConnectionPhase.requestSubmitted);
     diagnostics?.record(
       'connection',
       userInitiated ? 'manual_connect_tap' : 'auto_reconnect_initiated',
@@ -733,11 +784,7 @@ class NearbyService extends ChangeNotifier {
     }
     if (userInitiated) _userInitiatedEndpoints.add(peerId);
     unawaited(_recordCandidateTrust(peerId, traceId));
-    _connectionTimeouts.remove(peerId)?.cancel();
-    _connectionTimeouts[peerId] = Timer(connectionAttemptTimeout, () {
-      if (peerStates[peerId] != NearbyConnectionState.connecting) return;
-      unawaited(_expireConnectionAttempt(peerId));
-    });
+    _startConnectionSoftTimeout(peerId);
     notifyListeners();
     try {
       final localIdentity = await identityCrypto.getPublicIdentity();
@@ -763,9 +810,15 @@ class NearbyService extends ChangeNotifier {
         operation: 'requestConnection',
         peerIdentifier: peerId,
       );
+      _nativePhaseAccepted(
+        peerId,
+        NearbyConnectionPhase.nativeRequestAccepted,
+        operation: 'requestConnection',
+      );
       _log('ส่งคำขอเชื่อมต่อไปยัง ${DiagnosticsLogService.peerAlias(peerId)}');
     } on Object catch (error) {
-      _connectionTimeouts.remove(peerId)?.cancel();
+      _cancelConnectionTimers(peerId);
+      _connectionPhases[peerId] = NearbyConnectionPhase.nativeResult;
       peerStates[peerId] = NearbyConnectionState.failed;
       _fingerprintEndpointReservations.removeWhere(
         (_, endpoint) => endpoint == peerId,
@@ -790,6 +843,84 @@ class NearbyService extends ChangeNotifier {
       );
       _fail('เชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
     }
+  }
+
+  void _setConnectionPhase(
+    String endpointId,
+    NearbyConnectionPhase phase, {
+    bool notify = false,
+  }) {
+    _connectionPhases[endpointId] = phase;
+    _connectionPhaseStartedAt[endpointId] = DateTime.now().toUtc();
+    diagnostics?.record(
+      'connection',
+      'connection_phase_changed',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: phase.name,
+      peerIdentifier: endpointId,
+      fields: {
+        'phase': phase.name,
+        'phaseStartedAt': _connectionPhaseStartedAt[endpointId]!
+            .toIso8601String(),
+      },
+    );
+    if (notify) notifyListeners();
+  }
+
+  void _startConnectionSoftTimeout(String endpointId) {
+    _connectionSoftTimeouts.remove(endpointId)?.cancel();
+    _connectionSoftTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
+      if (peerStates[endpointId] != NearbyConnectionState.connecting) return;
+      peerErrors[endpointId] = 'connection_slow';
+      diagnostics?.record(
+        'connection',
+        'connection_soft_timeout',
+        severity: 'warning',
+        connectionTraceId: _connectionTraces[endpointId],
+        operation: 'connectionNegotiation',
+        peerIdentifier: endpointId,
+        reason: 'RELIO_APPLICATION_SOFT_TIMEOUT',
+        fields: {
+          'timeoutMs': connectionAttemptTimeout.inMilliseconds,
+          'phase': _connectionPhases[endpointId]?.name,
+          'disconnectRequested': false,
+        },
+      );
+      // รอผลจาก Google Nearby ต่อ ไม่ตัดการเชื่อมต่อทันทีเมื่อครบ soft timeout
+      notifyListeners();
+    });
+  }
+
+  void _startHardNegotiationWatchdog(String endpointId) {
+    _connectionHardWatchdogs.remove(endpointId)?.cancel();
+    _connectionHardWatchdogs[endpointId] = Timer(
+      hardNegotiationTimeout,
+      () => unawaited(_expireConnectionAttempt(endpointId)),
+    );
+  }
+
+  void _nativePhaseAccepted(
+    String endpointId,
+    NearbyConnectionPhase phase, {
+    required String operation,
+  }) {
+    if (peerStates[endpointId] != NearbyConnectionState.connecting) return;
+    _setConnectionPhase(endpointId, phase);
+    _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeNegotiating);
+    _startHardNegotiationWatchdog(endpointId);
+    diagnostics?.record(
+      'connection',
+      'native_${operation}_accepted',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: operation,
+      peerIdentifier: endpointId,
+      fields: {'hardWatchdogMs': hardNegotiationTimeout.inMilliseconds},
+    );
+  }
+
+  void _cancelConnectionTimers(String endpointId) {
+    _connectionSoftTimeouts.remove(endpointId)?.cancel();
+    _connectionHardWatchdogs.remove(endpointId)?.cancel();
   }
 
   Future<void> _recordCandidateTrust(String endpointId, String traceId) async {
@@ -839,46 +970,57 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _expireConnectionAttempt(String endpointId) async {
+    if (peerStates[endpointId] != NearbyConnectionState.connecting) return;
     final traceId = _connectionTraces[endpointId];
+    final softTimeoutElapsed = peerErrors[endpointId] == 'connection_slow';
     final operation = _approvedConnectionEndpoints.contains(endpointId)
         ? 'acceptConnection'
         : 'requestConnection';
-    _connectionTimeouts.remove(endpointId)?.cancel();
+    _cancelConnectionTimers(endpointId);
     _userInitiatedEndpoints.remove(endpointId);
     _approvedConnectionEndpoints.remove(endpointId);
+    peerErrors[endpointId] = 'connection_hard_timeout';
+    _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
+    diagnostics?.record(
+      'connection',
+      'RELIO_HARD_NEGOTIATION_TIMEOUT',
+      severity: 'error',
+      connectionTraceId: traceId,
+      operation: operation,
+      stateFrom: 'negotiating',
+      stateTo: 'failed',
+      peerIdentifier: endpointId,
+      reason: 'RELIO_HARD_NEGOTIATION_TIMEOUT',
+      fields: {
+        'hardWatchdogMs': hardNegotiationTimeout.inMilliseconds,
+        'phase': _connectionPhases[endpointId]?.name,
+        'softTimeoutElapsed': softTimeoutElapsed,
+      },
+    );
     try {
-      await disconnect(endpointId, reason: 'connection_attempt_timeout');
+      // Hard watchdog เป็น timeout เดียวที่ยกเลิก Native negotiation ได้
+      // ส่วน soft timeout มีหน้าที่แจ้งผู้ใช้เท่านั้น
+      await disconnect(endpointId, reason: 'hard_negotiation_timeout');
     } on Object {
       // Timeout cleanup is best effort; local transient state still expires.
     }
     if (_closed) return;
     peerStates[endpointId] = NearbyConnectionState.failed;
-    peerErrors[endpointId] = 'connection_timeout';
-    diagnostics?.record(
-      'connection',
-      'connection_timeout',
-      severity: 'error',
-      connectionTraceId: traceId,
-      operation: operation,
-      stateFrom: 'connecting',
-      stateTo: 'failed',
-      peerIdentifier: endpointId,
-      reason: 'RELIO_APPLICATION_TIMEOUT',
-      fields: {
-        'failureSource': 'RELIO_APPLICATION_TIMEOUT',
-        'timeoutMs': connectionAttemptTimeout.inMilliseconds,
-        'appLifecycleState': appLifecycleState,
-      },
-    );
     diagnostics?.record(
       'connection',
       'connection_negotiation_timeout',
       severity: 'error',
       connectionTraceId: traceId,
       operation: operation,
+      stateFrom: 'connecting',
+      stateTo: 'failed',
       peerIdentifier: endpointId,
-      reason: 'RELIO_APPLICATION_TIMEOUT',
-      fields: {'timeoutMs': connectionAttemptTimeout.inMilliseconds},
+      reason: 'RELIO_HARD_NEGOTIATION_TIMEOUT',
+      fields: {
+        'failureSource': 'RELIO_HARD_NEGOTIATION_TIMEOUT',
+        'timeoutMs': hardNegotiationTimeout.inMilliseconds,
+        'appLifecycleState': appLifecycleState,
+      },
     );
     notifyListeners();
   }
@@ -895,32 +1037,14 @@ class NearbyService extends ChangeNotifier {
         .union(pendingConnectionRequests.keys.toSet())
         .union(_provisionalConnectionEndpoints);
     for (final endpointId in endpoints) {
-      final traceId = _connectionTraces[endpointId];
-      final hadIncomingPrompt =
-          pendingConnectionRequests.remove(endpointId) != null;
-      _connectionTimeouts.remove(endpointId)?.cancel();
-      _approvedConnectionEndpoints.remove(endpointId);
-      _provisionalConnectionEndpoints.remove(endpointId);
-      _provisionalIncomingRequests.remove(endpointId);
-      peerStates[endpointId] = NearbyConnectionState.failed;
-      peerErrors[endpointId] = 'app_background_stop';
       diagnostics?.record(
-        'connection',
-        'connection_negotiation_failed',
-        severity: 'warning',
-        connectionTraceId: traceId,
-        operation: hadIncomingPrompt ? 'rejectConnection' : 'disconnect',
-        stateFrom: 'negotiating',
-        stateTo: 'failed',
+        'lifecycle',
+        'nearby_negotiation_kept_alive_in_background',
+        connectionTraceId: _connectionTraces[endpointId],
+        operation: 'setNearbyForeground',
         peerIdentifier: endpointId,
-        reason: 'APP_BACKGROUND_STOP',
-        fields: {'appLifecycleState': appLifecycleState},
+        fields: {'phase': _connectionPhases[endpointId]?.name},
       );
-      if (hadIncomingPrompt) {
-        unawaited(_rejectEndpoint(endpointId));
-      } else {
-        unawaited(transport.disconnect(endpointId).catchError((Object _) {}));
-      }
     }
     notifyListeners();
   }
@@ -965,14 +1089,13 @@ class NearbyService extends ChangeNotifier {
     _approvedConnectionEndpoints.add(endpointId);
     pendingConnectionRequests.remove(endpointId);
     peerStates[endpointId] = NearbyConnectionState.connecting;
-    _connectionTimeouts.remove(endpointId)?.cancel();
+    _setConnectionPhase(
+      endpointId,
+      NearbyConnectionPhase.awaitingRemoteApproval,
+    );
+    _connectionSoftTimeouts.remove(endpointId)?.cancel();
     _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
-    _connectionTimeouts.remove(endpointId)?.cancel();
-    _connectionTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
-      if (peerStates[endpointId] == NearbyConnectionState.connecting) {
-        unawaited(_expireConnectionAttempt(endpointId));
-      }
-    });
+    _startConnectionSoftTimeout(endpointId);
     notifyListeners();
     try {
       await transport.acceptConnection(
@@ -986,8 +1109,15 @@ class NearbyService extends ChangeNotifier {
         operation: 'acceptConnection',
         peerIdentifier: endpointId,
       );
+      _nativePhaseAccepted(
+        endpointId,
+        NearbyConnectionPhase.nativeAcceptAccepted,
+        operation: 'acceptConnection',
+      );
     } on Object catch (error) {
       _approvedConnectionEndpoints.remove(endpointId);
+      _cancelConnectionTimers(endpointId);
+      _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
       peerStates[endpointId] = NearbyConnectionState.failed;
       diagnostics?.record(
         'connection',
@@ -1006,7 +1136,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> rejectConnectionRequest(String endpointId) async {
-    _connectionTimeouts.remove(endpointId)?.cancel();
+    _connectionSoftTimeouts.remove(endpointId)?.cancel();
     diagnostics?.record(
       'connection',
       'reject_tapped',
@@ -1049,6 +1179,22 @@ class NearbyService extends ChangeNotifier {
     String peerId, {
     String reason = 'user_requested',
   }) async {
+    final cancellingNegotiation =
+        hasActiveConnectionAttempts &&
+        peerStates[peerId] == NearbyConnectionState.connecting;
+    if (cancellingNegotiation &&
+        (reason == 'user_requested' || reason == 'user_cancelled_connection')) {
+      _cancelConnectionTimers(peerId);
+      _setConnectionPhase(peerId, NearbyConnectionPhase.nativeResult);
+      diagnostics?.record(
+        'connection',
+        'USER_CANCELLED_CONNECTION',
+        connectionTraceId: _connectionTraces[peerId],
+        operation: 'disconnect',
+        peerIdentifier: peerId,
+        reason: 'USER_CANCELLED_CONNECTION',
+      );
+    }
     _appDisconnectRequests[peerId] = _AppDisconnectRequest(
       reason,
       DateTime.now().toUtc(),
@@ -1081,6 +1227,9 @@ class NearbyService extends ChangeNotifier {
       _fail('ตัดการเชื่อมต่อไม่สำเร็จ: $error', code: _errorCode(error));
     }
   }
+
+  Future<void> cancelConnection(String peerId) =>
+      disconnect(peerId, reason: 'user_cancelled_connection');
 
   Future<DeviceStatus> currentStatus() async {
     final deviceId = await identity.getDeviceId();
@@ -1430,7 +1579,7 @@ class NearbyService extends ChangeNotifier {
               NearbyConnectionState.incomingRequest) {
         diagnostics?.record(
           'connection',
-          'endpoint_lost_during_negotiation',
+          'ENDPOINT_LOST_DURING_NEGOTIATION',
           severity: 'warning',
           connectionTraceId: _connectionTraces[peer.endpointId],
           operation: 'onEndpointLost',
@@ -1447,20 +1596,26 @@ class NearbyService extends ChangeNotifier {
           connectionTraceId: _connectionTraces[peer.endpointId],
           operation: 'onEndpointLost',
           stateFrom: peerStates[peer.endpointId]?.name,
-          stateTo: 'disconnected',
+          stateTo: 'failed',
           peerIdentifier: peer.endpointId,
           nativeCode: 'ENDPOINT_LOST',
+          reason: 'ENDPOINT_LOST_DURING_NEGOTIATION',
         );
       }
       if (peerStates[peer.endpointId] != NearbyConnectionState.connected) {
         _identityHandshakeTimeouts.remove(peer.endpointId)?.cancel();
-        _connectionTimeouts.remove(peer.endpointId)?.cancel();
+        _cancelConnectionTimers(peer.endpointId);
+        _setConnectionPhase(
+          peer.endpointId,
+          NearbyConnectionPhase.nativeResult,
+        );
         _connectionStartedAt.remove(peer.endpointId);
         _connectionTraces.remove(peer.endpointId);
         discoveredPeers.removeWhere(
           (item) => item.endpointId == peer.endpointId,
         );
-        peerStates[peer.endpointId] = NearbyConnectionState.disconnected;
+        peerStates[peer.endpointId] = NearbyConnectionState.failed;
+        peerErrors[peer.endpointId] = 'endpoint_lost_during_negotiation';
         final deviceId = endpointToDeviceId.remove(peer.endpointId);
         if (deviceId != null) deviceToEndpointId.remove(deviceId);
       }
@@ -1656,6 +1811,13 @@ class NearbyService extends ChangeNotifier {
 
   void _onConnection(NearbyConnectionEvent event) {
     final endpointId = event.peer.endpointId;
+    if (event.state == NearbyConnectionState.connected ||
+        event.state == NearbyConnectionState.failed ||
+        event.state == NearbyConnectionState.disconnected) {
+      // ยกเลิก timer ก่อนบันทึก callback เพื่อไม่ให้ native failure
+      // แข่งกับ soft timeout เก่าแล้วถูกระบุสาเหตุผิด
+      _cancelConnectionTimers(endpointId);
+    }
     if (event.connectionTraceId != null) {
       _connectionTraces.putIfAbsent(endpointId, () => event.connectionTraceId!);
     }
@@ -1665,6 +1827,12 @@ class NearbyService extends ChangeNotifier {
         () => const Uuid().v4(),
       );
       _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
+      _setConnectionPhase(
+        endpointId,
+        event.isIncomingRequest
+            ? NearbyConnectionPhase.connectionInitiated
+            : NearbyConnectionPhase.awaitingRemoteApproval,
+      );
       diagnostics?.record(
         'connection',
         'native_connection_initiated_received',
@@ -1907,11 +2075,34 @@ class NearbyService extends ChangeNotifier {
     if (event.state == NearbyConnectionState.connected ||
         event.state == NearbyConnectionState.failed ||
         event.state == NearbyConnectionState.disconnected) {
-      _connectionTimeouts.remove(endpointId)?.cancel();
+      _cancelConnectionTimers(endpointId);
+      _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
       _connectionStartedAt.remove(endpointId);
     }
     if (event.state == NearbyConnectionState.connected ||
         event.state == NearbyConnectionState.failed) {
+      if (event.state == NearbyConnectionState.failed) {
+        diagnostics?.record(
+          'connection',
+          'GOOGLE_NEARBY_NATIVE_FAILURE',
+          severity: 'error',
+          connectionTraceId:
+              event.connectionTraceId ?? _connectionTraces[endpointId],
+          operation: event.operation ?? 'onConnectionResult',
+          peerIdentifier: endpointId,
+          nativeCode: event.rawStatusCode ?? event.error,
+          nativeMessage: event.rawStatusMessage ?? event.error,
+          fields: {
+            if (event.rawStatusCode != null)
+              'rawStatusCode': event.rawStatusCode,
+            if (event.rawStatusName != null)
+              'rawStatusName': event.rawStatusName,
+            if (event.role != null) 'role': event.role,
+            if (event.strategy != null) 'strategy': event.strategy,
+            if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
+          },
+        );
+      }
       diagnostics?.record(
         'connection',
         event.state == NearbyConnectionState.connected
@@ -1939,6 +2130,7 @@ class NearbyService extends ChangeNotifier {
       );
     }
     if (event.state == NearbyConnectionState.connected) {
+      _setConnectionPhase(endpointId, NearbyConnectionPhase.identityHandshake);
       pendingConnectionRequests.remove(endpointId);
       peerErrors.remove(endpointId);
       _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
@@ -1985,6 +2177,8 @@ class NearbyService extends ChangeNotifier {
       _fingerprintEndpointReservations.removeWhere(
         (_, reservedEndpoint) => reservedEndpoint == endpointId,
       );
+      _connectionPhases.remove(endpointId);
+      _connectionPhaseStartedAt.remove(endpointId);
     } else if (event.state == NearbyConnectionState.failed) {
       _identityHandshakeTimeouts.remove(endpointId)?.cancel();
       peerErrors[endpointId] = event.error ?? 'connection failed';
@@ -2011,6 +2205,8 @@ class NearbyService extends ChangeNotifier {
         event.state == NearbyConnectionState.failed) {
       _connectionTraces.remove(endpointId);
       _connectionStartedAt.remove(endpointId);
+      _connectionPhases.remove(endpointId);
+      _connectionPhaseStartedAt.remove(endpointId);
     }
     if (!hasActiveConnectionAttempts) _sessionRestartDeferred = false;
     notifyListeners();
@@ -2052,12 +2248,11 @@ class NearbyService extends ChangeNotifier {
     _provisionalConnectionEndpoints.add(endpointId);
     _provisionalIncomingRequests[endpointId] = event;
     peerStates[endpointId] = NearbyConnectionState.connecting;
-    _connectionTimeouts.remove(endpointId)?.cancel();
-    _connectionTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
-      if (peerStates[endpointId] == NearbyConnectionState.connecting) {
-        unawaited(_expireConnectionAttempt(endpointId));
-      }
-    });
+    _setConnectionPhase(
+      endpointId,
+      NearbyConnectionPhase.awaitingRemoteApproval,
+    );
+    _startConnectionSoftTimeout(endpointId);
     diagnostics?.record(
       'trust',
       'trusted_transport_auto_accepted',
@@ -2083,10 +2278,16 @@ class NearbyService extends ChangeNotifier {
         endpointId,
         connectionTraceId: _connectionTraces[endpointId],
       );
+      _nativePhaseAccepted(
+        endpointId,
+        NearbyConnectionPhase.nativeAcceptAccepted,
+        operation: 'acceptConnection',
+      );
     } on Object catch (error) {
       _provisionalConnectionEndpoints.remove(endpointId);
       _provisionalIncomingRequests.remove(endpointId);
-      _connectionTimeouts.remove(endpointId)?.cancel();
+      _cancelConnectionTimers(endpointId);
+      _setConnectionPhase(endpointId, NearbyConnectionPhase.nativeResult);
       peerStates[endpointId] = NearbyConnectionState.failed;
       _fail('ยอมรับคำขอชั่วคราวไม่สำเร็จ: $error', code: _errorCode(error));
     }
@@ -2169,9 +2370,10 @@ class NearbyService extends ChangeNotifier {
     final isNewRequest = !pendingConnectionRequests.containsKey(endpointId);
     pendingConnectionRequests[endpointId] = event;
     peerStates[endpointId] = event.state;
+    _setConnectionPhase(endpointId, NearbyConnectionPhase.awaitingApproval);
     if (isNewRequest) {
-      _connectionTimeouts.remove(endpointId)?.cancel();
-      _connectionTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
+      _connectionSoftTimeouts.remove(endpointId)?.cancel();
+      _connectionSoftTimeouts[endpointId] = Timer(connectionAttemptTimeout, () {
         if (pendingConnectionRequests.containsKey(endpointId)) {
           unawaited(_expireIncomingRequest(endpointId));
         }
@@ -2199,7 +2401,7 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> _expireIncomingRequest(String endpointId) async {
     final event = pendingConnectionRequests.remove(endpointId);
-    _connectionTimeouts.remove(endpointId)?.cancel();
+    _connectionSoftTimeouts.remove(endpointId)?.cancel();
     if (event == null || _closed) return;
     try {
       await transport.rejectConnection(
@@ -3497,10 +3699,14 @@ class NearbyService extends ChangeNotifier {
       timer.cancel();
     }
     _identityHandshakeTimeouts.clear();
-    for (final timer in _connectionTimeouts.values) {
+    for (final timer in _connectionSoftTimeouts.values) {
       timer.cancel();
     }
-    _connectionTimeouts.clear();
+    _connectionSoftTimeouts.clear();
+    for (final timer in _connectionHardWatchdogs.values) {
+      timer.cancel();
+    }
+    _connectionHardWatchdogs.clear();
     for (final timer in _reconnectTimers.values) {
       timer.cancel();
     }

@@ -123,6 +123,24 @@
   published or installed; Huawei ↔ realme physical verification is still
   required and is not claimed.
 
+## Build 32 — local-first Nearby negotiation stability candidate
+
+- Build 31 evidence is asymmetric: the Samsung diagnostic bundle was Build 31,
+  while the Huawei bundle was Build 30. The observed ordering supports RELIO's
+  35-second application timeout followed by app disconnect and a later native
+  status 13; it does not prove status 13 caused the timeout.
+- Build 32 separates request-submitted, native Task accepted, connection
+  initiated, approval, native negotiation, native result, and identity phases.
+  The 35-second timer is now a soft UX timeout and never disconnects an active
+  native negotiation. A conservative 90-second hard watchdog starts only after
+  the native request/accept Task is accepted and prevents stale attempts from
+  living forever because Google does not publish a reliable resolution maximum.
+- Focused tests cover delayed success beyond the soft timeout, native failure
+  precedence, missing callbacks, hard cleanup, endpoint loss, user cancel,
+  lifecycle/session deferral, request/accept Task invariants, and a deterministic
+  two-peer text/ACK/reconnect harness. Build 32 remains unpublished and no
+  phone has been modified or physically tested by this workspace.
+
 ## Firebase identity
 
 - Project ID: `relio-17dc0`

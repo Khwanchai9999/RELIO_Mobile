@@ -142,7 +142,7 @@ void main() {
   );
 
   test(
-    'missing native connection result times out and permits retry',
+    'soft timeout keeps native negotiation alive until hard watchdog',
     () async {
       await service.close();
       transport = MockNearbyTransport()..holdConnectionRequests = true;
@@ -152,20 +152,26 @@ void main() {
         conversations: repositories.conversations,
         identity: RelioDeviceIdentityRepository(database),
         nearbyDevices: repositories.nearbyDevices,
-        connectionAttemptTimeout: const Duration(milliseconds: 20),
+        connectionAttemptTimeout: const Duration(milliseconds: 35),
+        hardNegotiationTimeout: const Duration(milliseconds: 180),
       );
       await service.initialize();
       transport.simulatePeer(id: 'timeout-peer', name: 'Peer');
       await Future<void>.delayed(Duration.zero);
 
       await service.connect('timeout-peer');
-      await Future<void>.delayed(const Duration(milliseconds: 60));
-      expect(service.peerErrors['timeout-peer'], 'connection_timeout');
-      expect(service.peerStates['timeout-peer'], NearbyConnectionState.failed);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(service.peerErrors['timeout-peer'], 'connection_slow');
+      expect(
+        service.peerStates['timeout-peer'],
+        NearbyConnectionState.connecting,
+      );
+      expect(transport.disconnectCount, 0);
 
-      transport.holdConnectionRequests = false;
-      await service.connect('timeout-peer');
-      expect(transport.connectionRequestCount, 2);
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      expect(service.peerErrors['timeout-peer'], 'connection_hard_timeout');
+      expect(service.peerStates['timeout-peer'], NearbyConnectionState.failed);
+      expect(transport.disconnectCount, 1);
     },
   );
 
@@ -185,7 +191,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(service.pendingConnectionRequests, contains('expiring-peer'));
 
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await Future<void>.delayed(const Duration(milliseconds: 140));
     expect(service.pendingConnectionRequests, isEmpty);
     expect(transport.rejectedConnections, contains('expiring-peer'));
     expect(service.peerErrors['expiring-peer'], 'incoming_request_timeout');
