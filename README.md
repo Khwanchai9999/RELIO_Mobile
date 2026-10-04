@@ -127,8 +127,8 @@ Instructor-facing references: [architecture](docs/architecture.md),
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
 overrides use Mock transport. Build 35 (`0.9.0+35`) adds current-discovery
-endpoint validation and DEV/QA-only Nearby isolation modes. Build 34 remains
-the public QA release until Build 35 passes its release gates and is published.
+endpoint validation and DEV/QA-only Nearby isolation modes. Build 35 is the
+current public QA release; Build 34 is the preceding release.
 Physical radio behavior is still deferred; automated checks do not prove
 real-device behavior.
 Cross-account direct conversation linking, local mapping, paged
@@ -268,8 +268,8 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 35 is the current QA physical-test candidate; Build 34 remains
-the last published release until the Build 35 publisher completes. Neither
+releases. Build 35 is the current public QA physical-test candidate; Build 34
+is the preceding release. Neither
 source changes nor automated simulations establish physical radio behavior;
 two-phone verification remains pending.
 
