@@ -190,6 +190,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
             final brightness = Theme.of(context).brightness;
             return IncomingConnectionPromptHost(
               dependencies: _dependencies,
+              router: _router,
               navigatorKey: _router.routerDelegate.navigatorKey,
               child: AnnotatedRegion<SystemUiOverlayStyle>(
                 value: SystemUiOverlayStyle(
@@ -219,12 +220,14 @@ class IncomingConnectionPromptHost extends StatefulWidget {
   const IncomingConnectionPromptHost({
     required this.dependencies,
     required this.child,
+    this.router,
     this.navigatorKey,
     super.key,
   });
 
   final RelioDependencies dependencies;
   final Widget child;
+  final GoRouter? router;
   final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
@@ -282,8 +285,11 @@ class _IncomingConnectionPromptHostState
     final isChat = RegExp(r'^/chat/[A-Za-z0-9._:-]{1,128}$').hasMatch(route);
     if (!mounted || (!isSos && !isChat)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(GoRouter.of(context).push(route));
+      final router = widget.router;
+      if (mounted && router != null) unawaited(router.push(route));
     });
+    // Warm notification อาจเข้าหลัง frame ปัจจุบัน จึงขอ frame ให้ callback ทำงาน
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   void _showNextRequest() {

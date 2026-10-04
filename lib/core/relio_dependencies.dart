@@ -33,6 +33,7 @@ class RelioDependencies {
     bool? useMockTransport,
     LocationService? locationService,
     MediaStorageService? mediaStorage,
+    LocalNotificationSink? localNotificationSink,
     CloudDataSource? cloudDataSource,
     AppUpdateService? appUpdateService,
     ConnectivityStatusService? connectivityStatusService,
@@ -60,9 +61,11 @@ class RelioDependencies {
                 const LocationResult.failure(LocationFailure.unavailable),
               ));
     mediaStorageService = mediaStorage ?? MediaStorageService();
-    localNotificationService = _isAndroid
-        ? AndroidLocalNotificationService()
-        : const NoopLocalNotificationService();
+    localNotificationService =
+        localNotificationSink ??
+        (_isAndroid
+            ? AndroidLocalNotificationService()
+            : const NoopLocalNotificationService());
     this.cloudDataSource = cloudDataSource ?? SupabaseCloudDataSource();
     authService = CloudAuthService(this.cloudDataSource);
     repositories = RelioRepositories(
@@ -112,7 +115,7 @@ class RelioDependencies {
       mediaStorage: mediaStorageService,
       localNotifications: localNotificationService,
       isConversationActive: (conversationId) =>
-          nearbyService.activeConversationId == conversationId,
+          nearbyService.isConversationVisible(conversationId),
     );
     this.appUpdateService = appUpdateService ?? AppUpdateService();
   }

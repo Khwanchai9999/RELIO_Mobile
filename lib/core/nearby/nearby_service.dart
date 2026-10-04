@@ -211,6 +211,7 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _pendingConversationFlushes = {};
   final Set<String> _incomingTextMessagesInProgress = {};
   final Map<String, RelioPacket> _mediaMetadataByPayload = {};
+  final Map<String, Future<void>> _incomingMediaOperations = {};
   final Map<String, NearbyFilePayloadEvent> _mediaFilesByPayload = {};
   final Map<String, String> _payloadTransferIds = {};
   final Map<String, String> endpointToDeviceId = {};
@@ -286,6 +287,12 @@ class NearbyService extends ChangeNotifier {
   void setActiveConversation(String? conversationId) {
     activeConversationId = conversationId;
   }
+
+  // แชตที่ยังอยู่ใน navigation stack อาจถูกหน้าอื่นบัง หรือแอปอยู่เบื้องหลัง
+  bool isConversationVisible(String conversationId) =>
+      activeConversationId == conversationId &&
+      appLifecycleState == 'resumed' &&
+      screenRoute == '/chat/$conversationId';
 
   NearbyApplicationState get applicationState {
     if (!initialized) return NearbyApplicationState.initializing;
@@ -1450,6 +1457,7 @@ class NearbyService extends ChangeNotifier {
           'sizeBytes': attachment.byteSize,
         },
       );
+      final digest = await mediaStorage!.sha256ForFile(attachment.localPath);
       final payloadId = await transport.sendFile(
         attachment.localPath,
         peerId: peerId,
@@ -1466,6 +1474,7 @@ class NearbyService extends ChangeNotifier {
         mimeType: attachment.mimeType,
         byteSize: attachment.byteSize,
         payloadId: payloadId,
+        sha256: digest,
       );
       await transport.sendBytes(packet.toBytes(), peerId: peerId);
       _recordMediaStage(peerId, 'media_metadata_sent');
@@ -3074,13 +3083,63 @@ class NearbyService extends ChangeNotifier {
         )) {
       return;
     }
+    final messageId = packet.payload['messageId']! as String;
+    final active = _incomingMediaOperations[messageId];
+    if (active != null) {
+      await active;
+      return _tryCompleteIncomingMedia(payloadId);
+    }
+    // UUID เดียวทำทีละรายการ เพื่อไม่สร้างไฟล์หรือแจ้งเตือนซ้ำเมื่อ callback มาพร้อมกัน
+    final operation = _persistIncomingMedia(payloadId, packet, file);
+    _incomingMediaOperations[messageId] = operation;
+    try {
+      await operation;
+    } finally {
+      _incomingMediaOperations.remove(messageId);
+    }
+  }
+
+  Future<void> _persistIncomingMedia(
+    String payloadId,
+    RelioPacket packet,
+    NearbyFilePayloadEvent file,
+  ) async {
     final payload = packet.payload;
     try {
+      if (endpointToDeviceId[file.peerId] != packet.senderDeviceId) {
+        throw const MediaStorageException('ไฟล์และ metadata มาจากคนละเครื่อง');
+      }
+      final existingMessage = await messages.getMessage(
+        payload['messageId']! as String,
+      );
+      final existingAttachment = await attachments!.getById(
+        payload['attachmentId']! as String,
+      );
+      if (existingMessage != null &&
+          existingAttachment != null &&
+          existingAttachment.transferStatus == MediaTransferState.completed) {
+        if (existingMessage.senderDeviceId != packet.senderDeviceId ||
+            existingAttachment.messageId != existingMessage.id ||
+            existingAttachment.transferId != payload['transferId'] ||
+            existingAttachment.byteSize != payload['byteSize'] ||
+            existingAttachment.mimeType != payload['mimeType'] ||
+            !await mediaStorage!.fileExists(existingAttachment.localPath) ||
+            (payload['sha256'] != null &&
+                await mediaStorage!.sha256ForFile(
+                      existingAttachment.localPath,
+                    ) !=
+                    payload['sha256'])) {
+          throw const MediaStorageException('ข้อมูลสื่อซ้ำไม่ตรงกับรายการเดิม');
+        }
+        await _sendMediaAck(file.peerId, packet, 'completed');
+        return;
+      }
       final storedPath = await mediaStorage!.storeIncomingFile(
         sourcePath: file.filePath,
         fileName: payload['fileName']! as String,
         expectedMimeType: payload['mimeType']! as String,
         expectedBytes: (payload['byteSize']! as num).toInt(),
+        expectedSha256: payload['sha256'] as String?,
       );
       final conversationId = await _conversationIdForDevice(
         packet.senderDeviceId,
@@ -3116,12 +3175,14 @@ class NearbyService extends ChangeNotifier {
       }
       await attachments!.markCompleted(attachmentId, localPath: storedPath);
       await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
-      await _notifyIncoming(
-        id: payload['messageId']! as String,
-        title: _peerName(file.peerId, packet.senderUserId),
-        preview: payload['mediaType'] == 'video' ? 'ส่งวิดีโอ' : 'ส่งรูปภาพ',
-        route: '/chat/$conversationId',
-      );
+      if (existingMessage == null) {
+        await _notifyIncoming(
+          id: payload['messageId']! as String,
+          title: _peerName(file.peerId, packet.senderUserId),
+          preview: payload['mediaType'] == 'video' ? 'ส่งวิดีโอ' : 'ส่งรูปภาพ',
+          route: '/chat/$conversationId',
+        );
+      }
       _recordMediaStage(
         file.peerId,
         'media_received_persisted',
@@ -3130,9 +3191,8 @@ class NearbyService extends ChangeNotifier {
           'sizeBytes': payload['byteSize'],
         },
       );
+      // ACK สำเร็จได้เมื่อไฟล์ตรวจผ่าน เก็บแล้ว และผูก attachment กับข้อความแล้วเท่านั้น
       await _sendMediaAck(file.peerId, packet, 'completed');
-      _mediaMetadataByPayload.remove(payloadId);
-      _mediaFilesByPayload.remove(payloadId);
     } on Object catch (error) {
       _fail('รับไฟล์ไม่สำเร็จ: $error');
       await _sendMediaAck(
@@ -3141,6 +3201,9 @@ class NearbyService extends ChangeNotifier {
         'failed',
         errorCode: 'invalid_file',
       );
+    } finally {
+      _mediaMetadataByPayload.remove(payloadId);
+      _mediaFilesByPayload.remove(payloadId);
     }
   }
 
@@ -3226,7 +3289,7 @@ class NearbyService extends ChangeNotifier {
     String conversationId,
     String peerDeviceId,
   ) async {
-    if (activeConversationId != conversationId) return;
+    if (!isConversationVisible(conversationId)) return;
     final messageIds = await messages.markConversationRead(conversationId);
     for (final messageId in messageIds) {
       await sendReadReceipt(messageId: messageId, peerDeviceId: peerDeviceId);
@@ -3240,7 +3303,11 @@ class NearbyService extends ChangeNotifier {
     String? preview,
     bool urgent = false,
   }) async {
-    if (route == '/chat/$activeConversationId') return;
+    if (activeConversationId != null &&
+        route == '/chat/$activeConversationId' &&
+        isConversationVisible(activeConversationId!)) {
+      return;
+    }
     final sink = localNotifications;
     final setting = settings;
     if (sink == null || setting == null) return;

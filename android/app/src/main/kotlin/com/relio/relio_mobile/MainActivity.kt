@@ -55,15 +55,26 @@ class MainActivity : FlutterActivity() {
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, diagnosticsChannel)
                 .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "getDiagnosticsDeviceInfo" -> result.success(
-                        mapOf(
-                            "manufacturer" to Build.MANUFACTURER.take(80),
-                            "model" to Build.MODEL.take(100),
-                            "androidVersion" to Build.VERSION.RELEASE.take(40),
-                            "apiLevel" to Build.VERSION.SDK_INT,
-                            "package" to packageName,
-                        ),
-                    )
+                    "getDiagnosticsDeviceInfo" -> {
+                        // อ่านเลข build จาก APK ที่ติดตั้งจริง ป้องกันข้อมูล Dart define ไม่ตรงกับเครื่อง
+                        val info = packageManager.getPackageInfo(packageName, 0)
+                        result.success(
+                            mapOf(
+                                "manufacturer" to Build.MANUFACTURER.take(80),
+                                "model" to Build.MODEL.take(100),
+                                "androidVersion" to Build.VERSION.RELEASE.take(40),
+                                "apiLevel" to Build.VERSION.SDK_INT,
+                                "package" to packageName,
+                                "versionName" to info.versionName,
+                                "versionCode" to versionCode(info),
+                                "flavor" to when {
+                                    packageName.endsWith(".test") -> "qa"
+                                    packageName.endsWith(".dev") -> "dev"
+                                    else -> "prod"
+                                },
+                            ),
+                        )
+                    }
                     "shareDiagnosticsZip" -> {
                         try {
                             val path = call.argument<String>("path")

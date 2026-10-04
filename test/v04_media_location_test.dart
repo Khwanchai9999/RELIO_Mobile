@@ -166,6 +166,44 @@ void main() {
     },
   );
 
+  test('image size cap and MIME signature are enforced', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'relio-media-policy-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final storage = MediaStorageService(
+      rootDirectory: Directory('${directory.path}/managed'),
+    );
+    final oversized = File('${directory.path}/large.png');
+    await oversized.writeAsBytes([
+      137,
+      80,
+      78,
+      71,
+      13,
+      10,
+      26,
+      10,
+      ...List<int>.filled(15 * 1024 * 1024, 0),
+    ]);
+    await expectLater(
+      storage.validateFile(oversized.path),
+      throwsA(isA<MediaStorageException>()),
+    );
+
+    final wrongMime = File('${directory.path}/wrong.jpg')
+      ..writeAsBytesSync([137, 80, 78, 71, 13, 10, 26, 10, 0]);
+    await expectLater(
+      storage.storeIncomingFile(
+        sourcePath: wrongMime.path,
+        fileName: 'wrong.jpg',
+        expectedMimeType: 'image/jpeg',
+        expectedBytes: 9,
+      ),
+      throwsA(isA<MediaStorageException>()),
+    );
+  });
+
   test(
     'fake location service supports success and unavailable states',
     () async {

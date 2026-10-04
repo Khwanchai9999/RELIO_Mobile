@@ -160,8 +160,9 @@ automated-tested. Build 30 fixes asymmetric identity-hint handling, duplicate
 connection prompts, and Nearby session restarts that could disconnect active
 peers. Build 31 captures exact native resolution results. Build 32 separates
 Nearby negotiation phases, keeps the 35-second application timeout soft, and
-uses a later hard watchdog only for stale native negotiation. Physical retest
-remains deferred; do not install builds
+uses a later hard watchdog only for stale native negotiation. Build 33 source
+hardens media integrity/deduplication, notification visibility, and installed
+build diagnostics. Release gates and physical retest remain pending; do not install builds
 on phones or claim physical behavior without explicit physical-test authorization.
 
 The Google Services Gradle plugin is configured for the QA-only config with a

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
@@ -93,6 +94,7 @@ class MediaStorageService {
   }
 
   Future<String> copySelectedFile(String sourcePath) async {
+    // คัดลอกเข้าโฟลเดอร์ RELIO เพื่อไม่พึ่งไฟล์ต้นฉบับที่ผู้ใช้อาจย้ายหรือลบ
     final validation = await validateFile(sourcePath);
     final root = await _root();
     final extension = _extensionFor(validation.mimeType, sourcePath);
@@ -106,6 +108,7 @@ class MediaStorageService {
     required String fileName,
     required String expectedMimeType,
     required int expectedBytes,
+    String? expectedSha256,
   }) async {
     final validation = await validateFile(sourcePath);
     if (validation.mimeType != expectedMimeType ||
@@ -116,8 +119,17 @@ class MediaStorageService {
     final extension = _extensionFor(validation.mimeType, fileName);
     final destination = File(path.join(root.path, '${_uuid.v4()}$extension'));
     await File(sourcePath).copy(destination.path);
+    // ตรวจไฟล์ที่เก็บจริงก่อนส่ง ACK; เครื่องรุ่นเก่าที่ยังไม่ส่ง hash ใช้การตรวจเดิม
+    if (expectedSha256 != null &&
+        await sha256ForFile(destination.path) != expectedSha256) {
+      await destination.delete();
+      throw const MediaStorageException('SHA-256 ของไฟล์ที่ได้รับไม่ตรงกัน');
+    }
     return destination.path;
   }
+
+  Future<String> sha256ForFile(String filePath) async =>
+      (await sha256.bind(File(filePath).openRead()).first).toString();
 
   /// Stores bytes returned by a cloud adapter without exposing filesystem
   /// details to the UI or cloud implementation.

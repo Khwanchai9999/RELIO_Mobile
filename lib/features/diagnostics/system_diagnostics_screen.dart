@@ -134,8 +134,9 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
     try {
       final state = await _deviceState();
       final summary = [
-        'RELIO ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
-        'Flavor: ${RelioBuildInfo.environmentLabel}',
+        'RELIO ${_device['versionName'] ?? RelioBuildInfo.versionName}+${_device['versionCode'] ?? RelioBuildInfo.buildNumber}',
+        'Flavor: ${_device['flavor'] ?? RelioBuildInfo.environmentLabel}',
+        'Package: ${_device['package'] ?? 'unknown'}',
         'Device: ${_device['manufacturer'] ?? 'unknown'} ${_device['model'] ?? 'unknown'}',
         'Android/API: ${_device['androidVersion'] ?? 'unknown'} / ${_device['apiLevel'] ?? 'unknown'}',
         'Nearby readiness: ${state['nearbyReadiness']}',
@@ -151,13 +152,16 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
       final file = await _dependencies.diagnostics.exportZip(
         appInfo: {
           'app': RelioBuildInfo.appName,
-          'version': RelioBuildInfo.versionName,
-          'build': RelioBuildInfo.buildNumber,
+          'version': _device['versionName'] ?? RelioBuildInfo.versionName,
+          'versionCode':
+              _device['versionCode'] ??
+              int.tryParse(RelioBuildInfo.buildNumber),
+          'build': _device['versionCode'] ?? RelioBuildInfo.buildNumber,
           'relioBuild': RelioBuildInfo.buildLabel,
           'protocolVersion': 2,
           'nearbyDiagnosticVersion': '1',
           'package': _device['package'] ?? 'unknown',
-          'flavor': RelioBuildInfo.environmentLabel,
+          'flavor': _device['flavor'] ?? RelioBuildInfo.environmentLabel,
         },
         deviceState: {..._device, ...state},
         summary: summary,
@@ -196,11 +200,11 @@ class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           _section('แอป', [
-            'RELIO ${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
-            'RELIO Build: ${RelioBuildInfo.buildNumber}',
+            'RELIO ${_device['versionName'] ?? RelioBuildInfo.versionName}+${_device['versionCode'] ?? RelioBuildInfo.buildNumber}',
+            'RELIO Build: ${_device['versionCode'] ?? RelioBuildInfo.buildNumber}',
             'Protocol / Nearby diagnostic: v2 / v1',
             'Package: ${_device['package'] ?? 'กำลังอ่าน'}',
-            'Flavor: ${RelioBuildInfo.environmentLabel}',
+            'Flavor: ${_device['flavor'] ?? RelioBuildInfo.environmentLabel}',
           ]),
           _section('อุปกรณ์', [
             '${_device['manufacturer'] ?? 'กำลังอ่าน'} ${_device['model'] ?? ''}',

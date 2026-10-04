@@ -239,6 +239,7 @@ class RelioPacket {
     required String mimeType,
     required int byteSize,
     String? payloadId,
+    String? sha256,
     DateTime? mediaCreatedAt,
     int? width,
     int? height,
@@ -260,6 +261,7 @@ class RelioPacket {
       'byteSize': byteSize,
       'createdAt': (mediaCreatedAt ?? DateTime.now()).toUtc().toIso8601String(),
       ...?(payloadId == null ? null : {'payloadId': payloadId}),
+      ...?(sha256 == null ? null : {'sha256': sha256}),
       ...?(width == null ? null : {'width': width}),
       ...?(height == null ? null : {'height': height}),
       ...?(durationMs == null ? null : {'durationMs': durationMs}),
@@ -524,6 +526,10 @@ class RelioPacket {
         _payloadString('fileName');
         _payloadString('mimeType');
         _requiredNumber('byteSize');
+        if (payload.containsKey('sha256') &&
+            !RegExp(r'^[0-9a-f]{64}$').hasMatch(_payloadString('sha256'))) {
+          throw const RelioPacketException('Invalid media SHA-256.');
+        }
         _payloadString('createdAt');
         _optionalNumber('width');
         _optionalNumber('height');

@@ -183,8 +183,22 @@ class DiagnosticsLogService {
       for (final entry
           in await root.list().where((item) => item is File).toList()) {
         final file = entry as File;
-        if (!file.path.endsWith('.jsonl')) continue;
-        final data = await file.readAsBytes();
+        // ส่งออกเฉพาะ log ของระบบ และกรองซ้ำเผื่อมีข้อมูลจากเวอร์ชันก่อนหน้า
+        if (!RegExp(
+          r'^diagnostics(?:\.[1-4])?\.jsonl$',
+        ).hasMatch(file.uri.pathSegments.last)) {
+          continue;
+        }
+        final safeLines = <String>[];
+        for (final line in await file.readAsLines()) {
+          try {
+            final decoded = jsonDecode(line);
+            if (decoded is Map) safeLines.add(jsonEncode(_safeValue(decoded)));
+          } on FormatException {
+            // ข้ามบรรทัดที่อ่านไม่ได้ ไม่แนบข้อความดิบซึ่งอาจมีข้อมูลส่วนตัว
+          }
+        }
+        final data = utf8.encode('${safeLines.join('\n')}\n');
         archive.addFile(
           ArchiveFile(file.uri.pathSegments.last, data.length, data),
         );
@@ -193,8 +207,8 @@ class DiagnosticsLogService {
     archive.addFile(
       ArchiveFile(
         'summary.txt',
-        utf8.encode(summary).length,
-        utf8.encode(summary),
+        utf8.encode(_clean(summary, truncate: false)).length,
+        utf8.encode(_clean(summary, truncate: false)),
       ),
     );
     for (final item in {
@@ -202,7 +216,7 @@ class DiagnosticsLogService {
       'device_state.json': deviceState,
     }.entries) {
       final data = utf8.encode(
-        const JsonEncoder.withIndent('  ').convert(item.value),
+        const JsonEncoder.withIndent('  ').convert(_safeValue(item.value)),
       );
       archive.addFile(ArchiveFile(item.key, data.length, data));
     }
@@ -263,12 +277,13 @@ class DiagnosticsLogService {
   }
 
   static bool _sensitiveKey(String key) => RegExp(
-    r'(token|password|secret|authorization|private.?key|message.?body|content|credential|service.?role|conversation.?id|user.?id|device.?id)',
+    r'(token|password|secret|authorization|private.?key|message.?body|chat.?body|content|credential|service.?role|conversation.?id|user.?id|device.?id|image.?bytes|media.?bytes|file.?bytes|local.?path|file.?path)',
     caseSensitive: false,
   ).hasMatch(key);
 
   static Object? _safeValue(Object? value) {
     if (value is String) return _clean(value);
+    if (value is List<int>) return '[REDACTED_BINARY_DATA]';
     if (value is num || value is bool || value == null) return value;
     if (value is Iterable) return value.take(20).map(_safeValue).toList();
     if (value is Map) {
@@ -281,10 +296,14 @@ class DiagnosticsLogService {
     return _clean(value.toString());
   }
 
-  static String _clean(String value) {
+  static String _clean(String value, {bool truncate = true}) {
     var clean = value.replaceAll(
       RegExp(r'Bearer\s+\S+', caseSensitive: false),
       '[REDACTED]',
+    );
+    clean = clean.replaceAll(
+      RegExp(r'authorization\s*[:=]\s*[^\r\n]+', caseSensitive: false),
+      '[REDACTED_AUTHORIZATION]',
     );
     clean = clean.replaceAll(
       RegExp(
@@ -314,7 +333,9 @@ class DiagnosticsLogService {
       RegExp(r'eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'),
       '[REDACTED_JWT]',
     );
-    return clean.length > 240 ? '${clean.substring(0, 240)}…' : clean;
+    return truncate && clean.length > 240
+        ? '${clean.substring(0, 240)}…'
+        : clean;
   }
 
   static Map<String, Object?>? _optionalField(String name, Object? value) =>

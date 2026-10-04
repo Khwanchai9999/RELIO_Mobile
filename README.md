@@ -6,6 +6,12 @@ ownership-gated cloud boundary, bounded Nearby relay foundation, and adds a
 hybrid public Android QA update channel: Firebase Hosting serves metadata and
 GitHub Releases serves the signed APK.
 
+RELIO means **Relay + IO** — “สื่อสารได้ แม้ไม่มีสัญญาณ”. It is an
+offline-first emergency communication app: nearby devices can exchange data
+without Internet, while optional Cloud sync can catch up when Internet is
+available. Conversation history is saved locally first and remains available
+when a temporary transport connection ends.
+
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
@@ -108,9 +114,11 @@ app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
 The Android adapter compiles and is the application runtime default after the
 Flutter binding is active. Headless automated tests and deliberate developer
-overrides use Mock transport. Build 28 (`0.9.0+28`) remains the current public
-QA release. Build 32 (`0.9.0+32`) is the local-first Nearby negotiation-
-stability candidate; its physical Huawei/realme retest is pending.
+overrides use Mock transport. Build 32 (`0.9.0+32`) is the current public
+physical-test candidate. Source version `0.9.0+33` contains locally verified
+hardening fixes and is not published; Build 32 remains the physical candidate
+until Build 33 passes its full release gates. Physical Huawei/realme radio
+retest is pending.
 Cross-account direct conversation linking, local mapping, paged
 cloud-to-local message reconciliation, and receipt merge are implemented and
 covered by multi-account FakeCloud tests. The separate RELIO-QA Supabase
@@ -162,6 +170,11 @@ flutter test
 flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
 ```
 
+For an internal QA no-upload build, use `.\scripts\deploy-test.ps1 -NoUpload`.
+QA updater values are loaded from `scripts/public-qa-config.ps1`; do not build
+QA manually without those approved dart-defines. Run
+`.\scripts\verify-qa-update-isolation.ps1` before QA packaging.
+
 After Drift schema changes, generate sources with:
 
 ```bash
@@ -185,12 +198,12 @@ flutter build apk --release
 The PROD Android application ID is `com.relio.relio_mobile`; DEV and QA have
 separate flavor IDs. These IDs and the QA signing identity are preserved.
 
-The current source and public QA version is `0.9.0+23` (versionCode 23),
-containing the Nearby permission and session-recovery fix. It is available at
-[the RELIO QA page](https://relio-17dc0.web.app/qa/) and [GitHub release](https://github.com/Khwanchai9999/RELIO-Android-Updates/releases/tag/qa-v0.9.0-b23).
-Physical interoperability remains pending the user's authorized installation
-and retest; release publication alone does not establish device behavior.
-PROD remains `com.relio.relio_mobile`.
+The public QA release remains `0.9.0+32` (versionCode 32), available from
+[the RELIO QA page](https://relio-17dc0.web.app/qa/) and its linked immutable
+GitHub release. The working source is `0.9.0+33` while automated validation is
+in progress; it is not a public release. Physical interoperability remains
+pending an authorized two-phone retest. Release publication alone does not
+establish device behavior. PROD remains `com.relio.relio_mobile`.
 
 ## Public QA distribution and wireless updates (v0.9.0)
 
@@ -236,8 +249,9 @@ app installation and confirm the Package Installer update. The earlier
 all-Firebase attempt was blocked by the Spark executable-file restriction; the
 hybrid channel keeps the APK out of Hosting and does not upgrade billing or
 use Firebase Storage. Build 13, Build 16, and Build 22 are immutable historical
-releases. Build 28 is the current public QA release; Build 32 is the current
-unpublished native transport candidate and is not physically verified.
+releases. Build 32 is the current public QA physical-test candidate; source
+Build 33 is unpublished and awaits release gates. Neither source changes nor
+automated simulations establish physical radio behavior.
 
 ## Architecture
 
@@ -261,6 +275,18 @@ single persistence source for the `light`, `dark`, or `system` preference.
 Material 3 is configured through centralized RELIO color,
 spacing, and typography tokens. Google Prompt is wired through `google_fonts`
 with a safe fallback for offline development.
+
+Optional cloud account, message, receipt, and managed-media operations use the
+Supabase boundary. FCM is a QA-only push transport with consent/account gates;
+the admin web application is a separate deployment and is not part of this
+mobile runtime. Public QA updates use Hosting for metadata and GitHub Releases
+for the APK; the PROD Play build excludes QA installation/update behavior.
+
+For the main implementation boundaries, see `lib/core/nearby/` (packet and
+transport coordination), `lib/core/repositories/` (local persistence),
+`lib/core/media/` (managed attachment storage), `lib/core/sync/` (optional
+Cloud queue), and `lib/features/` (screens). Tests use deterministic fake
+Cloud and Mock Nearby implementations; ordinary tests do not require Internet.
 
 The local write path is:
 
@@ -289,6 +315,15 @@ the UI. Media control is JSON, while image/video content uses native Nearby
 file payloads; binary content is never Base64-encoded into protocol JSON. See
 [docs/NEARBY_PROTOCOL.md](docs/NEARBY_PROTOCOL.md) and
 [docs/MEDIA_TRANSFER.md](docs/MEDIA_TRANSFER.md).
+
+## Verification status
+
+Automated tests cover local persistence, protocol validation, identity and
+trust decisions, simulated Nearby exchange, media integrity, notification
+decisions, relay rules, and fake Cloud ownership. These tests do not exercise
+Bluetooth/Wi-Fi radio behavior between real phones. Physical discovery,
+permissions, GPS prompts, reconnect, image relay, and two-phone delivery remain
+pending the manual checklist in `docs/MANUAL_DEVICE_TESTS.md`.
 
 ## Roadmap
 
