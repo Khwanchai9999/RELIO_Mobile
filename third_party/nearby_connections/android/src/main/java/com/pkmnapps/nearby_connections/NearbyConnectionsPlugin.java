@@ -455,7 +455,10 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		args.put("endpointAlias", endpointAlias(endpointId));
 		args.putAll(getNearbyDiagnostics());
 		String traceId = connectionTraceIds.get(endpointId);
-		if (traceId != null) args.put("connectionTraceId", traceId);
+		if (traceId != null) {
+			args.put("connectionTraceId", traceId);
+			args.put("traceId", traceId);
+		}
 		args.put("method", method);
 		sendEvent(args);
 		emitNativeDiagnostic("native_connection_resolution_received", endpointId,
@@ -508,7 +511,10 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				? advertisingStrategy : discoveryStrategy));
 		event.putAll(getNearbyDiagnostics());
 		String traceId = connectionTraceIds.get(endpointId);
-		if (traceId != null) event.put("connectionTraceId", traceId);
+		if (traceId != null) {
+			event.put("connectionTraceId", traceId);
+			event.put("traceId", traceId);
+		}
 		if (rawCode != null) event.put("rawStatusCode", rawCode);
 		if (rawName != null) event.put("rawStatusName", rawName);
 		if (rawMessage != null) event.put("rawStatusMessage", rawMessage);

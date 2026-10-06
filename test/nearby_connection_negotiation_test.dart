@@ -77,6 +77,111 @@ void main() {
   });
 
   test(
+    'discovery loss during native negotiation does not own the attempt',
+    () async {
+      rig.transport.holdConnectionRequests = true;
+      rig.transport.simulatePeer(id: 'negotiating-peer', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('negotiating-peer');
+      expect(
+        rig.service.connectionPhaseForEndpoint('negotiating-peer'),
+        NearbyConnectionPhase.nativeNegotiating,
+      );
+
+      rig.transport.simulateEndpointLoss('negotiating-peer');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        rig.service.peerStates['negotiating-peer'],
+        NearbyConnectionState.connecting,
+      );
+      expect(
+        rig.service.connectionPhaseForEndpoint('negotiating-peer'),
+        NearbyConnectionPhase.nativeNegotiating,
+      );
+      expect(rig.transport.disconnectCount, 0);
+      expect(rig.service.transportAttemptResults, isEmpty);
+
+      rig.transport.simulatePeer(id: 'negotiating-peer', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+      expect(rig.transport.connectionRequestCount, 1);
+      expect(
+        rig.service.peerStates['negotiating-peer'],
+        NearbyConnectionState.connecting,
+      );
+
+      rig.transport.resolveConnectionRequest(
+        'negotiating-peer',
+        connected: true,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        rig.service.peerStates['negotiating-peer'],
+        NearbyConnectionState.connected,
+      );
+      final log = await rig.logText();
+      expect(log, contains('endpoint_visibility_lost'));
+      expect(log, contains('endpoint_loss_ignored_for_active_negotiation'));
+      expect(log, isNot(contains('ENDPOINT_LOST_DURING_NEGOTIATION')));
+    },
+  );
+
+  test('native failure owns an endpoint loss during negotiation', () async {
+    rig.transport.holdConnectionRequests = true;
+    rig.transport.simulatePeer(id: 'native-failure-peer', name: 'Peer');
+    await Future<void>.delayed(Duration.zero);
+
+    await rig.service.connect('native-failure-peer');
+    rig.transport.simulateEndpointLoss('native-failure-peer');
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      rig.service.peerStates['native-failure-peer'],
+      NearbyConnectionState.connecting,
+    );
+
+    rig.transport.resolveConnectionRequest(
+      'native-failure-peer',
+      connected: false,
+      rawStatusCode: 13,
+      rawStatusName: 'ERROR',
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      rig.service.peerStates['native-failure-peer'],
+      NearbyConnectionState.failed,
+    );
+    final log = await rig.logText();
+    expect(log, contains('GOOGLE_NEARBY_NATIVE_FAILURE'));
+    expect(log, contains('connection_resolution_applied'));
+    expect(log, isNot(contains('ENDPOINT_LOST_DURING_NEGOTIATION')));
+  });
+
+  test(
+    'hard watchdog still owns a lost endpoint with no native result',
+    () async {
+      rig.transport.holdConnectionRequests = true;
+      rig.transport.simulatePeer(id: 'watchdog-lost-peer', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('watchdog-lost-peer');
+      rig.transport.simulateEndpointLoss('watchdog-lost-peer');
+      await Future<void>.delayed(const Duration(milliseconds: 260));
+
+      expect(
+        rig.service.peerStates['watchdog-lost-peer'],
+        NearbyConnectionState.failed,
+      );
+      expect(rig.transport.disconnectCount, 1);
+      final log = await rig.logText();
+      expect(log, contains('RELIO_HARD_NEGOTIATION_TIMEOUT'));
+      expect(log, isNot(contains('ENDPOINT_LOST_DURING_NEGOTIATION')));
+    },
+  );
+
+  test(
     'Nearby event log exposes endpoint aliases rather than raw ids',
     () async {
       const endpointId = 'private-endpoint-identifier';
@@ -279,8 +384,13 @@ void main() {
       await rig.service.connect('lost-peer');
       rig.transport.simulateEndpointLoss('lost-peer');
       await Future<void>.delayed(const Duration(milliseconds: 10));
-      expect(rig.service.peerStates['lost-peer'], NearbyConnectionState.failed);
-      expect(await rig.logText(), contains('ENDPOINT_LOST_DURING_NEGOTIATION'));
+      expect(
+        rig.service.peerStates['lost-peer'],
+        NearbyConnectionState.connecting,
+      );
+      final log = await rig.logText();
+      expect(log, contains('endpoint_loss_ignored_for_active_negotiation'));
+      expect(log, isNot(contains('ENDPOINT_LOST_DURING_NEGOTIATION')));
     },
   );
 

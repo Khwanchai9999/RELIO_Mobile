@@ -50,7 +50,8 @@ class NativeConnectionResult {
       role: args['role'] as String?,
       elapsedMs: args['elapsedMs'] as int?,
       strategy: args['strategy'] as String?,
-      connectionTraceId: args['connectionTraceId'] as String?,
+      connectionTraceId:
+          (args['connectionTraceId'] ?? args['traceId']) as String?,
       androidApi: args['androidApi'] as int?,
       googlePlayServicesVersionName:
           args['googlePlayServicesVersionName'] as String?,

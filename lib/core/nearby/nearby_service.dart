@@ -361,6 +361,7 @@ class NearbyService extends ChangeNotifier {
       'connected': false,
       'elapsedMs': null,
       'endpointLostDuringAttempt': false,
+      'discoveryVisibility': 'visible',
       'discoveryActiveDuringNegotiation': isDiscovering,
       'advertisingActiveDuringNegotiation': isAdvertising,
       'lifecycleChanged': false,
@@ -599,7 +600,8 @@ class NearbyService extends ChangeNotifier {
     diagnostics?.record(
       'native_nearby',
       event.name,
-      connectionTraceId: fields['connectionTraceId'] as String?,
+      connectionTraceId:
+          (fields['connectionTraceId'] ?? fields['traceId']) as String?,
       operation: fields['operation'] as String?,
       nativeCode: fields['rawStatusCode'],
       nativeMessage: fields['rawStatusMessage'] as String?,
@@ -1886,21 +1888,28 @@ class NearbyService extends ChangeNotifier {
     _endpointLifecycle[peer.endpointId] = peer;
     if (peer.isLost) {
       final activeAttempt = _activeTransportAttempts[peer.endpointId];
+      final state = peerStates[peer.endpointId];
+      final activeNegotiation =
+          activeAttempt != null &&
+          (state == NearbyConnectionState.connecting ||
+              state == NearbyConnectionState.incomingRequest);
       if (activeAttempt != null) {
-        activeAttempt['endpointLostDuringAttempt'] = true;
+        activeAttempt
+          ..['endpointLostDuringAttempt'] = true
+          ..['discoveryVisibility'] = 'lost'
+          ..['discoveryVisibilityLostAt'] =
+              (peer.lostAt ?? DateTime.now().toUtc()).toIso8601String()
+          ..['discoveryVisibilityLostEpoch'] = peer.discoveryEpoch;
       }
-      _finishTransportAttempt(
-        peer.endpointId,
-        connected: false,
-        endpointLost: true,
-      );
       diagnostics?.record(
         'nearby',
-        'endpoint_lost',
+        'endpoint_visibility_lost',
         connectionTraceId: _connectionTraces[peer.endpointId],
         operation: 'onEndpointLost',
         peerIdentifier: peer.endpointId,
         fields: {
+          'activeNegotiation': activeNegotiation,
+          'negotiationPhase': _connectionPhases[peer.endpointId]?.name,
           'discoveryEpoch': peer.discoveryEpoch,
           'currentDiscoveryEpoch': transport.discoveryEpoch,
           'foundAt': peer.foundAt?.toIso8601String(),
@@ -1911,50 +1920,38 @@ class NearbyService extends ChangeNotifier {
           'isMarkedLost': true,
         },
       );
-      if (peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
-          peerStates[peer.endpointId] ==
-              NearbyConnectionState.incomingRequest) {
+      if (activeNegotiation) {
         diagnostics?.record(
           'connection',
-          'ENDPOINT_LOST_DURING_NEGOTIATION',
+          'endpoint_loss_ignored_for_active_negotiation',
           severity: 'warning',
           connectionTraceId: _connectionTraces[peer.endpointId],
           operation: 'onEndpointLost',
           peerIdentifier: peer.endpointId,
           fields: {
+            'activeNegotiation': true,
+            'negotiationPhase': _connectionPhases[peer.endpointId]?.name,
+            'discoveryEpoch': peer.discoveryEpoch,
             'appLifecycleState': appLifecycleState,
             'screenRoute': screenRoute,
           },
         );
-        diagnostics?.record(
-          'connection',
-          'connection_negotiation_failed',
-          severity: 'warning',
-          connectionTraceId: _connectionTraces[peer.endpointId],
-          operation: 'onEndpointLost',
-          stateFrom: peerStates[peer.endpointId]?.name,
-          stateTo: 'failed',
-          peerIdentifier: peer.endpointId,
-          nativeCode: 'ENDPOINT_LOST',
-          reason: 'ENDPOINT_LOST_DURING_NEGOTIATION',
-        );
-      }
-      if (peerStates[peer.endpointId] != NearbyConnectionState.connected) {
-        _identityHandshakeTimeouts.remove(peer.endpointId)?.cancel();
-        _cancelConnectionTimers(peer.endpointId);
-        _setConnectionPhase(
-          peer.endpointId,
-          NearbyConnectionPhase.nativeResult,
-        );
-        _connectionStartedAt.remove(peer.endpointId);
-        _connectionTraces.remove(peer.endpointId);
+        // แยก discovery visibility ออกจาก ConnectionLifecycle; attempt ที่กำลังทำงาน
+        // ต้องรอ native callback ต่อ จึงไม่ยกเลิก timer หรือ state เดิม
         discoveredPeers.removeWhere(
           (item) => item.endpointId == peer.endpointId,
         );
-        peerStates[peer.endpointId] = NearbyConnectionState.failed;
-        peerErrors[peer.endpointId] = 'endpoint_lost_during_negotiation';
-        final deviceId = endpointToDeviceId.remove(peer.endpointId);
-        if (deviceId != null) deviceToEndpointId.remove(deviceId);
+      } else {
+        _finishTransportAttempt(
+          peer.endpointId,
+          connected: false,
+          endpointLost: true,
+        );
+        if (state != NearbyConnectionState.connected) {
+          discoveredPeers.removeWhere(
+            (item) => item.endpointId == peer.endpointId,
+          );
+        }
       }
       _log(
         'endpoint lost alias=${DiagnosticsLogService.peerAlias(peer.endpointId)}',
@@ -1990,6 +1987,11 @@ class NearbyService extends ChangeNotifier {
       discoveredPeers.add(peer);
     } else {
       discoveredPeers[index] = peer;
+    }
+    final activeAttempt = _activeTransportAttempts[peer.endpointId];
+    if (activeAttempt != null) {
+      activeAttempt['discoveryVisibility'] = 'visible';
+      _markTransportPhase(peer.endpointId, 'endpointRefound');
     }
     peerStates.putIfAbsent(
       peer.endpointId,
@@ -2487,63 +2489,72 @@ class NearbyService extends ChangeNotifier {
       lastNativeConnectionFailure = event;
       lastDiagnostic = event.rawStatusName ?? event.error;
     }
-    diagnostics?.record(
-      'connection',
-      event.state == NearbyConnectionState.failed
-          ? 'native_connection_resolution_failed'
-          : 'native_connection_result',
-      connectionTraceId:
-          event.connectionTraceId ?? _connectionTraces[endpointId],
-      operation: event.operation ?? 'onConnectionResult',
-      stateFrom: event.state == NearbyConnectionState.connected
-          ? 'connecting'
-          : 'connecting',
-      stateTo: event.state.name,
-      peerIdentifier: endpointId,
-      nativeCode:
-          (RelioBuildInfo.developerDiagnosticsEnabled
-              ? event.rawStatusCode
-              : null) ??
-          (event.error == null ? 'success' : _errorCode(event.error!)),
-      nativeMessage:
-          (RelioBuildInfo.developerDiagnosticsEnabled
-              ? event.rawStatusMessage
-              : null) ??
-          event.error,
-      fields: {
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.rawStatusCode != null)
-          'rawStatusCode': event.rawStatusCode,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.rawStatusName != null)
-          'rawStatusName': event.rawStatusName,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.rawStatusMessage != null)
-          'rawStatusMessage': event.rawStatusMessage,
-        if (event.role != null) 'role': event.role,
-        if (event.strategy != null) 'strategy': event.strategy,
-        if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.androidApi != null)
-          'androidApi': event.androidApi,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.googlePlayServicesVersionName != null)
-          'googlePlayServicesVersionName': event.googlePlayServicesVersionName,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.googlePlayServicesVersionCode != null)
-          'googlePlayServicesVersionCode': event.googlePlayServicesVersionCode,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.nearbyLibraryVersion != null)
-          'nearbyLibraryVersion': event.nearbyLibraryVersion,
-        if (RelioBuildInfo.developerDiagnosticsEnabled &&
-            event.playServicesNearbyDependencyVersion != null)
-          'playServicesNearbyDependencyVersion':
-              event.playServicesNearbyDependencyVersion,
-        if (_connectionStartedAt[endpointId] case final start?)
-          'durationMs': DateTime.now().toUtc().difference(start).inMilliseconds,
-        ..._radioSnapshotFields(),
-      },
-    );
+    if (event.state == NearbyConnectionState.connected ||
+        event.state == NearbyConnectionState.failed) {
+      diagnostics?.record(
+        'connection',
+        'connection_resolution_applied',
+        connectionTraceId:
+            event.connectionTraceId ?? _connectionTraces[endpointId],
+        operation: event.operation ?? 'onConnectionResult',
+        stateFrom: event.state == NearbyConnectionState.connected
+            ? 'connecting'
+            : 'connecting',
+        stateTo: event.state.name,
+        peerIdentifier: endpointId,
+        nativeCode:
+            (RelioBuildInfo.developerDiagnosticsEnabled
+                ? event.rawStatusCode
+                : null) ??
+            (event.error == null ? 'success' : _errorCode(event.error!)),
+        nativeMessage:
+            (RelioBuildInfo.developerDiagnosticsEnabled
+                ? event.rawStatusMessage
+                : null) ??
+            event.error,
+        fields: {
+          'resolution': event.state == NearbyConnectionState.failed
+              ? 'failure'
+              : 'success',
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.rawStatusCode != null)
+            'rawStatusCode': event.rawStatusCode,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.rawStatusName != null)
+            'rawStatusName': event.rawStatusName,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.rawStatusMessage != null)
+            'rawStatusMessage': event.rawStatusMessage,
+          if (event.role != null) 'role': event.role,
+          if (event.strategy != null) 'strategy': event.strategy,
+          if (event.elapsedMs != null) 'elapsedMs': event.elapsedMs,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.androidApi != null)
+            'androidApi': event.androidApi,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.googlePlayServicesVersionName != null)
+            'googlePlayServicesVersionName':
+                event.googlePlayServicesVersionName,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.googlePlayServicesVersionCode != null)
+            'googlePlayServicesVersionCode':
+                event.googlePlayServicesVersionCode,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.nearbyLibraryVersion != null)
+            'nearbyLibraryVersion': event.nearbyLibraryVersion,
+          if (RelioBuildInfo.developerDiagnosticsEnabled &&
+              event.playServicesNearbyDependencyVersion != null)
+            'playServicesNearbyDependencyVersion':
+                event.playServicesNearbyDependencyVersion,
+          if (_connectionStartedAt[endpointId] case final start?)
+            'durationMs': DateTime.now()
+                .toUtc()
+                .difference(start)
+                .inMilliseconds,
+          ..._radioSnapshotFields(),
+        },
+      );
+    }
     if (event.state == NearbyConnectionState.connected ||
         event.state == NearbyConnectionState.failed ||
         event.state == NearbyConnectionState.disconnected) {
