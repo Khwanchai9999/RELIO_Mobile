@@ -20,6 +20,7 @@ enum FakeCloudFailure {
 
 class FakeCloudBackend {
   final users = <String, ({String password, CloudIdentity identity})>{};
+  final profiles = <String, CloudProfile>{};
   final pushTokens = <String, String>{};
   final messages = <String, CloudMessageDto>{};
   final conversations = <String, CloudConversationDto>{};
@@ -36,6 +37,7 @@ class FakeCloudBackend {
   DateTime? lastMessageServerTime;
 }
 
+// ใช้ backend จำลองใน test โดยคงกฎ ownership เดียวกับ Cloud จริง
 class FakeCloudDataSource implements CloudDataSource {
   FakeCloudDataSource({
     this.configured = true,
@@ -59,6 +61,7 @@ class FakeCloudDataSource implements CloudDataSource {
   final _cloudStates = StreamController<CloudState>.broadcast();
   final _authStates = StreamController<AuthState>.broadcast();
   Map<String, String> get pushTokens => backend.pushTokens;
+  Map<String, CloudProfile> get profiles => backend.profiles;
   Map<String, ({String password, CloudIdentity identity})> get _users =>
       backend.users;
   Map<String, CloudMessageDto> get messages => backend.messages;
@@ -86,6 +89,10 @@ class FakeCloudDataSource implements CloudDataSource {
       displayName: displayName,
     );
     _users[email] = (password: 'password', identity: identity);
+    backend.profiles[identity.userId] = CloudProfile(
+      userId: identity.userId,
+      displayName: displayName ?? '',
+    );
     return identity;
   }
 
@@ -168,6 +175,10 @@ class FakeCloudDataSource implements CloudDataSource {
       displayName: displayName,
     );
     _users[email] = (password: password, identity: identity);
+    backend.profiles[identity.userId] = CloudProfile(
+      userId: identity.userId,
+      displayName: displayName ?? '',
+    );
     _identity = identity;
     _authState = AuthState.authenticated;
     _state = CloudState.ready;
@@ -210,8 +221,38 @@ class FakeCloudDataSource implements CloudDataSource {
   }
 
   @override
-  Future<void> upsertProfile({required String displayName}) async =>
-      _requireAuth();
+  Future<CloudProfile> fetchMyProfile() async {
+    _requireAuth();
+    final profile = backend.profiles[_identity!.userId];
+    if (profile == null) {
+      throw const CloudException('ไม่พบข้อมูลสมาชิก', code: 'notFound');
+    }
+    return profile;
+  }
+
+  @override
+  Future<void> upsertProfile({required String displayName}) async {
+    _requireAuth();
+    backend.profiles[_identity!.userId] = CloudProfile(
+      userId: _identity!.userId,
+      displayName: displayName,
+    );
+  }
+
+  @override
+  Future<void> deleteMyAccount() async {
+    _requireAuth();
+    final identity = _identity!;
+    _users.remove(identity.email);
+    backend.profiles[identity.userId] = CloudProfile(
+      userId: identity.userId,
+      displayName: 'บัญชีที่ลบแล้ว',
+    );
+    backend.pushTokens.removeWhere(
+      (key, _) => key.startsWith('${identity.userId}:'),
+    );
+    await signOut();
+  }
 
   @override
   Future<void> upsertPushToken({

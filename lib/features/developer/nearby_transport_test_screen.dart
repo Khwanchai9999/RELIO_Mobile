@@ -56,6 +56,22 @@ class _NearbyTransportTestScreenState extends State<NearbyTransportTestScreen> {
     }
   }
 
+  Future<void> _selectRole(NearbyDiagnosticRole? role) async {
+    if (role == null || role == _nearby.diagnosticRole) return;
+    setState(() => _changingMode = true);
+    try {
+      await _nearby.configureDiagnosticRole(role);
+    } on Object catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('เปลี่ยนบทบาท Nearby ไม่ได้: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _changingMode = false);
+    }
+  }
+
   Future<void> _startTest() async {
     final endpoint = _selectedEndpoint;
     if (endpoint == null || !_nearby.isEndpointCurrent(endpoint)) return;
@@ -83,6 +99,19 @@ class _NearbyTransportTestScreenState extends State<NearbyTransportTestScreen> {
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            DropdownButtonFormField<NearbyDiagnosticRole>(
+              key: ValueKey(_nearby.diagnosticRole),
+              initialValue: _nearby.diagnosticRole,
+              decoration: const InputDecoration(labelText: 'บทบาท QA Nearby'),
+              items: NearbyDiagnosticRole.values
+                  .map(
+                    (role) =>
+                        DropdownMenuItem(value: role, child: Text(role.label)),
+                  )
+                  .toList(growable: false),
+              onChanged: _changingMode ? null : _selectRole,
+            ),
+            const SizedBox(height: 12),
             DropdownButtonFormField<NearbyTransportTestMode>(
               key: ValueKey(_nearby.transportTestMode),
               initialValue: _nearby.transportTestMode,
@@ -105,6 +134,7 @@ class _NearbyTransportTestScreenState extends State<NearbyTransportTestScreen> {
               'Google Play Services: ${snapshot['googlePlayServicesVersionName'] ?? 'ไม่ทราบ'} (${snapshot['googlePlayServicesVersionCode'] ?? '—'})',
               'Native ล่าสุด: ${failure?.rawStatusCode ?? '—'} ${failure?.rawStatusName ?? ''}',
               'Strategy: ${_nearby.transport.strategyName}',
+              'QA role: ${_nearby.diagnosticRole.name}',
             ]),
             if (candidates.isEmpty)
               const Card(

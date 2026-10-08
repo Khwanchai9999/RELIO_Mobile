@@ -19,10 +19,41 @@ import '../features/sync/sync_screen.dart';
 import 'app.dart';
 import 'environment.dart';
 
-GoRouter createRelioRouter() {
+// รวม route ไว้จุดเดียว เพื่อให้ทุกหน้ามีเส้นทางและชื่อที่ตรวจสอบได้ตรงกัน
+String? authStartupRedirect({
+  required String location,
+  required bool authReady,
+  required bool hasSession,
+}) {
+  if (location != '/startup' || !authReady) return null;
+  return hasSession ? '/home' : '/welcome';
+}
+
+GoRouter createRelioRouter({
+  bool Function()? authReady,
+  bool Function()? hasSession,
+  Listenable? refreshListenable,
+}) {
   return GoRouter(
-    initialLocation: '/welcome',
+    initialLocation: '/startup',
+    refreshListenable: refreshListenable,
+    redirect: (_, state) => authStartupRedirect(
+      location: state.matchedLocation,
+      authReady: authReady?.call() ?? true,
+      hasSession: hasSession?.call() ?? false,
+    ),
     routes: [
+      GoRoute(
+        path: '/startup',
+        builder: (_, _) => Scaffold(
+          body: Center(
+            child: Semantics(
+              label: 'กำลังตรวจสอบบัญชี RELIO',
+              child: CircularProgressIndicator(),
+            ),
+          ),
+        ),
+      ),
       GoRoute(path: '/', redirect: (_, _) => '/welcome'),
       GoRoute(path: '/welcome', builder: (_, _) => const WelcomeScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),

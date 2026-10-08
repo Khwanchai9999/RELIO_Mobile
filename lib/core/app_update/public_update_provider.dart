@@ -142,6 +142,7 @@ class PublicQaUpdateProvider implements PublicUpdateProvider {
     required bool Function() isCancelled,
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) async {
+    // ตรวจ URL, ขนาด และ SHA-256 ให้ตรง manifest ก่อนคืนไฟล์ไปยังตัวติดตั้ง
     await directory.create(recursive: true);
     await for (final entity in directory.list()) {
       if (entity is File &&

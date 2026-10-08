@@ -8,17 +8,20 @@ import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
+import 'support/recording_notifications.dart';
 
 void main() {
   late AppDatabase database;
   late RelioRepositories repositories;
   late MockNearbyTransport transport;
   late NearbyService service;
+  late RecordingNotifications notifications;
 
   setUp(() async {
     database = AppDatabase.memory();
     repositories = RelioRepositories(database);
     transport = MockNearbyTransport();
+    notifications = RecordingNotifications();
     service = NearbyService(
       transport: transport,
       messages: repositories.messages,
@@ -27,6 +30,7 @@ void main() {
       nearbyDevices: repositories.nearbyDevices,
       sos: repositories.sos,
       settings: repositories.settings,
+      localNotifications: notifications,
     );
     await service.initialize();
     addTearDown(() async {
@@ -248,6 +252,10 @@ void main() {
     expect((await repositories.sos.getById('sos-1'))?.isActive, isTrue);
     expect((await repositories.sos.getById('sos-1'))?.message, 'need help');
     expect(
+      notifications.shown.where((item) => item.id == 'sos-1'),
+      hasLength(1),
+    );
+    expect(
       (await repositories.nearbyDevices.listDevices()).single.status,
       DeviceStatus.sos,
     );
@@ -267,12 +275,88 @@ void main() {
     await settle();
 
     expect((await repositories.sos.getById('sos-1'))?.isActive, isFalse);
+    expect(
+      await repositories.sos.readActive(ownerDeviceId: 'device-sos'),
+      isNull,
+    );
+    expect(
+      notifications.shown.where((item) => item.id == 'sos-1'),
+      hasLength(1),
+    );
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
     expect(
       (await repositories.nearbyDevices.listDevices()).single.status,
       DeviceStatus.normal,
     );
   });
+
+  test(
+    'new SOS routes only to established RFCOMM peer and correlates its ACK',
+    () async {
+      Future<void> connectAndIdentify(String endpoint, String deviceId) async {
+        transport.simulatePeer(id: endpoint, name: deviceId);
+        await settle();
+        await service.connect(endpoint);
+        await settle();
+        transport.simulateIncoming(
+          peerId: endpoint,
+          bytes: RelioPacket.hello(
+            senderDeviceId: deviceId,
+            senderUserId: '$deviceId-user',
+            displayName: deviceId,
+          ).toBytes(),
+        );
+        await settle();
+      }
+
+      await connectAndIdentify('old-nearby-endpoint', 'device-old');
+      await connectAndIdentify('classic:realme-address', 'device-realme');
+      transport.sentPayloads.clear();
+      transport.sentPeerIds.clear();
+
+      // Discovery loss must not leave the old endpoint eligible for SOS routing.
+      transport.simulateEndpointLoss('old-nearby-endpoint');
+      await settle();
+
+      final localDeviceId = await RelioDeviceIdentityRepository(
+        database,
+      ).getDeviceId();
+      final event = await repositories.sos.createAndActivate(
+        ownerDeviceId: localDeviceId,
+        ownerUserId: '',
+        message: 'outbound route check',
+      );
+      await service.sendSos(event);
+
+      expect(transport.sentPeerIds, ['classic:realme-address']);
+      final sentPacket = transport.sentPayloads
+          .map(RelioPacket.fromBytes)
+          .single;
+      expect(sentPacket.type, RelioPacketType.sos);
+      expect(sentPacket.payload['sosId'], event.id);
+      expect(service.lastError, isNull);
+
+      transport.simulateIncoming(
+        peerId: 'classic:realme-address',
+        bytes: RelioPacket.ack(
+          senderDeviceId: 'device-realme',
+          senderUserId: 'device-realme-user',
+          acknowledgedPacketId: sentPacket.packetId,
+        ).toBytes(),
+      );
+      await settle();
+
+      expect(
+        service.eventLog.any(
+          (entry) =>
+              entry.contains('SOS ACK received') &&
+              entry.contains('event=${event.id}'),
+        ),
+        isTrue,
+      );
+      expect(service.acknowledgementCount, 1);
+    },
+  );
 
   test('incoming Rescue and normal status propagate and clear', () async {
     transport.simulatePeer(id: 'endpoint-rescue', name: 'Rescue Peer');

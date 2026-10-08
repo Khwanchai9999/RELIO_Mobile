@@ -32,6 +32,7 @@ class MainActivity : FlutterActivity() {
     private val identityKeyStore = RelioIdentityKeyStore()
     private val identityExecutor = Executors.newSingleThreadExecutor()
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
+    private var bluetoothClassicChannels: BluetoothClassicChannels? = null
     private var notificationPermissionResult: MethodChannel.Result? = null
     private var notificationsMethodChannel: MethodChannel? = null
 
@@ -122,6 +123,11 @@ class MainActivity : FlutterActivity() {
         }
         runtimeConnectivityChannels = RuntimeConnectivityChannels(this).also {
             it.register(flutterEngine)
+        }
+        if (packageName != PROD_APPLICATION_ID) {
+            bluetoothClassicChannels = BluetoothClassicChannels(this).also {
+                it.register(flutterEngine)
+            }
         }
     }
 

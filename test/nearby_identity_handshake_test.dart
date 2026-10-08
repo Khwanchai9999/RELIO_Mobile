@@ -24,6 +24,18 @@ void main() {
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
             pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
       );
+      await waitFor(() async {
+        final conversationsA = await pair.repositoriesA.conversations
+            .listConversations();
+        final conversationsB = await pair.repositoriesB.conversations
+            .listConversations();
+        return conversationsA.any(
+              (conversation) => conversation.participantId == 'device-b',
+            ) &&
+            conversationsB.any(
+              (conversation) => conversation.participantId == 'device-a',
+            );
+      });
 
       expect(
         pair.serviceA.peerStates['endpoint-b'],
@@ -132,6 +144,11 @@ void main() {
       addTearDown(pair.close);
 
       pair.transportB.clearDiscoveredFingerprintHint();
+      // Also clear the service's cached discovery record so this truly tests
+      // an incoming request with no available identity hint.
+      pair.serviceB.discoveredPeers.removeWhere(
+        (peer) => peer.endpointId == 'endpoint-a',
+      );
       pair.transportB.discoverPeer();
       for (var attempt = 0; attempt < 3; attempt++) {
         pair.transportB.simulateIncomingRequest(

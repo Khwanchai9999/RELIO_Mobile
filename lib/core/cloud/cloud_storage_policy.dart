@@ -1,3 +1,4 @@
+// บังคับ path ให้ผูกกับเจ้าของก่อนส่งไฟล์ เพื่อให้ตรงกับกฎ RLS/Storage
 abstract final class CloudStoragePathPolicy {
   static const bucket = 'relio-media';
 

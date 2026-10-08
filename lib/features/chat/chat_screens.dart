@@ -33,16 +33,17 @@ class ChatListScreen extends StatelessWidget {
           final conversations = [
             ...allConversations.where(
               (conversation) =>
-                  !RelioMockData.isDemoId(conversation.id) &&
+                  !RelioMockData.isDemoId(conversation.participantId) &&
                   nearby.isDeviceConnected(conversation.participantId),
             ),
             ...allConversations.where(
               (conversation) =>
-                  !RelioMockData.isDemoId(conversation.id) &&
+                  !RelioMockData.isDemoId(conversation.participantId) &&
                   !nearby.isDeviceConnected(conversation.participantId),
             ),
             ...allConversations.where(
-              (conversation) => RelioMockData.isDemoId(conversation.id),
+              (conversation) =>
+                  RelioMockData.isDemoId(conversation.participantId),
             ),
           ];
           if (conversations.isEmpty) {
@@ -83,7 +84,7 @@ class ChatListScreen extends StatelessWidget {
         : '${conversation.lastMessageAt!.hour.toString().padLeft(2, '0')}:${conversation.lastMessageAt!.minute.toString().padLeft(2, '0')}',
     status: conversation.participantStatus,
     unread: conversation.unreadCount,
-    isDemo: RelioMockData.isDemoId(conversation.id),
+    isDemo: RelioMockData.isDemoId(conversation.participantId),
   );
 }
 
@@ -102,6 +103,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   RelioDevice? _demoDevice;
   late Stream<List<RelioMessage>> _messagesStream;
   String? _persistedPeerName;
+  String? _persistedPeerDeviceId;
   RelioDependencies? _dependencies;
 
   @override
@@ -123,7 +125,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         .getConversation(widget.chatId)
         .then((conversation) {
           if (mounted && conversation != null) {
-            setState(() => _persistedPeerName = conversation.displayName);
+            setState(() {
+              _persistedPeerName = conversation.displayName;
+              _persistedPeerDeviceId = conversation.participantId;
+            });
           }
         });
     _dependencies!.nearbyService.setActiveConversation(widget.chatId);
@@ -133,12 +138,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _markConversationRead() async {
     final dependencies = _dependencies;
     if (dependencies == null) return;
+    final conversation = await dependencies.repositories.conversations
+        .getConversation(widget.chatId);
+    final peerDeviceId = conversation?.participantId ?? widget.chatId;
     final messageIds = await dependencies.repositories.messages
         .markConversationRead(widget.chatId);
     for (final messageId in messageIds) {
       await dependencies.nearbyService.sendReadReceipt(
         messageId: messageId,
-        peerDeviceId: widget.chatId,
+        peerDeviceId: peerDeviceId,
       );
     }
     await dependencies.syncEngine.queueReadReceipts(
@@ -161,6 +169,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final dependencies = RelioDependencyScope.of(context);
     try {
       final deviceId = await dependencies.identity.getDeviceId();
+      // บันทึกผ่าน Repository ก่อนส่ง Nearby เพื่อให้ข้อความอยู่ในเครื่องเสมอ
       final message = await dependencies.repositories.messages
           .createOutgoingText(
             conversationId: widget.chatId,
@@ -178,6 +187,46 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _confirmDeleteDemoMessage(RelioMessage message) async {
+    if (!message.outgoing ||
+        message.type != MessageType.text ||
+        (message.text != 'WEEK3 DELETE TEST' &&
+            message.text != 'W3DELETETEST')) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ลบข้อความทดสอบ?'),
+        content: const Text('ลบได้เฉพาะข้อความ Week 3 ที่ยังไม่ซิงก์'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('ลบข้อความ'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final deleted = await _dependencies!.repositories.messages
+        .deleteWeek3DemoMessage(message.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleted
+              ? 'ลบข้อความทดสอบออกจากเครื่องและคิวแล้ว'
+              : 'ลบไม่ได้: ข้อความอาจเริ่มซิงก์หรือไม่ใช่รายการทดสอบที่ยังค้าง',
+        ),
+      ),
+    );
   }
 
   Future<void> _linkCloudConversation() async {
@@ -253,6 +302,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final transferId = const Uuid().v4();
       await dependencies.repositories.attachments.createPending(
         id: attachmentId,
+        conversationId: widget.chatId,
         messageId: messageId,
         transferId: transferId,
         mediaType: type == MessageType.video
@@ -364,14 +414,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final nearby = RelioDependencyScope.of(context).nearbyService;
-    final isDemo = RelioMockData.isDemoId(widget.chatId);
+    final isDemo = RelioMockData.isDemoId(
+      _persistedPeerDeviceId ?? widget.chatId,
+    );
     return Scaffold(
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(64),
         child: AnimatedBuilder(
           animation: nearby,
           builder: (context, _) {
-            final connected = nearby.isDeviceConnected(widget.chatId);
+            final connected = nearby.isDeviceConnected(
+              _persistedPeerDeviceId ?? widget.chatId,
+            );
             return RelioAppBar(
               title: _persistedPeerName ?? _demoDevice?.name ?? 'อุปกรณ์ RELIO',
               subtitle: isDemo
@@ -420,7 +474,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           ? CrossAxisAlignment.end
                           : CrossAxisAlignment.start,
                       children: [
-                        RelioMessageBubble(message: message),
+                        GestureDetector(
+                          onLongPress:
+                              message.outgoing &&
+                                  message.type == MessageType.text &&
+                                  (message.text == 'WEEK3 DELETE TEST' ||
+                                      message.text == 'W3DELETETEST')
+                              ? () => _confirmDeleteDemoMessage(message)
+                              : null,
+                          child: RelioMessageBubble(message: message),
+                        ),
                         if (message.status == DeliveryStatus.failed)
                           TextButton.icon(
                             onPressed: () => RelioDependencyScope.of(

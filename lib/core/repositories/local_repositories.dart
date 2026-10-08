@@ -21,16 +21,19 @@ abstract interface class ConversationRepository {
     required DeviceStatus participantStatus,
   });
   Future<void> updateLastActivity(String conversationId, DateTime time);
+  Future<int> countUnowned();
   Future<void> updateParticipantStatus(
     String participantId,
     DeviceStatus status,
   );
+  Future<void> adoptUnowned(String ownerUserId);
 }
 
 abstract interface class MessageRepository {
   Stream<List<RelioMessage>> watchMessages(String conversationId);
   Future<List<RelioMessage>> listMessages(String conversationId);
   Future<RelioMessage?> getMessage(String messageId);
+  Future<bool> deleteWeek3DemoMessage(String messageId);
   Future<RelioMessage> createOutgoingText({
     required String conversationId,
     required String senderId,
@@ -145,6 +148,7 @@ abstract interface class AttachmentRepository {
   Future<List<RelioMediaAttachment>> listAll();
   Future<RelioMediaAttachment> createPending({
     required String id,
+    required String conversationId,
     required String messageId,
     required String transferId,
     required MediaType mediaType,
@@ -251,64 +255,88 @@ abstract interface class NearbyDeviceRepository {
 }
 
 class DriftConversationRepository implements ConversationRepository {
-  DriftConversationRepository(this.db);
+  DriftConversationRepository(
+    this.db, {
+    this.ownerUserIdProvider,
+    this.ownerScopeChanges,
+  });
   final AppDatabase db;
+  final String? Function()? ownerUserIdProvider;
+  final Stream<Object?>? ownerScopeChanges;
   final _conversationController =
       StreamController<List<RelioConversation>>.broadcast();
-  StreamSubscription<List<RelioConversation>>? _conversationSubscription;
+  StreamSubscription<List<RelioConversation>>? _databaseSubscription;
   List<RelioConversation>? _latestConversations;
+  var _watchingConversations = false;
+  var _conversationWatchGeneration = 0;
 
   @override
   Stream<List<RelioConversation>> watchConversations() {
-    _conversationSubscription ??=
-        (db.select(db.conversations).join([
-              leftOuterJoin(
-                db.messages,
-                db.messages.conversationId.equalsExp(db.conversations.id),
-              ),
-            ])..orderBy([
-              OrderingTerm.desc(db.conversations.lastMessageAt),
-              OrderingTerm.desc(db.conversations.updatedAt),
-              OrderingTerm.desc(db.messages.createdAt),
-            ]))
-            .watch()
-            .map(_mapJoinedRows)
-            .listen((conversations) {
-              _latestConversations = conversations;
-              _conversationController.add(conversations);
-            });
+    _startWatchingConversations();
     return Stream<List<RelioConversation>>.multi((controller) {
       final latest = _latestConversations;
       if (latest != null) controller.add(latest);
       final subscription = _conversationController.stream.listen(
         controller.add,
+        onError: controller.addError,
       );
       controller.onCancel = subscription.cancel;
     });
   }
 
+  void _startWatchingConversations() {
+    if (_watchingConversations) return;
+    _watchingConversations = true;
+    _subscribeToConversationScope();
+    ownerScopeChanges?.listen((_) => _subscribeToConversationScope());
+  }
+
+  void _subscribeToConversationScope() {
+    final generation = ++_conversationWatchGeneration;
+    _databaseSubscription?.cancel();
+    final ownerUserId = ownerUserIdProvider?.call();
+    final query = db.select(db.conversations).join([
+      leftOuterJoin(
+        db.messages,
+        db.messages.conversationId.equalsExp(db.conversations.id),
+      ),
+    ])..where(_ownerFilter(ownerUserId));
+    query.orderBy([
+      OrderingTerm.desc(db.conversations.lastMessageAt),
+      OrderingTerm.desc(db.conversations.updatedAt),
+      OrderingTerm.desc(db.messages.createdAt),
+    ]);
+    _databaseSubscription = query.watch().map(_mapJoinedRows).listen((rows) {
+      if (generation != _conversationWatchGeneration) return;
+      _latestConversations = rows;
+      _conversationController.add(rows);
+    }, onError: _conversationController.addError);
+  }
+
   @override
   Future<List<RelioConversation>> listConversations() async {
-    final rows =
-        await (db.select(db.conversations).join([
-              leftOuterJoin(
-                db.messages,
-                db.messages.conversationId.equalsExp(db.conversations.id),
-              ),
-            ])..orderBy([
-              OrderingTerm.desc(db.conversations.lastMessageAt),
-              OrderingTerm.desc(db.conversations.updatedAt),
-              OrderingTerm.desc(db.messages.createdAt),
-            ]))
-            .get();
+    final ownerUserId = ownerUserIdProvider?.call();
+    final query = db.select(db.conversations).join([
+      leftOuterJoin(
+        db.messages,
+        db.messages.conversationId.equalsExp(db.conversations.id),
+      ),
+    ])..where(_ownerFilter(ownerUserId));
+    query.orderBy([
+      OrderingTerm.desc(db.conversations.lastMessageAt),
+      OrderingTerm.desc(db.conversations.updatedAt),
+      OrderingTerm.desc(db.messages.createdAt),
+    ]);
+    final rows = await query.get();
     return _mapJoinedRows(rows);
   }
 
   @override
   Future<RelioConversation?> getConversation(String id) async {
-    final row = await (db.select(
-      db.conversations,
-    )..where((item) => item.id.equals(id))).getSingleOrNull();
+    final ownerUserId = ownerUserIdProvider?.call();
+    final query = db.select(db.conversations)
+      ..where((item) => item.id.equals(id) & _ownerFilter(ownerUserId));
+    final row = await query.getSingleOrNull();
     return row == null ? null : _map(row);
   }
 
@@ -319,25 +347,66 @@ class DriftConversationRepository implements ConversationRepository {
     required String displayName,
     required DeviceStatus participantStatus,
   }) async {
-    final existing = await (db.select(
+    final ownerUserId = ownerUserIdProvider?.call();
+    final existing = await getConversation(id);
+    if (existing != null && existing.participantId == participantId) {
+      return existing;
+    }
+    final sourceId = '$participantId|$id';
+    if (ownerUserId != null && ownerUserId.isNotEmpty) {
+      final sourceConversation = await db
+          .customSelect(
+            'SELECT conversation_id FROM conversation_scopes '
+            'WHERE owner_user_id = ? AND source_id = ?',
+            variables: [
+              Variable.withString(ownerUserId),
+              Variable.withString(sourceId),
+            ],
+            readsFrom: {db.conversations},
+          )
+          .getSingleOrNull();
+      if (sourceConversation != null) {
+        final scopedExisting = await getConversation(
+          sourceConversation.read<String>('conversation_id'),
+        );
+        if (scopedExisting != null &&
+            scopedExisting.participantId == participantId) {
+          return scopedExisting;
+        }
+      }
+    }
+    final existingId = await (db.select(
       db.conversations,
     )..where((row) => row.id.equals(id))).getSingleOrNull();
-    if (existing != null) return _map(existing);
+    final scopedId = ownerUserId == null || ownerUserId.isEmpty
+        ? existingId == null
+              ? id
+              : const Uuid().v4()
+        : const Uuid().v4();
     final now = DateTime.now();
-    await db
-        .into(db.conversations)
-        .insert(
-          ConversationsCompanion.insert(
-            id: id,
-            participantId: participantId,
-            displayName: displayName,
-            participantStatus: participantStatus.name,
-            createdAt: now,
-            updatedAt: now,
-          ),
+    await db.transaction(() async {
+      await db
+          .into(db.conversations)
+          .insert(
+            ConversationsCompanion.insert(
+              id: scopedId,
+              participantId: participantId,
+              displayName: displayName,
+              participantStatus: participantStatus.name,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+      if (ownerUserId != null && ownerUserId.isNotEmpty) {
+        await db.customStatement(
+          'INSERT INTO conversation_scopes('
+          'conversation_id, owner_user_id, source_id) VALUES (?, ?, ?)',
+          [scopedId, ownerUserId, sourceId],
         );
+      }
+    });
     return RelioConversation(
-      id: id,
+      id: scopedId,
       participantId: participantId,
       displayName: displayName,
       participantStatus: participantStatus,
@@ -351,6 +420,9 @@ class DriftConversationRepository implements ConversationRepository {
 
   @override
   Future<void> updateLastActivity(String conversationId, DateTime time) async {
+    if (await getConversation(conversationId) == null) {
+      throw StateError('Conversation is not available in the current scope');
+    }
     await (db.update(
       db.conversations,
     )..where((row) => row.id.equals(conversationId))).write(
@@ -362,17 +434,72 @@ class DriftConversationRepository implements ConversationRepository {
   }
 
   @override
+  Future<int> countUnowned() async {
+    final result = await db
+        .customSelect(
+          'SELECT COUNT(*) AS count FROM conversations '
+          'WHERE NOT EXISTS ('
+          'SELECT 1 FROM conversation_scopes '
+          'WHERE conversation_scopes.conversation_id = conversations.id'
+          ')',
+          readsFrom: {db.conversations},
+        )
+        .getSingle();
+    return result.read<int>('count');
+  }
+
+  @override
   Future<void> updateParticipantStatus(
     String participantId,
     DeviceStatus status,
   ) async {
-    await (db.update(
-      db.conversations,
-    )..where((row) => row.participantId.equals(participantId))).write(
+    final ownerUserId = ownerUserIdProvider?.call();
+    final query = db.update(db.conversations)
+      ..where(
+        (row) =>
+            row.participantId.equals(participantId) & _ownerFilter(ownerUserId),
+      );
+    await query.write(
       ConversationsCompanion(
         participantStatus: Value(status.name),
         updatedAt: Value(DateTime.now()),
       ),
+    );
+  }
+
+  @override
+  Future<void> adoptUnowned(String ownerUserId) async {
+    if (ownerUserId.isEmpty) return;
+    await db.transaction(() async {
+      await db.customStatement(
+        'INSERT INTO conversation_scopes('
+        'conversation_id, owner_user_id, source_id) '
+        'SELECT conversations.id, ?, conversations.id FROM conversations '
+        'WHERE NOT EXISTS ('
+        'SELECT 1 FROM conversation_scopes '
+        'WHERE conversation_scopes.conversation_id = conversations.id'
+        ')',
+        [ownerUserId],
+      );
+      await db.customUpdate(
+        'UPDATE conversations SET updated_at = updated_at',
+        updates: {db.conversations},
+      );
+    });
+  }
+
+  Expression<bool> _ownerFilter(String? ownerUserId) {
+    if (ownerUserId == null || ownerUserId.isEmpty) {
+      return const CustomExpression<bool>(
+        'NOT EXISTS (SELECT 1 FROM conversation_scopes '
+        'WHERE conversation_scopes.conversation_id = conversations.id)',
+      );
+    }
+    final escapedOwnerId = ownerUserId.replaceAll("'", "''");
+    return CustomExpression<bool>(
+      'EXISTS (SELECT 1 FROM conversation_scopes '
+      'WHERE conversation_scopes.conversation_id = conversations.id '
+      "AND conversation_scopes.owner_user_id = '$escapedOwnerId')",
     );
   }
 
@@ -382,12 +509,10 @@ class DriftConversationRepository implements ConversationRepository {
       final conversation = result.readTable(db.conversations);
       final message = result.readTableOrNull(db.messages);
       final current = grouped[conversation.id];
-      if (current != null &&
+      if (message != null &&
+          current != null &&
           (current.lastMessageAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-                  .compareTo(
-                    message?.createdAt ??
-                        DateTime.fromMillisecondsSinceEpoch(0),
-                  ) >=
+                  .compareTo(message.createdAt) >=
               0) {
         continue;
       }
@@ -422,45 +547,180 @@ class DriftMessageRepository implements MessageRepository {
   final AppDatabase db;
   final ConversationRepository conversations;
   final SyncQueueRepository queue;
-  final Map<String, StreamController<List<RelioMessage>>> _messageControllers =
+  final Map<String, StreamController<List<RelioMessage>>> _messageWatchers = {};
+  final Map<String, StreamSubscription<List<Message>>> _messageSubscriptions =
       {};
-  final Map<String, StreamSubscription<List<RelioMessage>>>
-  _messageSubscriptions = {};
+  final Map<String, List<RelioMessage>> _latestMessages = {};
+  final Map<String, int> _messageGenerations = {};
+  StreamSubscription<Object?>? _ownerScopeSubscription;
 
-  @override
-  Stream<List<RelioMessage>> watchMessages(String conversationId) {
-    final controller = _messageControllers.putIfAbsent(
-      conversationId,
-      () => StreamController<List<RelioMessage>>.broadcast(),
-    );
-    _messageSubscriptions.putIfAbsent(
-      conversationId,
-      () =>
-          (db.select(db.messages)
-                ..where((row) => row.conversationId.equals(conversationId))
-                ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
-              .watch()
-              .map((rows) => rows.map(_map).toList(growable: false))
-              .listen(controller.add, onError: controller.addError),
-    );
-    return controller.stream;
+  Future<void> _requireVisibleConversation(String conversationId) async {
+    if (await conversations.getConversation(conversationId) == null) {
+      throw StateError('Conversation is not available in the current scope');
+    }
+  }
+
+  Future<Message?> _visibleMessage(String messageId) async {
+    final row = await (db.select(
+      db.messages,
+    )..where((item) => item.id.equals(messageId))).getSingleOrNull();
+    if (row == null ||
+        await conversations.getConversation(row.conversationId) == null) {
+      return null;
+    }
+    return row;
   }
 
   @override
-  Future<List<RelioMessage>> listMessages(String conversationId) async =>
-      (await (db.select(db.messages)
-                ..where((row) => row.conversationId.equals(conversationId))
-                ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
-              .get())
-          .map(_map)
-          .toList(growable: false);
+  Stream<List<RelioMessage>> watchMessages(String conversationId) {
+    _ensureMessageWatcher(conversationId);
+    return Stream<List<RelioMessage>>.multi((controller) {
+      final latest = _latestMessages[conversationId];
+      if (latest != null) controller.add(latest);
+      final subscription = _messageWatchers[conversationId]!.stream.listen(
+        controller.add,
+        onError: controller.addError,
+      );
+      controller.onCancel = subscription.cancel;
+    });
+  }
+
+  void _ensureMessageWatcher(String conversationId) {
+    if (_messageWatchers.containsKey(conversationId)) return;
+    _messageWatchers[conversationId] =
+        StreamController<List<RelioMessage>>.broadcast();
+    _ownerScopeSubscription ??= conversations is DriftConversationRepository
+        ? (conversations as DriftConversationRepository).ownerScopeChanges
+              ?.listen((_) {
+                for (final id in _messageWatchers.keys.toList()) {
+                  _latestMessages[id] = const [];
+                  _messageWatchers[id]!.add(const []);
+                  _subscribeToMessageScope(id);
+                }
+              })
+        : null;
+    _subscribeToMessageScope(conversationId);
+  }
+
+  void _subscribeToMessageScope(String conversationId) {
+    final generation = (_messageGenerations[conversationId] ?? 0) + 1;
+    _messageGenerations[conversationId] = generation;
+    _messageSubscriptions[conversationId]?.cancel();
+    _messageSubscriptions[conversationId] =
+        (db.select(db.messages)
+              ..where((row) => row.conversationId.equals(conversationId))
+              ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+            .watch()
+            .listen((_) async {
+              try {
+                final rows = await listMessages(conversationId);
+                if (_messageGenerations[conversationId] != generation) return;
+                _latestMessages[conversationId] = rows;
+                _messageWatchers[conversationId]!.add(rows);
+              } on Object catch (error, stackTrace) {
+                if (_messageGenerations[conversationId] == generation) {
+                  _messageWatchers[conversationId]!.addError(error, stackTrace);
+                }
+              }
+            }, onError: _messageWatchers[conversationId]!.addError);
+  }
+
+  @override
+  Future<List<RelioMessage>> listMessages(String conversationId) async {
+    if (await conversations.getConversation(conversationId) == null) {
+      return const [];
+    }
+    return (await (db.select(db.messages)
+              ..where((row) => row.conversationId.equals(conversationId))
+              ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+            .get())
+        .map(_map)
+        .toList(growable: false);
+  }
 
   @override
   Future<RelioMessage?> getMessage(String messageId) async {
     final row = await (db.select(
       db.messages,
     )..where((item) => item.id.equals(messageId))).getSingleOrNull();
-    return row == null ? null : _map(row);
+    if (row == null ||
+        await conversations.getConversation(row.conversationId) == null) {
+      return null;
+    }
+    return _map(row);
+  }
+
+  @override
+  Future<bool> deleteWeek3DemoMessage(String messageId) async {
+    return db.transaction(() async {
+      final message = await (db.select(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+      if (message == null ||
+          await conversations.getConversation(message.conversationId) == null ||
+          !message.isOutgoing ||
+          message.messageType != MessageType.text.name ||
+          (message.content != 'WEEK3 DELETE TEST' &&
+              message.content != 'W3DELETETEST') ||
+          (message.deliveryStatus != DeliveryStatus.pending.name &&
+              message.deliveryStatus != DeliveryStatus.failed.name) ||
+          (message.cloudSyncStatus != CloudSyncStatus.pending.value &&
+              message.cloudSyncStatus != CloudSyncStatus.failed.value)) {
+        return false;
+      }
+
+      final queueItems =
+          await (db.select(db.syncQueue)..where(
+                (row) =>
+                    row.entityType.equals(SyncEntityType.message.value) &
+                    row.entityId.equals(messageId) &
+                    row.operation.equals(SyncOperation.messageUpsert.value),
+              ))
+              .get();
+      if (queueItems.isEmpty ||
+          queueItems.any(
+            (row) =>
+                row.status != SyncQueueStatus.pending.value &&
+                row.status != SyncQueueStatus.failed.value,
+          )) {
+        return false;
+      }
+
+      // ลบได้เฉพาะข้อความทดสอบที่ยังรอ Sync และเอาแถวคิวออกใน transaction เดียวกัน
+      await (db.delete(db.syncQueue)..where(
+            (row) =>
+                row.entityType.equals(SyncEntityType.message.value) &
+                row.entityId.equals(messageId) &
+                row.operation.equals(SyncOperation.messageUpsert.value) &
+                row.status.isIn([
+                  SyncQueueStatus.pending.value,
+                  SyncQueueStatus.failed.value,
+                ]),
+          ))
+          .go();
+      final deleted = await (db.delete(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).go();
+      if (deleted == 1) {
+        final latest =
+            await (db.select(db.messages)
+                  ..where(
+                    (row) => row.conversationId.equals(message.conversationId),
+                  )
+                  ..orderBy([(row) => OrderingTerm.desc(row.createdAt)])
+                  ..limit(1))
+                .getSingleOrNull();
+        await (db.update(
+          db.conversations,
+        )..where((row) => row.id.equals(message.conversationId))).write(
+          ConversationsCompanion(
+            lastMessageAt: Value(latest?.createdAt),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+      return deleted == 1;
+    });
   }
 
   @override
@@ -470,6 +730,7 @@ class DriftMessageRepository implements MessageRepository {
     required String senderDeviceId,
     required String text,
   }) async {
+    await _requireVisibleConversation(conversationId);
     final now = DateTime.now();
     final id = const Uuid().v4();
     await db.transaction(() async {
@@ -525,12 +786,18 @@ class DriftMessageRepository implements MessageRepository {
     required String text,
     required DateTime createdAt,
   }) async {
+    await _requireVisibleConversation(conversationId);
     return db.transaction(() async {
       // ตรวจ UUID ภายใน transaction เพื่อให้ packet ซ้ำพร้อมกันไม่ชน primary key
       final exists = await (db.select(
         db.messages,
       )..where((row) => row.id.equals(messageId))).getSingleOrNull();
-      if (exists != null) return _map(exists);
+      if (exists != null) {
+        if (exists.conversationId != conversationId) {
+          throw StateError('Message ID belongs to a different conversation');
+        }
+        return _map(exists);
+      }
 
       final now = DateTime.now();
       await db
@@ -573,6 +840,7 @@ class DriftMessageRepository implements MessageRepository {
     required String senderDeviceId,
     required LocationData location,
   }) async {
+    await _requireVisibleConversation(conversationId);
     final now = DateTime.now();
     final id = const Uuid().v4();
     await db.transaction(() async {
@@ -618,11 +886,17 @@ class DriftMessageRepository implements MessageRepository {
     required String messageId,
     required LocationData location,
   }) async {
+    await _requireVisibleConversation(conversationId);
     return db.transaction(() async {
       final exists = await (db.select(
         db.messages,
       )..where((row) => row.id.equals(messageId))).getSingleOrNull();
-      if (exists != null) return _map(exists);
+      if (exists != null) {
+        if (exists.conversationId != conversationId) {
+          throw StateError('Message ID belongs to a different conversation');
+        }
+        return _map(exists);
+      }
       final now = DateTime.now();
       await db
           .into(db.messages)
@@ -666,6 +940,7 @@ class DriftMessageRepository implements MessageRepository {
     required String attachmentId,
     String? messageId,
   }) async {
+    await _requireVisibleConversation(conversationId);
     final now = DateTime.now();
     final id = messageId ?? const Uuid().v4();
     await db.transaction(() async {
@@ -723,11 +998,17 @@ class DriftMessageRepository implements MessageRepository {
     required String fileName,
     required String localPath,
   }) async {
+    await _requireVisibleConversation(conversationId);
     return db.transaction(() async {
       final exists = await (db.select(
         db.messages,
       )..where((row) => row.id.equals(messageId))).getSingleOrNull();
-      if (exists != null) return _map(exists);
+      if (exists != null) {
+        if (exists.conversationId != conversationId) {
+          throw StateError('Message ID belongs to a different conversation');
+        }
+        return _map(exists);
+      }
       final now = DateTime.now();
       await db
           .into(db.messages)
@@ -761,6 +1042,7 @@ class DriftMessageRepository implements MessageRepository {
     String messageId,
     DeliveryStatus status,
   ) async {
+    if (await _visibleMessage(messageId) == null) return;
     await (db.update(
       db.messages,
     )..where((row) => row.id.equals(messageId))).write(
@@ -783,6 +1065,7 @@ class DriftMessageRepository implements MessageRepository {
 
   @override
   Future<void> updateCloudSyncStatus(String messageId, String status) async {
+    if (await _visibleMessage(messageId) == null) return;
     await (db.update(
       db.messages,
     )..where((row) => row.id.equals(messageId))).write(
@@ -795,6 +1078,9 @@ class DriftMessageRepository implements MessageRepository {
 
   @override
   Future<List<String>> markConversationRead(String conversationId) async {
+    if (await conversations.getConversation(conversationId) == null) {
+      return const [];
+    }
     final unread =
         await (db.select(db.messages)..where(
               (row) =>
@@ -822,6 +1108,7 @@ class DriftMessageRepository implements MessageRepository {
 
   @override
   Future<void> markMessageRead(String messageId) async {
+    if (await _visibleMessage(messageId) == null) return;
     final now = DateTime.now();
     await (db.update(db.messages)..where(
           (row) =>
@@ -837,9 +1124,7 @@ class DriftMessageRepository implements MessageRepository {
     required String messageId,
     required DateTime readAt,
   }) async {
-    final existing = await (db.select(
-      db.messages,
-    )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+    final existing = await _visibleMessage(messageId);
     if (existing == null || !existing.isOutgoing) return;
     final current = existing.readAt;
     if (current != null && !readAt.isBefore(current)) return;
@@ -868,6 +1153,9 @@ class DriftMessageRepository implements MessageRepository {
     required String currentUserId,
     DateTime? readAt,
   }) async {
+    if (await conversations.getConversation(conversationId) == null) {
+      return false;
+    }
     final result = await db.transaction(() async {
       final existing = await (db.select(
         db.messages,
@@ -955,16 +1243,56 @@ class DriftMessageRepository implements MessageRepository {
 }
 
 class DriftAttachmentRepository implements AttachmentRepository {
-  DriftAttachmentRepository(this.db);
+  DriftAttachmentRepository(this.db, {required this.conversations});
   final AppDatabase db;
+  final ConversationRepository conversations;
+  final _pendingConversationIds = <String, String>{};
 
   @override
   Stream<List<RelioMediaAttachment>> watchForMessage(String messageId) =>
-      (db.select(db.attachments)
-            ..where((row) => row.messageId.equals(messageId))
-            ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
-          .watch()
-          .map((rows) => rows.map(_map).toList(growable: false));
+      Stream<List<RelioMediaAttachment>>.multi((controller) {
+        dynamic databaseSubscription;
+        dynamic scopeSubscription;
+        var generation = 0;
+        var cancelled = false;
+        void subscribe() {
+          final currentGeneration = ++generation;
+          databaseSubscription?.cancel();
+          databaseSubscription =
+              (db.select(db.attachments)
+                    ..where((row) => row.messageId.equals(messageId))
+                    ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+                  .watch()
+                  .listen((rows) async {
+                    try {
+                      final visible = await _messageVisible(messageId);
+                      if (!cancelled && currentGeneration == generation) {
+                        controller.add(
+                          visible
+                              ? rows.map(_map).toList(growable: false)
+                              : const [],
+                        );
+                      }
+                    } on Object catch (error, stackTrace) {
+                      if (!cancelled && currentGeneration == generation) {
+                        controller.addError(error, stackTrace);
+                      }
+                    }
+                  }, onError: controller.addError);
+        }
+
+        subscribe();
+        if (conversations is DriftConversationRepository) {
+          scopeSubscription = (conversations as DriftConversationRepository)
+              .ownerScopeChanges
+              ?.listen((_) => subscribe());
+        }
+        controller.onCancel = () async {
+          cancelled = true;
+          await databaseSubscription?.cancel();
+          await scopeSubscription?.cancel();
+        };
+      });
 
   @override
   Future<RelioMediaAttachment?> getById(String id) async =>
@@ -978,16 +1306,21 @@ class DriftAttachmentRepository implements AttachmentRepository {
       );
 
   @override
-  Future<List<RelioMediaAttachment>> listAll() async =>
-      (await (db.select(
-            db.attachments,
-          )..orderBy([(row) => OrderingTerm.desc(row.updatedAt)])).get())
-          .map(_map)
-          .toList(growable: false);
+  Future<List<RelioMediaAttachment>> listAll() async {
+    final rows = await (db.select(
+      db.attachments,
+    )..orderBy([(row) => OrderingTerm.desc(row.updatedAt)])).get();
+    final visible = <RelioMediaAttachment>[];
+    for (final row in rows) {
+      if (await _visibleAttachment(row.id) != null) visible.add(_map(row));
+    }
+    return visible;
+  }
 
   @override
   Future<RelioMediaAttachment> createPending({
     required String id,
+    required String conversationId,
     required String messageId,
     required String transferId,
     required MediaType mediaType,
@@ -997,6 +1330,18 @@ class DriftAttachmentRepository implements AttachmentRepository {
     required int byteSize,
     String? remoteFileName,
   }) async {
+    if (await conversations.getConversation(conversationId) == null) {
+      throw StateError('Conversation is not available in the current scope');
+    }
+    final parentMessage = await (db.select(
+      db.messages,
+    )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+    if (parentMessage != null &&
+        (parentMessage.conversationId != conversationId ||
+            !await _messageVisible(messageId))) {
+      throw StateError('Message is not available in the current scope');
+    }
+    _pendingConversationIds[id] = conversationId;
     final now = DateTime.now();
     await db
         .into(db.attachments)
@@ -1016,7 +1361,10 @@ class DriftAttachmentRepository implements AttachmentRepository {
             updatedAt: now,
           ),
         );
-    return (await getById(id))!;
+    final row = await (db.select(
+      db.attachments,
+    )..where((item) => item.id.equals(id))).getSingle();
+    return _map(row);
   }
 
   @override
@@ -1026,6 +1374,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
     required int bytesTransferred,
     String? errorCode,
   }) async {
+    if (await _visibleAttachment(id) == null) return;
     await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
       AttachmentsCompanion(
         bytesTransferred: Value(bytesTransferred),
@@ -1038,6 +1387,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
 
   @override
   Future<void> markCompleted(String id, {String? localPath}) async {
+    if (await _visibleAttachment(id) == null) return;
     await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
       AttachmentsCompanion(
         localPath: localPath == null ? const Value.absent() : Value(localPath),
@@ -1049,6 +1399,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
 
   @override
   Future<void> updateCloudMetadataStatus(String id, String status) async {
+    if (await _visibleAttachment(id) == null) return;
     await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
       AttachmentsCompanion(
         cloudMetadataStatus: Value(status),
@@ -1059,6 +1410,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
 
   @override
   Future<void> updateCloudFileStatus(String id, String status) async {
+    if (await _visibleAttachment(id) == null) return;
     await (db.update(db.attachments)..where((row) => row.id.equals(id))).write(
       AttachmentsCompanion(
         cloudFileStatus: Value(status),
@@ -1076,21 +1428,53 @@ class DriftAttachmentRepository implements AttachmentRepository {
   );
 
   @override
-  Future<List<RelioMediaAttachment>> listStaleTransfers() async =>
-      (await (db.select(db.attachments)..where(
-                (row) => row.transferStatus.equals(
-                  MediaTransferState.transferring.name,
-                ),
-              ))
-              .get())
-          .map(_map)
-          .toList(growable: false);
+  Future<List<RelioMediaAttachment>> listStaleTransfers() async {
+    final rows =
+        await (db.select(db.attachments)..where(
+              (row) => row.transferStatus.equals(
+                MediaTransferState.transferring.name,
+              ),
+            ))
+            .get();
+    final visible = <RelioMediaAttachment>[];
+    for (final row in rows) {
+      if (await _visibleAttachment(row.id) != null) visible.add(_map(row));
+    }
+    return visible;
+  }
 
   Future<RelioMediaAttachment?> _read(
     SimpleSelectStatement<$AttachmentsTable, Attachment> query,
   ) async {
     final row = await query.getSingleOrNull();
-    return row == null ? null : _map(row);
+    return row == null || await _visibleAttachment(row.id) == null
+        ? null
+        : _map(row);
+  }
+
+  Future<Attachment?> _visibleAttachment(String id) async {
+    final row = await (db.select(
+      db.attachments,
+    )..where((item) => item.id.equals(id))).getSingleOrNull();
+    if (row == null) return null;
+    final message = await (db.select(
+      db.messages,
+    )..where((item) => item.id.equals(row.messageId))).getSingleOrNull();
+    final conversationId =
+        message?.conversationId ?? _pendingConversationIds[id];
+    if (conversationId == null ||
+        await conversations.getConversation(conversationId) == null) {
+      return null;
+    }
+    return row;
+  }
+
+  Future<bool> _messageVisible(String messageId) async {
+    final message = await (db.select(
+      db.messages,
+    )..where((item) => item.id.equals(messageId))).getSingleOrNull();
+    return message != null &&
+        await conversations.getConversation(message.conversationId) != null;
   }
 
   RelioMediaAttachment _map(Attachment row) => RelioMediaAttachment(
@@ -1983,17 +2367,27 @@ class DriftCloudConversationLinkRepository
 }
 
 class RelioRepositories {
-  RelioRepositories(this.database, {String? Function()? ownerUserIdProvider})
-    : syncQueue = DriftSyncQueueRepository(
-        database,
-        ownerUserIdProvider: ownerUserIdProvider,
-      ),
-      conversations = DriftConversationRepository(database),
-      cloudLinks = DriftCloudConversationLinkRepository(database),
-      nearbyDevices = DriftNearbyDeviceRepository(database),
-      settings = RelioSettingsRepository(database),
-      attachments = DriftAttachmentRepository(database) {
+  RelioRepositories(
+    this.database, {
+    String? Function()? ownerUserIdProvider,
+    Stream<Object?>? ownerScopeChanges,
+  }) : syncQueue = DriftSyncQueueRepository(
+         database,
+         ownerUserIdProvider: ownerUserIdProvider,
+       ),
+       conversations = DriftConversationRepository(
+         database,
+         ownerUserIdProvider: ownerUserIdProvider,
+         ownerScopeChanges: ownerScopeChanges,
+       ),
+       cloudLinks = DriftCloudConversationLinkRepository(database),
+       nearbyDevices = DriftNearbyDeviceRepository(database),
+       settings = RelioSettingsRepository(database) {
     messages = DriftMessageRepository(database, conversations, syncQueue);
+    attachments = DriftAttachmentRepository(
+      database,
+      conversations: conversations,
+    );
     sos = DriftSosRepository(
       database,
       syncQueue,
@@ -2009,7 +2403,7 @@ class RelioRepositories {
   final SyncQueueRepository syncQueue;
   final NearbyDeviceRepository nearbyDevices;
   final RelioSettingsRepository settings;
-  final AttachmentRepository attachments;
+  late final AttachmentRepository attachments;
 
   Future<void> seedPrototypeData() async {
     final existing = await conversations.listConversations();

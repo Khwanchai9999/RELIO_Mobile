@@ -24,6 +24,7 @@ abstract interface class AppUpdateInstaller {
   Future<void> launchInstaller(String path);
 }
 
+// ส่งงานตรวจ APK และเปิด Package Installer ให้ Android native เป็นผู้ทำ
 class MethodChannelAppUpdateInstaller implements AppUpdateInstaller {
   MethodChannelAppUpdateInstaller({MethodChannel? channel})
     : _channel = channel ?? const MethodChannel('relio/app_update');

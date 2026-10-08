@@ -13,6 +13,11 @@ $currentRoot = [IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')
 if ($currentRoot -ne $projectRoot) {
     throw "Run this command from the active workspace: $projectRoot"
 }
+. (Join-Path $PSScriptRoot 'import-qa-local-env.ps1')
+if ($env:RELIO_SUPABASE_QA_URL -ne 'https://zeuiqspvqiplusiugcto.supabase.co' -or
+    [string]::IsNullOrWhiteSpace($env:RELIO_SUPABASE_QA_ANON_KEY)) {
+    throw 'QA Supabase runtime configuration is incomplete or does not target RELIO-QA.'
+}
 . (Join-Path $PSScriptRoot 'public-qa-config.ps1')
 $publicQaUpdateConfig = Get-RelioPublicQaUpdateConfig
 if (-not $env:JAVA_HOME) {
@@ -71,7 +76,9 @@ $defines = @(
     "--dart-define=RELIO_PUBLIC_UPDATE_MANIFEST_URL=$($publicQaUpdateConfig.ManifestUrl)",
     "--dart-define=RELIO_PUBLIC_UPDATE_OWNER=$($publicQaUpdateConfig.Owner)",
     "--dart-define=RELIO_PUBLIC_UPDATE_REPO=$($publicQaUpdateConfig.Repository)",
-    "--dart-define=RELIO_PUBLIC_UPDATE_CHANNEL=$($publicQaUpdateConfig.Channel)"
+    "--dart-define=RELIO_PUBLIC_UPDATE_CHANNEL=$($publicQaUpdateConfig.Channel)",
+    "--dart-define=SUPABASE_URL=$($env:RELIO_SUPABASE_QA_URL)",
+    "--dart-define=SUPABASE_ANON_KEY=$($env:RELIO_SUPABASE_QA_ANON_KEY)"
 )
 
 if (($versionName -eq '0.8.5' -and [int]$buildNumber -lt 11) -or

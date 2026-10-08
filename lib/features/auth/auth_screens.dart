@@ -8,6 +8,7 @@ import '../../app/theme/relio_spacing.dart';
 import '../../core/cloud/cloud_models.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
+import 'register_validation.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,12 +36,26 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _busy = true);
     try {
       final dependencies = RelioDependencyScope.of(context);
+      // ส่งข้อมูลเข้าสู่ AuthService; หน้าจอไม่จัดการ token หรือ SDK เอง
       await dependencies.authService.signIn(
         email: _email.text.trim(),
         password: _password.text,
       );
       unawaited(dependencies.syncPushRegistration());
-      if (mounted) context.go('/permissions');
+      if (mounted) {
+        try {
+          final snapshot = await dependencies.permissionService
+              .readNearbyPermissions();
+          if (mounted) {
+            context.go(snapshot.allGranted ? '/home' : '/permissions');
+          }
+        } on Object {
+          // หากอ่านสถานะ native ไม่ได้ ให้เปิดหน้าที่ตรวจ/ขอสิทธิ์แทนการเดาว่าครบแล้ว
+          if (mounted) {
+            context.go('/permissions');
+          }
+        }
+      }
     } on CloudException catch (error) {
       if (mounted) _showError(error.message);
     } finally {
@@ -72,9 +87,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 prefixIcon: Icon(Icons.mail_outline),
               ),
               keyboardType: TextInputType.emailAddress,
-              validator: (value) => value == null || !value.contains('@')
-                  ? 'กรุณากรอกอีเมล'
-                  : null,
+              validator: RegisterValidation.emailError,
             ),
             const SizedBox(height: 14),
             TextFormField(
@@ -93,8 +106,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ),
-              validator: (value) => value == null || value.length < 6
-                  ? 'กรุณากรอกรหัสผ่านอย่างน้อย 6 ตัวอักษร'
+              validator: (value) => value == null || value.isEmpty
+                  ? 'กรุณากรอกรหัสผ่าน'
+                  : value.length < 6
+                  ? 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'
                   : null,
             ),
             Align(
@@ -141,6 +156,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmation = TextEditingController();
   bool _agreed = false;
   bool _busy = false;
+  bool _showPassword = false;
+  bool _showConfirmation = false;
 
   @override
   void dispose() {
@@ -157,7 +174,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     try {
       final dependencies = RelioDependencyScope.of(context);
       await dependencies.authService.register(
-        email: _email.text.trim(),
+        email: RegisterValidation.normalizeEmail(_email.text),
         password: _password.text,
         displayName: _name.text.trim(),
       );
@@ -204,32 +221,87 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 labelText: 'อีเมล',
                 prefixIcon: Icon(Icons.mail_outline),
               ),
-              validator: (value) => value == null || !value.contains('@')
-                  ? 'กรุณากรอกอีเมล'
-                  : null,
+              keyboardType: TextInputType.emailAddress,
+              validator: RegisterValidation.emailError,
             ),
             const SizedBox(height: 14),
             TextFormField(
               controller: _password,
-              obscureText: true,
-              decoration: const InputDecoration(
+              obscureText: !_showPassword,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
                 labelText: 'รหัสผ่าน',
-                prefixIcon: Icon(Icons.lock_outline),
+                prefixIcon: const Icon(Icons.lock_outline),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() {
+                    _showPassword = !_showPassword;
+                  }),
+                  icon: Icon(
+                    _showPassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
               ),
-              validator: (value) => value == null || value.length < 8
-                  ? 'อย่างน้อย 8 ตัวอักษร'
-                  : null,
+              validator: (value) =>
+                  RegisterValidation.passwordError(value ?? ''),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  _PasswordRequirement(
+                    label: 'อย่างน้อย 8 ตัวอักษร',
+                    satisfied: RegisterValidation.hasMinimumLength(
+                      _password.text,
+                    ),
+                  ),
+                  _PasswordRequirement(
+                    label: 'มีตัวพิมพ์ใหญ่',
+                    satisfied: RegisterValidation.hasUppercase(_password.text),
+                  ),
+                  _PasswordRequirement(
+                    label: 'มีตัวพิมพ์เล็ก',
+                    satisfied: RegisterValidation.hasLowercase(_password.text),
+                  ),
+                  _PasswordRequirement(
+                    label: 'มีตัวเลข',
+                    satisfied: RegisterValidation.hasNumber(_password.text),
+                  ),
+                  _PasswordRequirement(
+                    label: 'มีอักขระพิเศษ',
+                    satisfied: RegisterValidation.hasSpecialCharacter(
+                      _password.text,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 14),
             TextFormField(
               controller: _confirmation,
-              obscureText: true,
-              decoration: const InputDecoration(
+              obscureText: !_showConfirmation,
+              decoration: InputDecoration(
                 labelText: 'ยืนยันรหัสผ่าน',
-                prefixIcon: Icon(Icons.lock_outline),
+                prefixIcon: const Icon(Icons.lock_outline),
+                suffixIcon: IconButton(
+                  onPressed: () => setState(() {
+                    _showConfirmation = !_showConfirmation;
+                  }),
+                  icon: Icon(
+                    _showConfirmation
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                ),
               ),
-              validator: (value) =>
-                  value != _password.text ? 'รหัสผ่านไม่ตรงกัน' : null,
+              validator: (value) => RegisterValidation.confirmationError(
+                _password.text,
+                value ?? '',
+              ),
             ),
             const SizedBox(height: 14),
             CheckboxListTile(
@@ -258,7 +330,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 }
 
-class PermissionsScreen extends StatelessWidget {
+class _PasswordRequirement extends StatelessWidget {
+  const _PasswordRequirement({required this.label, required this.satisfied});
+
+  final String label;
+  final bool satisfied;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = satisfied
+        ? Theme.of(context).colorScheme.primary
+        : RelioColors.muted;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          satisfied ? Icons.check_circle : Icons.radio_button_unchecked,
+          size: 15,
+          color: color,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
+        ),
+      ],
+    );
+  }
+}
+
+class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
 
   static const permissions = [
@@ -291,6 +392,82 @@ class PermissionsScreen extends StatelessWidget {
   ];
 
   @override
+  State<PermissionsScreen> createState() => _PermissionsScreenState();
+}
+
+class _PermissionsScreenState extends State<PermissionsScreen> {
+  bool _startedReading = false;
+  bool _checking = true;
+  bool _requesting = false;
+  bool? _allGranted;
+  bool _permissionStateKnown = false;
+  String? _statusMessage;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_startedReading) return;
+    _startedReading = true;
+    unawaited(_readPermissions());
+  }
+
+  Future<void> _readPermissions() async {
+    try {
+      final snapshot = await RelioDependencyScope.of(
+        context,
+      ).permissionService.readNearbyPermissions();
+      if (!mounted) return;
+      setState(() {
+        _allGranted = snapshot.allGranted;
+        _permissionStateKnown = snapshot.isKnown;
+        _statusMessage = snapshot.isKnown
+            ? null
+            : 'อ่านเวอร์ชัน Android ไม่ได้ จึงตรวจสอบสิทธิ์ Nearby ไม่สำเร็จ';
+        _checking = false;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _allGranted = null;
+        _statusMessage = 'ตรวจสอบสิทธิ์ไม่สำเร็จ กรุณาลองอีกครั้ง';
+        _checking = false;
+      });
+    }
+  }
+
+  Future<void> _requestPermissions() async {
+    if (_checking || _requesting) return;
+    setState(() {
+      _requesting = true;
+      _statusMessage = null;
+    });
+    try {
+      final snapshot = await RelioDependencyScope.of(
+        context,
+      ).permissionService.requestNearbyPermissions();
+      if (!mounted) return;
+      if (snapshot.allGranted) {
+        context.go('/home');
+        return;
+      }
+      setState(() {
+        _permissionStateKnown = snapshot.isKnown;
+        _allGranted = snapshot.isKnown ? false : null;
+        _statusMessage = snapshot.isKnown
+            ? 'ยังไม่ได้รับอนุญาตสิทธิ์ Nearby ที่จำเป็นบางรายการ คุณลองอีกครั้งหรือข้ามไปก่อนได้'
+            : 'อ่านเวอร์ชัน Android ไม่ได้ จึงตรวจสอบสิทธิ์ Nearby ไม่สำเร็จ';
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _statusMessage = 'ขอสิทธิ์ไม่สำเร็จ กรุณาลองอีกครั้ง';
+      });
+    } finally {
+      if (mounted) setState(() => _requesting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
@@ -314,12 +491,12 @@ class PermissionsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'RELIO ต้องการสิทธิ์เหล่านี้เพื่อให้ทำงานได้เต็มประสิทธิภาพ คุณสามารถเปลี่ยนแปลงได้ในการตั้งค่า',
+                    'หน้านี้ตรวจและขอสิทธิ์ Android ที่จำเป็นต่อ Nearby ส่วนตำแหน่ง รูปภาพ/วิดีโอ และการแจ้งเตือนจะใช้ตามฟีเจอร์และสิทธิ์ของระบบ',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 22),
-                  ...permissions.map(
+                  ...PermissionsScreen.permissions.map(
                     (permission) => Card(
                       child: ListTile(
                         leading: Icon(
@@ -331,14 +508,42 @@ class PermissionsScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  if (_checking)
+                    const Text('กำลังตรวจสอบสิทธิ์ Nearby...')
+                  else if (_statusMessage != null)
+                    Text(
+                      _statusMessage!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    )
+                  else if (_permissionStateKnown)
+                    Text(
+                      _allGranted == true
+                          ? 'สิทธิ์ Nearby ที่จำเป็นได้รับอนุญาตแล้ว'
+                          : 'ยังมีสิทธิ์ Nearby ที่จำเป็นซึ่งไม่ได้รับอนุญาต',
+                      textAlign: TextAlign.center,
+                    ),
                   const SizedBox(height: 18),
                   FilledButton(
-                    onPressed: () => context.go('/home'),
-                    child: const Text('อนุญาตทั้งหมด'),
+                    onPressed: _checking || _requesting
+                        ? null
+                        : _requestPermissions,
+                    child: Text(
+                      _requesting ? 'กำลังขอสิทธิ์...' : 'อนุญาตทั้งหมด',
+                    ),
                   ),
                   TextButton(
                     onPressed: () => context.go('/home'),
                     child: const Text('ข้ามขั้นตอนนี้'),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'คุณยังเข้าแอปได้โดยข้าม แต่ Nearby อาจใช้งานไม่ได้จนกว่าจะอนุญาตสิทธิ์ที่จำเป็น',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),

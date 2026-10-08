@@ -3,7 +3,7 @@ import 'models/prototype_models.dart';
 abstract final class RelioMockData {
   static const demoIds = {'somchai', 'rescue-team-a', 'mint', 'james', 'aom'};
 
-  static bool isDemoId(String id) => demoIds.contains(id);
+  static bool isDemoId(String id) => demoIds.contains(id.split(':').last);
 
   static const devices = [
     RelioDevice(

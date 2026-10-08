@@ -16,6 +16,7 @@ import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
 import 'notifications/local_notification_service.dart';
 import 'nearby/android_nearby_transport.dart';
+import 'nearby/bluetooth_classic_transport.dart';
 import 'nearby/nearby_readiness.dart';
 import 'nearby/nearby_service.dart';
 import 'nearby/nearby_retry_backoff.dart';
@@ -48,7 +49,13 @@ class RelioDependencies {
            transport ??
            ((useMockTransport ?? _defaultMockTransport)
                ? MockNearbyTransport(autoAcknowledge: true)
-               : AndroidNearbyTransport()) {
+               : (!RelioBuildInfo.developerDiagnosticsEnabled ||
+                     !Platform.isAndroid)
+               ? AndroidNearbyTransport()
+               : CompatibilityNearbyTransport(
+                   primary: AndroidNearbyTransport(),
+                   compatibility: BluetoothClassicTransport(),
+                 )) {
     connectivityStatus =
         connectivityStatusService ?? ConnectivityStatusService();
     diagnostics = DiagnosticsLogService();
@@ -71,6 +78,9 @@ class RelioDependencies {
     repositories = RelioRepositories(
       this.database,
       ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
+      ownerScopeChanges: this.cloudDataSource.watchAuthState().map<Object?>(
+        (state) => state,
+      ),
     );
     identity = RelioDeviceIdentityRepository(this.database);
     this.permissionService =
@@ -140,6 +150,8 @@ class RelioDependencies {
   late final AuthService authService;
   late final AppUpdateService appUpdateService;
   Future<void>? _initialization;
+  Future<void>? _authInitialization;
+  bool _authInitialized = false;
   StreamSubscription<InternetStatus>? _readinessSubscription;
   Future<bool>? _nearbySyncOperation;
   bool _nearbyForeground = true;
@@ -155,6 +167,22 @@ class RelioDependencies {
   String? _lastNearbyReadinessSignature;
 
   int get nearbyRetryAttempt => _nearbyRetryBackoff.attempt;
+
+  bool get authInitialized => _authInitialized;
+
+  Future<void> initializeAuth() => _authInitialization ??= _initializeAuth();
+
+  Future<void> _initializeAuth() async {
+    try {
+      await cloudDataSource.initialize();
+      await authService.restoreSession();
+      unawaited(syncPushRegistration());
+    } on Object {
+      // Cloud เป็น optional; เมื่อกู้ session ไม่ได้ ให้ startup ไปหน้า Welcome
+    } finally {
+      _authInitialized = true;
+    }
+  }
 
   Future<void> initialize() => _initialization ??= _initialize();
 
@@ -430,14 +458,7 @@ class RelioDependencies {
         if (_nearbyForeground) unawaited(startNearbySessionIfPermitted());
       });
     }
-    try {
-      await cloudDataSource.initialize();
-      await authService.restoreSession();
-      unawaited(syncPushRegistration());
-    } on Object {
-      // Cloud is an optional v0.5 destination. Local startup must remain
-      // healthy when credentials are absent or the network is unavailable.
-    }
+    await initializeAuth();
     await relayEngine.initialize();
     await syncEngine.initialize();
     // Startup sync runs asynchronously; rendering the local app never waits

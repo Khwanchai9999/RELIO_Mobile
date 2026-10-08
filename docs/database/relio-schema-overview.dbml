@@ -1,0 +1,234 @@
+Project RELIO_Schema_Overview {
+  Note: '''
+  This overview intentionally shows core application entities only; optional administration, receipts, and push tables are omitted.
+  Cloud uses PostgreSQL. Local uses Drift / SQLite and remains the device-side source of truth.
+  Local Conversation / Message / SOS data is stored before SyncEngine uploads owner-matched queue items to Supabase.
+  Cloud and Local are separate databases with no direct SQL foreign keys between them.
+  Local links are application-managed. SOS-to-Rescue is an application workflow, not a database foreign key.
+  The local.* prefix is a diagram-only namespace; SQLite table names are unqualified.
+  '''
+}
+
+Table auth.users {
+  id uuid [pk, not null, note: 'Supabase Auth managed; only the identifier is shown.']
+}
+
+Table public.profiles {
+  id uuid [pk, not null]
+  display_name text [not null]
+  role text [not null]
+  created_at "timestamp with time zone" [not null]
+}
+
+Table public.devices {
+  device_id text [pk, not null]
+  owner_user_id uuid [not null]
+  display_name text [not null]
+  last_seen_at "timestamp with time zone"
+}
+
+Table public.conversations {
+  id uuid [pk, not null]
+  owner_user_id uuid [not null]
+  direct_key text
+  created_at "timestamp with time zone" [not null]
+  updated_at "timestamp with time zone" [not null]
+}
+
+Table public.conversation_members {
+  conversation_id uuid [not null]
+  user_id uuid [not null]
+  joined_at "timestamp with time zone" [not null]
+
+  indexes {
+    (conversation_id, user_id) [pk]
+  }
+}
+
+Table public.messages {
+  id uuid [pk, not null]
+  conversation_id uuid [not null]
+  sender_id uuid [not null]
+  message_type text [not null]
+  content text
+  delivery_status text [not null]
+  created_at "timestamp with time zone" [not null]
+}
+
+Table public.attachments {
+  id uuid [pk, not null]
+  message_id uuid [not null, unique]
+  owner_user_id uuid [not null]
+  media_type text [not null]
+  file_name text [not null]
+  byte_size bigint [not null]
+  transfer_status text [not null]
+  created_at "timestamp with time zone" [not null]
+}
+
+Table public.sos_events {
+  id uuid [pk, not null]
+  owner_user_id uuid [not null]
+  owner_device_id text [not null]
+  message text
+  is_active boolean [not null]
+  created_at "timestamp with time zone" [not null]
+}
+
+Table public.rescue_status {
+  id uuid [pk, not null]
+  user_id uuid [not null, unique]
+  status text [not null]
+  service_area text
+  updated_at "timestamp with time zone" [not null]
+  Note: 'Rescue availability is account-scoped; SOS association is handled by the application flow.'
+}
+
+TableGroup "CLOUD — Supabase" [color: #E8F5E9] {
+  auth.users
+  public.profiles
+  public.devices
+  public.conversations
+  public.conversation_members
+  public.messages
+  public.attachments
+  public.sos_events
+  public.rescue_status
+}
+
+Ref: auth.users.id - public.profiles.id [delete: cascade]
+Ref: public.devices.owner_user_id > auth.users.id [delete: cascade]
+Ref: public.conversations.owner_user_id > auth.users.id [delete: cascade]
+Ref: public.conversation_members.conversation_id > public.conversations.id [delete: cascade]
+Ref: public.conversation_members.user_id > auth.users.id [delete: cascade]
+Ref: public.messages.conversation_id > public.conversations.id [delete: cascade]
+Ref: public.messages.sender_id > auth.users.id [delete: restrict]
+Ref: public.messages.id - public.attachments.message_id [delete: cascade]
+Ref: public.attachments.owner_user_id > auth.users.id [delete: cascade]
+Ref: public.sos_events.owner_user_id > auth.users.id [delete: cascade]
+Ref: auth.users.id - public.rescue_status.user_id [delete: cascade]
+
+Table local.conversations {
+  id TEXT [pk, not null]
+  participant_id TEXT [not null]
+  display_name TEXT [not null]
+  participant_status TEXT [not null]
+  unread_count INTEGER [not null]
+  last_message_at INTEGER
+  created_at INTEGER [not null]
+  updated_at INTEGER [not null]
+  Note: 'Drift DateTime columns use SQLite INTEGER storage. Logical links are repository-managed, not SQL foreign keys.'
+}
+
+Table local.cloud_conversation_links {
+  local_conversation_id TEXT [not null]
+  cloud_conversation_id TEXT [not null]
+  owner_user_id TEXT [not null]
+  peer_user_id TEXT [not null]
+  message_cursor_at INTEGER
+  updated_at INTEGER [not null]
+
+  indexes {
+    (local_conversation_id, owner_user_id) [pk]
+  }
+  Note: 'Account-scoped mapping between local and Cloud IDs; no cross-database foreign key.'
+}
+
+Table local.messages {
+  id TEXT [pk, not null]
+  conversation_id TEXT [not null]
+  sender_id TEXT [not null]
+  message_type TEXT [not null]
+  content TEXT [not null]
+  delivery_status TEXT [not null]
+  cloud_sync_status TEXT [not null]
+  created_at INTEGER [not null]
+  Note: 'conversation_id is a logical application-managed link to local.conversations.'
+}
+
+Table local.attachments {
+  id TEXT [pk, not null]
+  message_id TEXT [not null]
+  transfer_id TEXT [not null]
+  media_type TEXT [not null]
+  file_name TEXT [not null]
+  local_path TEXT [not null]
+  byte_size INTEGER [not null]
+  transfer_status TEXT [not null]
+  created_at INTEGER [not null]
+  Note: 'message_id is a logical application-managed link to local.messages.'
+}
+
+Table local.nearby_devices {
+  device_id TEXT [pk, not null]
+  display_name TEXT [not null]
+  status TEXT [not null]
+  last_seen_at INTEGER [not null]
+  is_trusted INTEGER [not null]
+  is_blocked INTEGER [not null]
+}
+
+Table local.sos_events {
+  id TEXT [pk, not null]
+  owner_device_id TEXT [not null]
+  owner_user_id TEXT [not null]
+  message TEXT
+  is_active INTEGER [not null]
+  delivery_status TEXT [not null]
+  created_at INTEGER [not null]
+  Note: 'Owner identifiers are application-managed; Rescue status is a separate Cloud entity.'
+}
+
+Table local.sync_queue {
+  id TEXT [pk, not null]
+  entity_type TEXT [not null]
+  entity_id TEXT [not null]
+  operation TEXT [not null]
+  status TEXT [not null]
+  owner_user_id TEXT
+  attempt_count INTEGER [not null]
+  created_at INTEGER [not null]
+  Note: 'entity_type + entity_id is a polymorphic logical link; SyncEngine uploads only rows owned by the active account.'
+}
+
+Table local.relay_packets {
+  packet_id TEXT [pk, not null]
+  origin_device_id TEXT [not null]
+  destination_device_id TEXT [not null]
+  payload_type TEXT [not null]
+  payload_id TEXT [not null]
+  hop_count INTEGER [not null]
+  max_hops INTEGER [not null]
+  state TEXT [not null]
+  created_at INTEGER [not null]
+  expires_at INTEGER [not null]
+}
+
+Table local.app_settings {
+  key TEXT [pk, not null]
+  value TEXT [not null]
+  updated_at INTEGER [not null]
+}
+
+TableGroup "LOCAL — Drift / SQLite" [color: #E3F2FD] {
+  local.conversations
+  local.cloud_conversation_links
+  local.messages
+  local.attachments
+  local.nearby_devices
+  local.sos_events
+  local.sync_queue
+  local.relay_packets
+  local.app_settings
+}
+
+Note relio_overview [color: #FFF3E0] {
+  '''
+  Core entities only; optional admin, receipt, and push-support tables are omitted.
+  On device: Conversation / Message / SOS → Drift SQLite → sync_queue → SyncEngine → Supabase.
+  Nearby peers and Relay packets are local communication state.
+  Local relations are logical only, not SQLite foreign keys. Cloud and Local have no cross-database SQL foreign keys.
+  The local.* prefix only separates same-named diagram tables; SQLite names are unqualified.
+  SOS-to-Rescue is an application workflow; no direct database foreign key connects them.
+  '''
+}

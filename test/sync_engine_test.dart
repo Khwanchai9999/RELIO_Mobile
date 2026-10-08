@@ -34,14 +34,15 @@ void main() {
       final harnessA = await SyncHarness.create(cloud: cloudA);
       addTearDown(harnessA.dispose);
 
-      await harnessA.repositories.conversations.ensureConversation(
-        id: 'nearby-local-conversation',
-        participantId: 'device-b',
-        displayName: 'Account B',
-        participantStatus: DeviceStatus.offline,
-      );
+      final localConversation = await harnessA.repositories.conversations
+          .ensureConversation(
+            id: 'nearby-local-conversation',
+            participantId: 'device-b',
+            displayName: 'Account B',
+            participantStatus: DeviceStatus.offline,
+          );
       final linked = await harnessA.engine.linkConversationToCloud(
-        localConversationId: 'nearby-local-conversation',
+        localConversationId: localConversation.id,
         peerUserId: accountB.userId,
       );
       final secondLink = await cloudA.createOrGetDirectConversation(
@@ -58,7 +59,7 @@ void main() {
       addTearDown(harnessB.dispose);
 
       final sent = await harnessA.repositories.messages.createOutgoingText(
-        conversationId: 'nearby-local-conversation',
+        conversationId: localConversation.id,
         senderId: accountA.userId,
         senderDeviceId: 'device-a',
         text: 'ข้อความทดสอบ Cloud',
@@ -73,8 +74,13 @@ void main() {
       await cloudB.signIn(email: accountB.email, password: 'password');
       await harnessB.engine.initialize();
       await harnessB.engine.run();
+      final accountBLinks = await harnessB.repositories.cloudLinks.listForOwner(
+        accountB.userId,
+      );
+      final importedLink = accountBLinks.single;
+      activeConversationId = importedLink.localConversationId;
       final imported = await harnessB.repositories.conversations
-          .getConversation(linked.cloudConversationId);
+          .getConversation(importedLink.localConversationId);
       expect(imported, isNotNull);
       final received = await harnessB.repositories.messages.getMessage(sent.id);
       expect(received?.text, 'ข้อความทดสอบ Cloud');
@@ -83,7 +89,7 @@ void main() {
       expect(notificationSink.showCount, 1);
       expect(
         (await harnessB.repositories.cloudLinks.get(
-          localConversationId: linked.cloudConversationId,
+          localConversationId: importedLink.localConversationId,
           ownerUserId: accountB.userId,
         ))?.messageCursor?.id,
         sent.id,
@@ -92,7 +98,7 @@ void main() {
       expect(notificationSink.showCount, 1);
 
       await harnessB.repositories.messages.createIncomingText(
-        conversationId: linked.cloudConversationId,
+        conversationId: importedLink.localConversationId,
         senderId: accountA.userId,
         senderDeviceId: 'device-a',
         messageId: sent.id,
@@ -101,16 +107,16 @@ void main() {
       );
       expect(
         (await harnessB.repositories.conversations.getConversation(
-          linked.cloudConversationId,
+          importedLink.localConversationId,
         ))?.unreadCount,
         1,
       );
 
       final readIds = await harnessB.repositories.messages.markConversationRead(
-        linked.cloudConversationId,
+        importedLink.localConversationId,
       );
       await harnessB.engine.queueReadReceipts(
-        localConversationId: linked.cloudConversationId,
+        localConversationId: importedLink.localConversationId,
         messageIds: readIds,
       );
       expect(cloudB.readReceipts, hasLength(1));
@@ -122,12 +128,11 @@ void main() {
       );
 
       final second = await harnessA.repositories.messages.createOutgoingText(
-        conversationId: 'nearby-local-conversation',
+        conversationId: localConversation.id,
         senderId: accountA.userId,
         senderDeviceId: 'device-a',
         text: 'ข้อความขณะเปิดแชท',
       );
-      activeConversationId = linked.cloudConversationId;
       await harnessA.engine.run();
       await harnessB.engine.run();
       expect(
@@ -136,7 +141,7 @@ void main() {
       );
       expect(
         (await harnessB.repositories.conversations.getConversation(
-          linked.cloudConversationId,
+          importedLink.localConversationId,
         ))?.unreadCount,
         0,
       );
@@ -249,6 +254,10 @@ void main() {
         email: 'peer@example.com',
         displayName: 'Peer',
       );
+      final currentIdentity = harness.cloud.currentIdentity!;
+      await harness.repositories.conversations.adoptUnowned(
+        currentIdentity.userId,
+      );
       await harness.engine.linkConversationToCloud(
         localConversationId: 'conversation-a',
         peerUserId: peer.userId,
@@ -309,15 +318,17 @@ void main() {
     await harness.engine.run();
 
     expect(harness.cloud.messages, isEmpty);
-    expect(
-      await harness.repositories.messages.getMessage(message.id),
-      isNotNull,
-    );
+    expect(await harness.repositories.messages.getMessage(message.id), isNull);
     expect(
       (await harness.repositories.syncQueue.listAll()).any(
         (item) => item.status == SyncQueueStatus.pending.value,
       ),
       isTrue,
+    );
+    await harness.cloud.signIn(email: 'a@example.com', password: 'password');
+    expect(
+      await harness.repositories.messages.getMessage(message.id),
+      isNotNull,
     );
   });
 
@@ -359,6 +370,7 @@ void main() {
       await file.writeAsBytes([1, 2, 3]);
       final attachment = await harness.repositories.attachments.createPending(
         id: 'attachment-a',
+        conversationId: message.conversationId!,
         messageId: message.id,
         transferId: 'transfer-a',
         mediaType: MediaType.image,
@@ -477,6 +489,7 @@ void main() {
       await file.writeAsBytes([1, 2, 3]);
       final attachment = await harness.repositories.attachments.createPending(
         id: 'attachment-a',
+        conversationId: message.conversationId!,
         messageId: message.id,
         transferId: 'transfer-a',
         mediaType: MediaType.image,
@@ -557,7 +570,7 @@ class SyncHarness {
   }
 
   Future<RelioMessage> createMessage({required String senderId}) async {
-    await repositories.conversations.ensureConversation(
+    final conversation = await repositories.conversations.ensureConversation(
       id: 'conversation-a',
       participantId: 'peer-a',
       displayName: 'Peer A',
@@ -570,12 +583,12 @@ class SyncHarness {
         displayName: 'Peer',
       );
       await engine.linkConversationToCloud(
-        localConversationId: 'conversation-a',
+        localConversationId: conversation.id,
         peerUserId: peer.userId,
       );
     }
     return repositories.messages.createOutgoingText(
-      conversationId: 'conversation-a',
+      conversationId: conversation.id,
       senderId: senderId,
       senderDeviceId: 'device-a',
       text: 'local message',

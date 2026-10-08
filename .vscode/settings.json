@@ -1,0 +1,15 @@
+{
+  "files.exclude": {
+    "**/.dart_tool": true,
+    "**/.env.qa.local": true,
+    "**/.firebase": true,
+    "**/.idea": true,
+    "**/.qa-local": true,
+    "**/android/.gradle": true,
+    "**/android/key.properties": true,
+    "**/android/relio-test.keystore": true,
+    "**/artifacts": true,
+    "**/build": true,
+    "**/dist": true
+  }
+}

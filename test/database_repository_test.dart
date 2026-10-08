@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -14,6 +15,236 @@ import 'package:relio_mobile/data/models/prototype_models.dart';
 import 'test_database.dart';
 
 void main() {
+  test(
+    'local conversations and messages are partitioned by cloud account',
+    () async {
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      var activeOwner = 'account-a';
+      final repositories = RelioRepositories(
+        database,
+        ownerUserIdProvider: () => activeOwner,
+      );
+
+      final accountAConversation = await repositories.conversations
+          .ensureConversation(
+            id: 'peer-device',
+            participantId: 'peer-device',
+            displayName: 'Peer A',
+            participantStatus: DeviceStatus.offline,
+          );
+      await repositories.messages.createOutgoingText(
+        conversationId: accountAConversation.id,
+        senderId: 'account-a',
+        senderDeviceId: 'local-device',
+        text: 'A private message',
+      );
+
+      activeOwner = 'account-b';
+      expect(await repositories.conversations.listConversations(), isEmpty);
+      expect(
+        await repositories.conversations.getConversation(
+          accountAConversation.id,
+        ),
+        isNull,
+      );
+      expect(
+        await repositories.messages.listMessages(accountAConversation.id),
+        isEmpty,
+      );
+
+      final accountBConversation = await repositories.conversations
+          .ensureConversation(
+            id: 'peer-device',
+            participantId: 'peer-device',
+            displayName: 'Peer B',
+            participantStatus: DeviceStatus.offline,
+          );
+      expect(accountBConversation.id, isNot(accountAConversation.id));
+      await repositories.messages.createOutgoingText(
+        conversationId: accountBConversation.id,
+        senderId: 'account-b',
+        senderDeviceId: 'local-device',
+        text: 'B private message',
+      );
+      expect(
+        (await repositories.messages.listMessages(
+          accountBConversation.id,
+        )).single.text,
+        'B private message',
+      );
+
+      activeOwner = 'account-a';
+      expect(
+        (await repositories.messages.listMessages(
+          accountAConversation.id,
+        )).single.text,
+        'A private message',
+      );
+    },
+  );
+
+  test(
+    'account changes rebind conversation watch to the current owner',
+    () async {
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      final ownerChanges = StreamController<Object?>.broadcast(sync: true);
+      addTearDown(ownerChanges.close);
+      var activeOwner = 'account-a';
+      final repositories = RelioRepositories(
+        database,
+        ownerUserIdProvider: () => activeOwner,
+        ownerScopeChanges: ownerChanges.stream,
+      );
+      final accountAConversation = await repositories.conversations
+          .ensureConversation(
+            id: 'peer-device',
+            participantId: 'peer-device',
+            displayName: 'Peer A',
+            participantStatus: DeviceStatus.offline,
+          );
+      final accountBVisible = repositories.conversations
+          .watchConversations()
+          .firstWhere((rows) => rows.any((row) => row.displayName == 'Peer B'));
+
+      activeOwner = 'account-b';
+      ownerChanges.add('account-b');
+      expect(await repositories.conversations.listConversations(), isEmpty);
+      expect(
+        await repositories.messages.listMessages(accountAConversation.id),
+        isEmpty,
+      );
+      await repositories.conversations.ensureConversation(
+        id: 'peer-device',
+        participantId: 'peer-device',
+        displayName: 'Peer B',
+        participantStatus: DeviceStatus.offline,
+      );
+      expect(await accountBVisible, hasLength(1));
+
+      activeOwner = 'account-a';
+      ownerChanges.add('account-a');
+      expect(
+        (await repositories.conversations.listConversations()).map(
+          (row) => row.displayName,
+        ),
+        ['Peer A'],
+      );
+    },
+  );
+
+  test(
+    'stale account cannot write or mutate another account conversation',
+    () async {
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      var activeOwner = 'account-a';
+      final repositories = RelioRepositories(
+        database,
+        ownerUserIdProvider: () => activeOwner,
+      );
+      final conversation = await repositories.conversations.ensureConversation(
+        id: 'shared-peer',
+        participantId: 'shared-peer',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      final original = await repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: 'account-a',
+        senderDeviceId: 'device-local',
+        text: 'A message',
+      );
+      final attachment = await repositories.attachments.createPending(
+        id: 'account-a-attachment',
+        conversationId: conversation.id,
+        messageId: original.id,
+        transferId: 'account-a-transfer',
+        mediaType: MediaType.image,
+        fileName: 'private.png',
+        mimeType: 'image/png',
+        localPath: 'private.png',
+        byteSize: 12,
+      );
+
+      activeOwner = 'account-b';
+      await expectLater(
+        repositories.messages.createOutgoingText(
+          conversationId: conversation.id,
+          senderId: 'account-b',
+          senderDeviceId: 'device-local',
+          text: 'must not be inserted',
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await repositories.messages.updateDeliveryStatus(
+        original.id,
+        DeliveryStatus.failed,
+      );
+      await expectLater(
+        repositories.attachments.createPending(
+          id: 'forbidden-account-b-attachment',
+          conversationId: conversation.id,
+          messageId: original.id,
+          transferId: 'forbidden-transfer',
+          mediaType: MediaType.image,
+          fileName: 'private.png',
+          mimeType: 'image/png',
+          localPath: 'private.png',
+          byteSize: 12,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await repositories.attachments.markFailed(
+        attachment.id,
+        'stale-account-write',
+      );
+      expect(await repositories.attachments.getById(attachment.id), isNull);
+      expect(await repositories.attachments.listAll(), isEmpty);
+      expect(
+        await repositories.conversations.getConversation(conversation.id),
+        isNull,
+      );
+      expect(
+        await repositories.messages.listMessages(conversation.id),
+        isEmpty,
+      );
+      expect(await repositories.messages.getMessage(original.id), isNull);
+      final stored = await (database.select(
+        database.messages,
+      )..where((row) => row.conversationId.equals(conversation.id))).get();
+      expect(stored, hasLength(1));
+      expect(stored.single.content, 'A message');
+      expect(stored.single.deliveryStatus, DeliveryStatus.pending.name);
+      final storedAttachment = await (database.select(
+        database.attachments,
+      )..where((row) => row.id.equals(attachment.id))).getSingle();
+      expect(storedAttachment.transferStatus, MediaTransferState.pending.name);
+    },
+  );
+
+  test('new empty conversation is emitted by the reactive chat list', () async {
+    final database = AppDatabase.memory();
+    addTearDown(database.close);
+    final repositories = RelioRepositories(database);
+    final appeared = repositories.conversations.watchConversations().firstWhere(
+      (rows) => rows.isNotEmpty,
+    );
+
+    final conversation = await repositories.conversations.ensureConversation(
+      id: 'verified-peer-device',
+      participantId: 'verified-peer-device',
+      displayName: 'Verified Peer',
+      participantStatus: DeviceStatus.normal,
+    );
+
+    final rows = await appeared;
+    expect(rows.single.id, conversation.id);
+    expect(rows.single.lastMessageText, isNull);
+    expect(await repositories.messages.listMessages(conversation.id), isEmpty);
+  });
+
   late AppDatabase database;
   late RelioRepositories repositories;
 
@@ -76,6 +307,181 @@ void main() {
         (await reopenedRepository.listMessages('peer-1')).single.text,
         'offline hello',
       );
+    },
+  );
+
+  test(
+    'Nearby incoming messages for the same peer resolve per account',
+    () async {
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      var activeOwner = 'account-a';
+      final repositories = RelioRepositories(
+        database,
+        ownerUserIdProvider: () => activeOwner,
+      );
+      final accountA = await repositories.conversations.ensureConversation(
+        id: 'peer-device',
+        participantId: 'peer-device',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      await repositories.messages.createIncomingText(
+        conversationId: accountA.id,
+        senderId: 'peer-user',
+        senderDeviceId: 'peer-device',
+        messageId: 'a-nearby-message',
+        text: 'A history',
+        createdAt: DateTime.utc(2026, 10, 9),
+      );
+
+      activeOwner = 'account-b';
+      final accountB = await repositories.conversations.ensureConversation(
+        id: 'peer-device',
+        participantId: 'peer-device',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      expect(accountB.id, isNot(accountA.id));
+      expect(
+        (await repositories.conversations.listConversations()).map(
+          (conversation) => conversation.id,
+        ),
+        [accountB.id],
+      );
+      expect(await repositories.messages.listMessages(accountA.id), isEmpty);
+      expect(await repositories.messages.listMessages(accountB.id), isEmpty);
+      await repositories.messages.createIncomingText(
+        conversationId: accountB.id,
+        senderId: 'peer-user',
+        senderDeviceId: 'peer-device',
+        messageId: 'b-nearby-message',
+        text: 'B history',
+        createdAt: DateTime.utc(2026, 10, 9, 0, 1),
+      );
+      expect(
+        (await repositories.messages.listMessages(
+          accountB.id,
+        )).map((message) => message.text),
+        ['B history'],
+      );
+      expect(
+        await repositories.messages.getMessage('a-nearby-message'),
+        isNull,
+      );
+
+      activeOwner = 'account-a';
+      expect(
+        (await repositories.messages.listMessages(accountA.id)).single.text,
+        'A history',
+      );
+      expect(
+        await repositories.messages.getMessage('b-nearby-message'),
+        isNull,
+      );
+      activeOwner = 'account-b';
+      final reconnectedB = await repositories.conversations.ensureConversation(
+        id: accountB.id,
+        participantId: 'peer-device',
+        displayName: 'Peer',
+        participantStatus: DeviceStatus.normal,
+      );
+      expect(reconnectedB.id, accountB.id);
+    },
+  );
+
+  test(
+    'Week 3 delete removes only the disposable message and its pending queue row',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'week3-delete-peer',
+        participantId: 'week3-delete-peer',
+        displayName: 'Week 3 peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      final message = await repositories.messages.createOutgoingText(
+        conversationId: 'week3-delete-peer',
+        senderId: 'account-a',
+        senderDeviceId: 'device-a',
+        text: 'WEEK3 DELETE TEST',
+      );
+
+      expect(
+        await repositories.messages.deleteWeek3DemoMessage(message.id),
+        isTrue,
+      );
+      expect(await repositories.messages.getMessage(message.id), isNull);
+      expect(
+        (await repositories.syncQueue.listAll()).where(
+          (item) => item.entityId == message.id,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test('Week 3 delete accepts the ASCII presentation token', () async {
+    await repositories.conversations.ensureConversation(
+      id: 'week3-delete-ascii',
+      participantId: 'week3-delete-ascii',
+      displayName: 'Week 3 peer',
+      participantStatus: DeviceStatus.offline,
+    );
+    final message = await repositories.messages.createOutgoingText(
+      conversationId: 'week3-delete-ascii',
+      senderId: 'account-a',
+      senderDeviceId: 'device-a',
+      text: 'W3DELETETEST',
+    );
+
+    expect(
+      await repositories.messages.deleteWeek3DemoMessage(message.id),
+      isTrue,
+    );
+    expect(await repositories.messages.getMessage(message.id), isNull);
+    expect(
+      (await repositories.syncQueue.listAll()).where(
+        (item) => item.entityId == message.id,
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
+    'Week 3 delete rejects ordinary messages and messages that started syncing',
+    () async {
+      await repositories.conversations.ensureConversation(
+        id: 'week3-delete-guard',
+        participantId: 'week3-delete-guard',
+        displayName: 'Week 3 peer',
+        participantStatus: DeviceStatus.offline,
+      );
+      final ordinary = await repositories.messages.createOutgoingText(
+        conversationId: 'week3-delete-guard',
+        senderId: 'account-a',
+        senderDeviceId: 'device-a',
+        text: 'ordinary message',
+      );
+      final demo = await repositories.messages.createOutgoingText(
+        conversationId: 'week3-delete-guard',
+        senderId: 'account-a',
+        senderDeviceId: 'device-a',
+        text: 'WEEK3 DELETE TEST',
+      );
+      final demoQueue = (await repositories.syncQueue.listPending())
+          .singleWhere((item) => item.entityId == demo.id);
+      await repositories.syncQueue.markProcessing(demoQueue.id);
+
+      expect(
+        await repositories.messages.deleteWeek3DemoMessage(ordinary.id),
+        isFalse,
+      );
+      expect(
+        await repositories.messages.deleteWeek3DemoMessage(demo.id),
+        isFalse,
+      );
+      expect(await repositories.messages.getMessage(ordinary.id), isNotNull);
+      expect(await repositories.messages.getMessage(demo.id), isNotNull);
     },
   );
 
@@ -548,7 +954,7 @@ void main() {
         await upgradedRepositories.cloudLinks.listForOwner('account-a'),
         isEmpty,
       );
-      expect(upgraded.schemaVersion, 7);
+      expect(upgraded.schemaVersion, 8);
       await upgraded.close();
     },
   );
@@ -564,14 +970,15 @@ void main() {
         firstDatabase,
         ownerUserIdProvider: () => 'account-a',
       );
-      await firstRepositories.conversations.ensureConversation(
-        id: 'persistent-peer',
-        participantId: 'persistent-peer',
-        displayName: 'Persistent Peer',
-        participantStatus: DeviceStatus.offline,
-      );
+      final persistentConversation = await firstRepositories.conversations
+          .ensureConversation(
+            id: 'persistent-peer',
+            participantId: 'persistent-peer',
+            displayName: 'Persistent Peer',
+            participantStatus: DeviceStatus.offline,
+          );
       await firstRepositories.messages.createIncomingText(
-        conversationId: 'persistent-peer',
+        conversationId: persistentConversation.id,
         senderId: 'peer-user',
         senderDeviceId: 'peer-device',
         messageId: 'persistent-message',
@@ -590,6 +997,7 @@ void main() {
       );
       await firstRepositories.attachments.createPending(
         id: 'persistent-attachment',
+        conversationId: persistentConversation.id,
         messageId: 'persistent-message',
         transferId: 'persistent-transfer',
         mediaType: MediaType.image,
@@ -617,7 +1025,7 @@ void main() {
 
       expect(
         (await reopenedRepositories.conversations.getConversation(
-          'persistent-peer',
+          persistentConversation.id,
         ))?.unreadCount,
         1,
       );

@@ -10,6 +10,7 @@ import '../../core/domain/relio_entities.dart';
 import '../../core/nearby/nearby_service.dart';
 import '../../core/nearby/nearby_readiness.dart';
 import '../../core/nearby/nearby_transport.dart';
+import '../../core/nearby/bluetooth_classic_transport.dart';
 import '../../core/relio_dependencies.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
@@ -30,6 +31,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   late RelioDependencies _dependencies;
   late NearbyService _nearby;
   List<RelioNearbyDevice> _savedDevices = const [];
+  List<BondedBluetoothDevice> _bondedDevices = const [];
 
   @override
   void didChangeDependencies() {
@@ -62,6 +64,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
         .listDevices();
     if (!mounted) return;
     setState(() => _savedDevices = devices);
+  }
+
+  Future<void> _loadBondedDevices() async {
+    final devices = await _nearby.bondedBluetoothDevices();
+    if (!mounted) return;
+    setState(() => _bondedDevices = devices);
   }
 
   Future<void> _startSearching() async {
@@ -145,7 +153,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
   List<NearbyPeer> get _livePeers {
     final seen = <String>{};
     final peers = _nearby.discoveredPeers.where((peer) {
-      final key = peer.deviceId ?? peer.endpointId;
+      final key = peer.endpointId.startsWith('classic:')
+          ? peer.endpointId
+          : peer.deviceId ?? peer.endpointId;
       return seen.add(key);
     }).toList();
     peers.sort((a, b) {
@@ -311,7 +321,105 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       ),
               ),
             ),
+          if (_nearby.compatibilityFallbackAvailable &&
+              !_nearby.compatibilityModeActive)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(RelioSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.bluetooth_searching),
+                      title: Text('Bluetooth Classic สำหรับ QA'),
+                      subtitle: Text(
+                        'Realme เปิด listener; Samsung ค้นหาและเป็นฝ่ายเชื่อมต่อ',
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              await _nearby.activateCompatibilityMode(
+                                serverRole: true,
+                              );
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'RFCOMM listener พร้อมรับการเชื่อมต่อ',
+                                  ),
+                                ),
+                              );
+                            },
+                            child: const Text('Realme • Listener'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () async {
+                              await _nearby.activateCompatibilityMode(
+                                serverRole: false,
+                                bondedOnly: true,
+                              );
+                              await _loadBondedDevices();
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'โหลดอุปกรณ์ Bluetooth ที่จับคู่แล้ว',
+                                  ),
+                                ),
+                              );
+                            },
+                            child: const Text('Samsung • Paired'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (_nearby.compatibilityModeActive)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.bluetooth_connected),
+                title: Text('Bluetooth Classic QA ทำงานอยู่'),
+                subtitle: Text(
+                  'Realme = RFCOMM Listener • Samsung = bonded client',
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
+          if (_nearby.compatibilityModeActive && _bondedDevices.isNotEmpty) ...[
+            Text(
+              'PAIRED DEVICES',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            ..._bondedDevices.map((device) {
+              final peer = NearbyPeer(id: device.endpointId, name: device.name);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.bluetooth_connected),
+                    title: Text(device.name),
+                    subtitle: Text(
+                      'Paired • ${bluetoothClassicAddressSuffix(device.endpointId)}',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _openRealPeer(peer),
+                  ),
+                ),
+              );
+            }),
+            const SizedBox(height: 12),
+          ],
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -380,6 +488,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
                     Expanded(
                       child: RelioDeviceCard(
                         device: device,
+                        peerIdentifier: peer == null
+                            ? null
+                            : bluetoothClassicAddressSuffix(peer.endpointId),
                         onTap: peer == null ? null : () => _openRealPeer(peer),
                       ),
                     ),

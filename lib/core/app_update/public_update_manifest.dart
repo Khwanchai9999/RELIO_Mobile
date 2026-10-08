@@ -13,6 +13,7 @@ class PublicUpdateValidationException implements Exception {
   String toString() => 'Public update manifest validation failed: $code';
 }
 
+// จำกัด manifest และ asset ไว้ที่ origin ที่อนุมัติ ไม่เชื่อ URL จากข้อมูลภายนอกโดยตรง
 class PublicUpdateUrlPolicy {
   const PublicUpdateUrlPolicy({
     required this.manifestUri,

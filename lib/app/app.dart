@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/cloud/cloud_models.dart';
 import '../core/relio_dependencies.dart';
 import 'environment.dart';
 import 'router.dart';
@@ -89,6 +90,10 @@ class RelioThemeController extends ChangeNotifier {
   }
 }
 
+class _RouterRefresh extends ChangeNotifier {
+  void refresh() => notifyListeners();
+}
+
 class RelioThemeScope extends InheritedNotifier<RelioThemeController> {
   const RelioThemeScope({
     required super.notifier,
@@ -115,10 +120,12 @@ class RelioApp extends StatefulWidget {
 
 class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
   late final RelioThemeController _themeController;
-  late final GoRouter _router = createRelioRouter();
+  late final GoRouter _router;
+  late final _RouterRefresh _routerRefresh;
   late final RelioDependencies _dependencies;
   late final bool _ownsDependencies;
   late final bool _ownsThemeController;
+  StreamSubscription<AuthState>? _authStateSubscription;
 
   @override
   void initState() {
@@ -130,9 +137,21 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _themeController.addListener(_handleThemeChanged);
     _dependencies = widget.dependencies ?? RelioDependencies();
     _ownsDependencies = widget.dependencies == null;
+    _routerRefresh = _RouterRefresh();
+    _router = createRelioRouter(
+      authReady: () => _dependencies.authInitialized,
+      hasSession: () => _dependencies.authService.identity != null,
+      refreshListenable: _routerRefresh,
+    );
+    _authStateSubscription = _dependencies.authService.watchState().listen((_) {
+      _routerRefresh.refresh();
+    });
     _router.routerDelegate.addListener(_updateNearbyLifecycleContext);
     _updateNearbyLifecycleContext();
     unawaited(_themeController.load());
+    unawaited(
+      _dependencies.initializeAuth().whenComplete(_routerRefresh.refresh),
+    );
     unawaited(_dependencies.initialize());
   }
 
@@ -145,6 +164,8 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _router.routerDelegate.removeListener(_updateNearbyLifecycleContext);
     _router.dispose();
+    unawaited(_authStateSubscription?.cancel());
+    _routerRefresh.dispose();
     _themeController.removeListener(_handleThemeChanged);
     if (_ownsThemeController) _themeController.dispose();
     if (_ownsDependencies) unawaited(_dependencies.dispose());

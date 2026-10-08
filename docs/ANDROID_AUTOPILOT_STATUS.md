@@ -187,8 +187,10 @@ by the current Build 25 section above.
 - Format, analyze, all 145 mobile tests, Windows PowerShell 5.1 syntax checks,
   QA/PROD isolation, DEV/QA/PROD debug builds, and the signed QA `-NoUpload`
   pipeline passed locally.
-- The signed QA artifact is local at `dist/relio-test-0.9.0+24.apk`; it has not
-  been uploaded, published, or installed on a phone.
+- The signed QA artifact was generated for that checkpoint; its old local APK
+  copy was removed during the approved final workspace cleanup. This does not
+  change the historical status: it was not uploaded, published, or installed
+  on a phone.
 - The migration and push Edge Function are source-only. No verified disposable
   QA Supabase project, Supabase CLI session, FCM service identity, or deployed
   webhook is configured. Admin deployment is not linked to Vercel.
@@ -257,9 +259,9 @@ by the current Build 25 section above.
 - `flutter test`: 125 passed for Build 22
 - QA/PROD App Distribution SDK isolation: passed
 - DEV debug, QA debug, QA signed release, and PROD debug verification builds:
-  passed for Build 22. QA signed artifact:
-  `dist/relio-test-0.9.0+22.apk`; package `com.relio.relio_mobile.test`;
-  signing identity matches the preserved TEST keystore.
+  passed for Build 22. Its historical local APK copy was removed during the
+  approved final workspace cleanup; package `com.relio.relio_mobile.test`;
+  signing identity matched the TEST keystore used at the time.
 - `scripts/deploy-test.ps1 -NoUpload`: passed; no Firebase upload was made.
 - Public Build 22 GitHub asset and Hosting page/manifest: deployed and remotely
   verified by the canonical publisher. Hosting contains metadata/page only; the

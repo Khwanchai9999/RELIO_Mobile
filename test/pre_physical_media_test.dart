@@ -218,6 +218,7 @@ Future<({RelioMessage message, RelioMediaAttachment attachment})> prepareImage(
   final managed = await storage.copySelectedFile(picked.path);
   final attachment = await pair.repositoriesA.attachments.createPending(
     id: 'image-attachment',
+    conversationId: 'device-b',
     messageId: 'image-message',
     transferId: 'image-transfer',
     mediaType: MediaType.image,

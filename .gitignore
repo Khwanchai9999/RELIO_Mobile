@@ -55,6 +55,12 @@ android/app/google-services.json
 !.env.qa.example
 .qa-local/
 
+# Local test evidence and temporary workspace files
+/artifacts/
+*.tmp
+*.bak
+Thumbs.db
+
 # Symbolication related
 app.*.symbols
 

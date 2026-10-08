@@ -37,6 +37,7 @@ class _RescueScreenState extends State<RescueScreen> {
       await dependencies.nearbyService.propagateCurrentStatus();
       return;
     }
+    // ให้ผู้ใช้ยืนยันก่อนเผยสถานะ Rescue ให้ peer ใกล้เคียงเห็น
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

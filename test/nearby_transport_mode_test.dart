@@ -6,6 +6,23 @@ import 'support/nearby_pair.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'repeated discovery for one endpoint updates instead of appending',
+    () async {
+      final pair = await HandshakePair.create();
+      addTearDown(pair.close);
+
+      pair.transportA.discoverPeer();
+      pair.transportA.discoverPeer();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        pair.serviceA.discoveredPeers.where((peer) => peer.id == 'endpoint-b'),
+        hasLength(1),
+      );
+    },
+  );
+
   for (final mode in NearbyTransportTestMode.values) {
     test(
       '${mode.diagnosticName} completes the two-peer consent flow',

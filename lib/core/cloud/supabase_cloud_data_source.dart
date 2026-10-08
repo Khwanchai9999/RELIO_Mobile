@@ -224,15 +224,71 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   @override
+  Future<CloudProfile> fetchMyProfile() async {
+    _requireAuth();
+    try {
+      final row = await (await _ready())
+          .from('profiles')
+          .select('id, display_name')
+          .eq('id', _identity!.userId)
+          .single();
+      return CloudProfile(
+        userId: row['id'] as String,
+        displayName: row['display_name'] as String? ?? '',
+      );
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
   Future<void> upsertProfile({required String displayName}) async {
     _requireAuth();
     try {
-      await (await _ready()).from('profiles').upsert({
-        'id': _identity!.userId,
-        'display_name': displayName,
-      });
+      final client = await _ready();
+      final profiles = client.from('profiles');
+      final userId = _identity!.userId;
+      final existing = await profiles
+          .select('id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (existing != null) {
+        // The profiles RLS contract deliberately makes id immutable after
+        // insert, so update only the user-editable display_name column.
+        await profiles.update({'display_name': displayName}).eq('id', userId);
+        return;
+      }
+
+      try {
+        await profiles.insert({'id': userId, 'display_name': displayName});
+      } on PostgrestException catch (error) {
+        // An Auth trigger may create the profile between the read and insert.
+        // Resolve that race with the same narrowly scoped update, never upsert
+        // id (which ordinary authenticated users are not allowed to update).
+        if (error.code != '23505') rethrow;
+        await profiles.update({'display_name': displayName}).eq('id', userId);
+      }
     } catch (error) {
       throw _failure(error);
+    }
+  }
+
+  @override
+  Future<void> deleteMyAccount() async {
+    _requireAuth();
+    try {
+      final client = await _ready();
+      await client.functions.invoke('delete-account');
+      await client.auth.signOut(scope: SignOutScope.local);
+      _identity = null;
+      _authState = AuthState.guest;
+      _state = CloudState.signedOut;
+      _authStates.add(_authState);
+      _cloudStates.add(_state);
+    } catch (error) {
+      if (error is CloudException) rethrow;
+      throw _failure(error, 'delete');
     }
   }
 

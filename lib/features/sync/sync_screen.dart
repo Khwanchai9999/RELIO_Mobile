@@ -34,8 +34,8 @@ class _SyncScreenState extends State<SyncScreen> {
       builder: (context) => AlertDialog(
         title: const Text('นำข้อมูลออฟไลน์ไปซิงก์หรือไม่'),
         content: const Text(
-          'ข้อมูลที่สร้างใน Guest Mode จะยังอยู่ในเครื่องและไม่ถูกผูกกับบัญชีโดยอัตโนมัติ\n\n'
-          'ยืนยันเพื่อผูกคิวข้อมูลออฟไลน์ที่ยังไม่มีเจ้าของกับบัญชีที่เข้าสู่ระบบอยู่',
+          'บทสนทนาและคิวข้อมูลที่สร้างใน Guest Mode จะยังอยู่ในเครื่องและไม่ถูกผูกกับบัญชีโดยอัตโนมัติ\n\n'
+          'ยืนยันเพื่อย้ายข้อมูล Guest ที่ยังไม่มีเจ้าของไปยังบัญชีที่เข้าสู่ระบบอยู่',
         ),
         actions: [
           TextButton(
@@ -44,7 +44,7 @@ class _SyncScreenState extends State<SyncScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('นำไปซิงก์'),
+            child: const Text('ย้ายและซิงก์'),
           ),
         ],
       ),
@@ -80,9 +80,6 @@ class _SyncScreenState extends State<SyncScreen> {
             builder: (context, queueSnapshot) {
               final summary = queueSnapshot.data ?? engine.queueSummary;
               final isRunning = engine.state == SyncEngineState.running;
-              final canAdopt =
-                  engine.authState == AuthState.authenticated &&
-                  summary.pending > 0;
               return ListView(
                 padding: const EdgeInsets.fromLTRB(
                   RelioSpacing.lg,
@@ -127,14 +124,28 @@ class _SyncScreenState extends State<SyncScreen> {
                     },
                   ),
                   const SizedBox(height: 10),
-                  if (canAdopt) ...[
-                    OutlinedButton.icon(
-                      onPressed: isRunning ? null : _adoptGuestData,
-                      icon: const Icon(Icons.person_add_alt_1_outlined),
-                      label: const Text('นำข้อมูลออฟไลน์นี้ไปซิงก์กับบัญชีนี้'),
+                  if (engine.authState == AuthState.authenticated)
+                    FutureBuilder<int>(
+                      future: dependencies.repositories.conversations
+                          .countUnowned(),
+                      builder: (context, snapshot) {
+                        if (summary.pending == 0 && (snapshot.data ?? 0) == 0) {
+                          return const SizedBox.shrink();
+                        }
+                        return Column(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: isRunning ? null : _adoptGuestData,
+                              icon: const Icon(Icons.person_add_alt_1_outlined),
+                              label: const Text(
+                                'นำข้อมูลออฟไลน์นี้ไปซิงก์กับบัญชีนี้',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+                        );
+                      },
                     ),
-                    const SizedBox(height: 8),
-                  ],
                   if (summary.failed > 0) ...[
                     OutlinedButton.icon(
                       onPressed: isRunning ? null : _retryFailed,

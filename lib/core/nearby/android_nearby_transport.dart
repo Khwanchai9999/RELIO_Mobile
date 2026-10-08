@@ -645,6 +645,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   String? _statusName(int? statusCode) => switch (statusCode) {
     8001 => 'STATUS_ALREADY_ADVERTISING',
     8002 => 'STATUS_ALREADY_DISCOVERING',
+    8003 => 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
     8007 => 'STATUS_RADIO_ERROR',
     8008 => 'STATUS_ALREADY_HAVE_ACTIVE_STRATEGY',
     8009 => 'STATUS_OUT_OF_ORDER_API_CALL',

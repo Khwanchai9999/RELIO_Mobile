@@ -75,6 +75,7 @@ void main() {
       const AuthException('sensitive backend detail', statusCode: '401'),
     );
     expect(auth.code, 'auth');
+    expect(auth.message, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     expect(auth.message, isNot(contains('sensitive')));
 
     final network = CloudErrorMapper.map(

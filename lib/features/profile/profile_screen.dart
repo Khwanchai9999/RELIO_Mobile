@@ -4,11 +4,31 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/environment.dart';
 import '../../app/theme/relio_spacing.dart';
+import '../../core/cloud/cloud_models.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Future<CloudProfile>? _profileFuture;
+  Future<String>? _localDisplayNameFuture;
+  bool _busy = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dependencies = RelioDependencyScope.of(context);
+    if (dependencies.authService.identity != null && _profileFuture == null) {
+      _profileFuture = dependencies.cloudDataSource.fetchMyProfile();
+    }
+    _localDisplayNameFuture ??= dependencies.identity.getDisplayName();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,15 +74,7 @@ class ProfileScreen extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        FutureBuilder<String>(
-                          future: dependencies.identity.getDisplayName(),
-                          builder: (context, snapshot) => Text(
-                            snapshot.data ??
-                                identity?.displayName ??
-                                'ผู้ใช้ RELIO',
-                            style: Theme.of(context).textTheme.headlineSmall,
-                          ),
-                        ),
+                        _memberName(context, identity),
                         const SizedBox(height: 3),
                         Text(
                           identity?.email ?? 'ใช้งานแบบออฟไลน์',
@@ -123,7 +135,7 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.person_outline,
-            title: 'ข้อมูลส่วนตัว',
+            title: 'แก้ไขข้อมูลสมาชิก',
             onTap: () => _editDisplayName(context),
           ),
           const SizedBox(height: 8),
@@ -169,24 +181,67 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: 14),
           if (identity != null)
             OutlinedButton.icon(
-              onPressed: () async {
-                await dependencies.removePushRegistration();
-                await dependencies.authService.signOut();
-                if (context.mounted) context.go('/welcome');
-              },
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      await dependencies.removePushRegistration();
+                      await dependencies.authService.signOut();
+                      if (context.mounted) context.go('/welcome');
+                    },
               icon: const Icon(Icons.logout_rounded),
               label: const Text('ออกจากระบบ'),
             ),
+          if (identity != null) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _confirmDeleteAccount(context),
+              icon: const Icon(Icons.delete_outline),
+              label: Text(_busy ? 'กำลังลบบัญชี...' : 'ลบบัญชี'),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _memberName(BuildContext context, CloudIdentity? identity) {
+    final style = Theme.of(context).textTheme.headlineSmall;
+    if (identity == null) {
+      return FutureBuilder<String>(
+        future: _localDisplayNameFuture,
+        builder: (context, snapshot) =>
+            Text(snapshot.data ?? 'ผู้ใช้ RELIO', style: style),
+      );
+    }
+    return FutureBuilder<CloudProfile>(
+      future: _profileFuture,
+      builder: (context, snapshot) => Text(
+        snapshot.hasError
+            ? 'อ่านข้อมูลสมาชิกไม่สำเร็จ'
+            : snapshot.data?.displayName ?? 'กำลังโหลดข้อมูลสมาชิก...',
+        style: style,
       ),
     );
   }
 
   Future<void> _editDisplayName(BuildContext context) async {
     final dependencies = RelioDependencyScope.of(context);
-    final controller = TextEditingController(
-      text: await dependencies.identity.getDisplayName(),
-    );
+    String initialName;
+    try {
+      initialName = dependencies.authService.identity == null
+          ? await dependencies.identity.getDisplayName()
+          : (await (_profileFuture ??= dependencies.cloudDataSource
+                    .fetchMyProfile()))
+                .displayName;
+    } on CloudException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+    final controller = TextEditingController(text: initialName);
     if (!context.mounted) {
       controller.dispose();
       return;
@@ -220,11 +275,69 @@ class ProfileScreen extends StatelessWidget {
           context,
         ).showSnackBar(const SnackBar(content: Text('กรุณาระบุชื่อที่แสดง')));
       } else {
-        await dependencies.identity.setDisplayName(value);
-        (context as Element).markNeedsBuild();
+        try {
+          if (dependencies.authService.identity != null) {
+            await dependencies.cloudDataSource.upsertProfile(
+              displayName: value,
+            );
+            _profileFuture = dependencies.cloudDataSource.fetchMyProfile();
+          } else {
+            await dependencies.identity.setDisplayName(value);
+          }
+          if (context.mounted) {
+            setState(() {});
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('บันทึกข้อมูลสมาชิกแล้ว')),
+            );
+          }
+        } on CloudException catch (error) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(error.message)));
+          }
+        }
       }
     }
     controller.dispose();
+  }
+
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('ลบบัญชี'),
+        content: const Text(
+          'บัญชีนี้จะเข้าสู่ระบบไม่ได้อีก ข้อมูลตำแหน่งและอุปกรณ์จะถูกลบ '
+          'ส่วนประวัติแชตจะยังอยู่ โดยเปลี่ยนชื่อเป็น “บัญชีที่ลบแล้ว”',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('ลบบัญชี'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted || _busy) return;
+
+    setState(() => _busy = true);
+    try {
+      await RelioDependencyScope.of(context).authService.deleteAccount();
+      if (context.mounted) context.go('/login');
+    } on CloudException catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _showAbout(BuildContext context) => showAboutDialog(

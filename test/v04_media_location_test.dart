@@ -95,6 +95,7 @@ void main() {
       );
       await repos.attachments.createPending(
         id: 'attachment',
+        conversationId: 'peer',
         messageId: message.id,
         transferId: 'transfer',
         mediaType: MediaType.image,
@@ -109,7 +110,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 7);
+      expect(db.schemaVersion, 8);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',
@@ -265,8 +266,15 @@ void main() {
       final database = AppDatabase.memory();
       addTearDown(database.close);
       final repositories = RelioRepositories(database);
+      await repositories.conversations.ensureConversation(
+        id: 'video-peer',
+        participantId: 'video-peer',
+        displayName: 'Video peer',
+        participantStatus: DeviceStatus.offline,
+      );
       final attachment = await repositories.attachments.createPending(
         id: 'video-attachment',
+        conversationId: 'video-peer',
         messageId: 'video-message',
         transferId: 'video-transfer',
         mediaType: MediaType.video,
@@ -338,6 +346,7 @@ void main() {
       ..writeAsBytesSync(Uint8List.fromList([0xff, 0xd8, 0xff]));
     final attachment = await repos.attachments.createPending(
       id: 'attachment',
+      conversationId: 'peer',
       messageId: message.id,
       transferId: 'transfer',
       mediaType: MediaType.image,
@@ -394,6 +403,7 @@ void main() {
         ..writeAsBytesSync(Uint8List.fromList([0xff, 0xd8, 0xff]));
       final attachment = await repositories.attachments.createPending(
         id: 'offline-attachment',
+        conversationId: 'offline-peer',
         messageId: 'offline-image-message',
         transferId: 'offline-image-transfer',
         mediaType: MediaType.image,

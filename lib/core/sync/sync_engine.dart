@@ -163,6 +163,7 @@ class SyncEngine {
       return;
     }
     await repositories.syncQueue.adoptUnowned(currentIdentity.userId);
+    await repositories.conversations.adoptUnowned(currentIdentity.userId);
     await run();
   }
 
@@ -244,6 +245,7 @@ class SyncEngine {
     final currentIdentity = cloud.currentIdentity!;
     if (adoptUnownedItems) {
       await repositories.syncQueue.adoptUnowned(currentIdentity.userId);
+      await repositories.conversations.adoptUnowned(currentIdentity.userId);
     }
 
     await _emit(
@@ -432,16 +434,17 @@ class SyncEngine {
         (link) => link.cloudConversationId == remote.id,
       );
       if (existing.isNotEmpty) continue;
-      await repositories.conversations.ensureConversation(
-        id: remote.id,
-        participantId: remote.participantId,
-        displayName: remote.displayName.isEmpty
-            ? 'ผู้ใช้ RELIO'
-            : remote.displayName,
-        participantStatus: DeviceStatus.offline,
-      );
+      final localConversation = await repositories.conversations
+          .ensureConversation(
+            id: remote.id,
+            participantId: remote.participantId,
+            displayName: remote.displayName.isEmpty
+                ? 'ผู้ใช้ RELIO'
+                : remote.displayName,
+            participantStatus: DeviceStatus.offline,
+          );
       final link = CloudConversationBinding(
-        localConversationId: remote.id,
+        localConversationId: localConversation.id,
         cloudConversationId: remote.id,
         ownerUserId: userId,
         peerUserId: remote.participantId,

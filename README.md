@@ -27,6 +27,10 @@ physically verified: Build 33 still requires the two-phone checklist.
 ## Current scope (v0.9.0 development / Android QA)
 
 - Optional Supabase email/password authentication with guest/offline entry
+- Authenticated members can read and update `profiles.display_name`; account
+  deletion is implemented by a caller-verified `delete-account` Edge Function;
+  it disables sign-in, removes personal SOS/device data, and keeps shared chat
+  history under the neutral name `บัญชีที่ลบแล้ว`
 - Configuration through `SUPABASE_URL` and `SUPABASE_ANON_KEY` dart-defines;
   missing configuration is safe and does not block local use
 - `CloudDataSource`, `CloudAuthService`, `SupabaseCloudDataSource`, and
@@ -44,6 +48,8 @@ physically verified: Build 33 still requires the two-phone checklist.
   ownership through retry and crash recovery
 - `FakeCloudDataSource` is the deterministic automated test path; routine tests
   do not upload live user data
+- Local Nearby conversations are isolated per Cloud account on a shared device;
+  old unowned Guest history stays local until the user explicitly adopts it
 - Public QA update checks use a small HTTPS manifest and are enabled only in
   RELIO Test; APK download and Android installation require explicit user
   actions

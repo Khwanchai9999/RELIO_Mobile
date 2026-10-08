@@ -307,14 +307,14 @@ class RelayEngine {
           throw StateError('Message repositories are unavailable.');
         }
         final conversationId = packet.payload['conversationId']! as String;
-        await conversations!.ensureConversation(
+        final conversation = await conversations!.ensureConversation(
           id: conversationId,
           participantId: envelope.originDeviceId,
           displayName: envelope.originDeviceId,
           participantStatus: DeviceStatus.normal,
         );
         await messages!.createIncomingText(
-          conversationId: conversationId,
+          conversationId: conversation.id,
           senderId: packet.senderUserId,
           senderDeviceId: envelope.originDeviceId,
           messageId: envelope.payloadId,
@@ -326,14 +326,14 @@ class RelayEngine {
           throw StateError('Message repositories are unavailable.');
         }
         final conversationId = packet.payload['conversationId']! as String;
-        await conversations!.ensureConversation(
+        final conversation = await conversations!.ensureConversation(
           id: conversationId,
           participantId: envelope.originDeviceId,
           displayName: envelope.originDeviceId,
           participantStatus: DeviceStatus.normal,
         );
         await messages!.createIncomingLocation(
-          conversationId: conversationId,
+          conversationId: conversation.id,
           senderId: packet.senderUserId,
           senderDeviceId: envelope.originDeviceId,
           messageId: envelope.payloadId,

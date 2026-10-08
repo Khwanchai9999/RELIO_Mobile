@@ -204,11 +204,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-    onCreate: (Migrator migrator) async => migrator.createAll(),
+    onCreate: (Migrator migrator) async {
+      await migrator.createAll();
+      await _createConversationScopes();
+    },
     onUpgrade: (Migrator migrator, int from, int to) async {
       if (from < 2) {
         await migrator.createTable(attachments);
@@ -262,9 +265,49 @@ class AppDatabase extends _$AppDatabase {
       if (from < 7) {
         await migrator.createTable(cloudConversationLinks);
       }
+      if (from < 8) {
+        await _createConversationScopes();
+        await customStatement('''
+          INSERT INTO conversation_scopes(conversation_id, owner_user_id, source_id)
+          SELECT local_conversation_id, MIN(owner_user_id), local_conversation_id
+          FROM cloud_conversation_links
+          GROUP BY local_conversation_id
+          HAVING COUNT(DISTINCT owner_user_id) = 1
+        ''');
+        await customStatement('''
+          INSERT OR IGNORE INTO conversation_scopes(conversation_id, owner_user_id, source_id)
+          SELECT messages.conversation_id, MIN(sync_queue.owner_user_id), messages.conversation_id
+          FROM messages
+          JOIN sync_queue
+            ON sync_queue.entity_type = 'message'
+            AND sync_queue.entity_id = messages.id
+          WHERE sync_queue.owner_user_id IS NOT NULL
+          GROUP BY messages.conversation_id
+          HAVING COUNT(DISTINCT sync_queue.owner_user_id) = 1
+        ''');
+      }
     },
     beforeOpen: (OpeningDetails details) async {
       await customStatement('PRAGMA foreign_keys = ON');
     },
   );
+
+  Future<void> _createConversationScopes() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS conversation_scopes (
+        conversation_id TEXT PRIMARY KEY NOT NULL
+          REFERENCES conversations(id) ON DELETE CASCADE,
+        owner_user_id TEXT NOT NULL,
+        source_id TEXT NOT NULL
+      )
+    ''');
+    await customStatement('''
+      CREATE INDEX IF NOT EXISTS conversation_scopes_owner_idx
+      ON conversation_scopes(owner_user_id, conversation_id)
+    ''');
+    await customStatement('''
+      CREATE UNIQUE INDEX IF NOT EXISTS conversation_scopes_source_idx
+      ON conversation_scopes(owner_user_id, source_id)
+    ''');
+  }
 }

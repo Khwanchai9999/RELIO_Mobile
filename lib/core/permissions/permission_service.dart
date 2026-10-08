@@ -25,6 +25,8 @@ class NearbyPermissionSnapshot {
   final ph.PermissionStatus locationWhenInUse;
   final bool isAndroid;
 
+  bool get isKnown => !isAndroid || androidSdk != null;
+
   List<ph.PermissionStatus> get requiredStatuses {
     if (!isAndroid) return const [];
     final sdk = androidSdk;

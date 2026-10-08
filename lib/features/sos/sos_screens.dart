@@ -25,6 +25,7 @@ class _SOSScreenState extends State<SOSScreen> {
   }
 
   Future<void> _openSOS() async {
+    // ขอการยืนยันก่อนอ่านตำแหน่งหรือบันทึกเหตุ SOS ลงเครื่อง
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -50,7 +51,7 @@ class _SOSScreenState extends State<SOSScreen> {
       final location = await dependencies.locationService.getCurrentOrLastKnown(
         timeout: const Duration(seconds: 5),
       );
-      await dependencies.repositories.sos.createAndActivate(
+      final event = await dependencies.repositories.sos.createAndActivate(
         ownerDeviceId: await dependencies.identity.getDeviceId(),
         ownerUserId: dependencies.authService.identity?.userId ?? '',
         message: _message.text.trim(),
@@ -59,7 +60,7 @@ class _SOSScreenState extends State<SOSScreen> {
         locationAccuracy: location.location?.accuracyMeters,
         locationCapturedAt: location.location?.capturedAt,
       );
-      await dependencies.nearbyService.propagateCurrentStatus();
+      await dependencies.nearbyService.sendSos(event);
       if (mounted) context.go('/sos/active');
     }
   }
@@ -230,7 +231,6 @@ class _SOSActiveScreenState extends State<SOSActiveScreen>
       if (cleared != null) {
         await dependencies.nearbyService.sendSos(cleared);
       }
-      await dependencies.nearbyService.propagateCurrentStatus();
     }
     if (!mounted) return;
     context.go('/sos');

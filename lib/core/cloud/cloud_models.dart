@@ -15,6 +15,13 @@ class CloudIdentity {
   final String? displayName;
 }
 
+class CloudProfile {
+  const CloudProfile({required this.userId, required this.displayName});
+
+  final String userId;
+  final String displayName;
+}
+
 class SupabaseConfig {
   const SupabaseConfig({required this.url, required this.anonKey});
   const SupabaseConfig.fromEnvironment()

@@ -1,6 +1,7 @@
 import '../media/media_storage_service.dart';
 import 'cloud_models.dart';
 
+// แยกสัญญา Cloud ออกจาก adapter เพื่อให้แอปสลับ Fake และ Supabase ได้
 abstract interface class CloudDataSource {
   SupabaseConfig get configuration;
   CloudState get cloudState;
@@ -20,7 +21,9 @@ abstract interface class CloudDataSource {
   });
   Future<void> signOut();
   Future<CloudIdentity?> restoreSession();
+  Future<CloudProfile> fetchMyProfile();
   Future<void> upsertProfile({required String displayName});
+  Future<void> deleteMyAccount();
   Future<void> upsertPushToken({
     required String deviceId,
     required String token,

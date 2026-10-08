@@ -4,6 +4,20 @@ import 'dart:typed_data';
 
 import '../../app/environment.dart';
 
+enum NearbyDiagnosticRole {
+  auto,
+  advertiserOnly,
+  discovererOnly,
+  stopped;
+
+  String get label => switch (this) {
+    NearbyDiagnosticRole.auto => 'AUTO — Advertiser + Discoverer',
+    NearbyDiagnosticRole.advertiserOnly => 'ADVERTISER_ONLY',
+    NearbyDiagnosticRole.discovererOnly => 'DISCOVERER_ONLY',
+    NearbyDiagnosticRole.stopped => 'STOPPED',
+  };
+}
+
 enum NearbyTransportTestMode {
   clusterBaseline,
   clusterPauseDiscovery,
@@ -72,6 +86,42 @@ class NearbyPeer {
   final DateTime? lastSeenAt;
   final DateTime? lostAt;
   final bool isCurrent;
+}
+
+class BondedBluetoothDevice {
+  const BondedBluetoothDevice({
+    required this.address,
+    required this.name,
+    required this.bondState,
+  });
+
+  final String address;
+  final String name;
+  final String bondState;
+
+  String get endpointId => 'classic:$address';
+}
+
+List<BondedBluetoothDevice> deduplicateBondedBluetoothDevices(
+  Iterable<BondedBluetoothDevice> devices,
+) {
+  final byAddress = <String, BondedBluetoothDevice>{};
+  for (final device in devices) {
+    final address = device.address.toUpperCase();
+    if (!RegExp(r'^[0-9A-F]{2}(:[0-9A-F]{2}){5}$').hasMatch(address) ||
+        device.bondState != 'BONDED') {
+      continue;
+    }
+    byAddress.putIfAbsent(
+      address,
+      () => BondedBluetoothDevice(
+        address: address,
+        name: device.name,
+        bondState: device.bondState,
+      ),
+    );
+  }
+  return byAddress.values.toList(growable: false);
 }
 
 class NearbyPayloadEvent {
@@ -251,6 +301,17 @@ abstract interface class NearbyTransport {
   Future<void> dispose();
 }
 
+/// Optional developer/QA capability. Production construction never exposes
+/// this transport, so public builds retain the normal Nearby-only surface.
+abstract interface class CompatibilityTransport {
+  bool get compatibilityModeActive;
+  Future<void> activateCompatibilityMode({
+    required bool serverRole,
+    bool bondedOnly = false,
+  });
+  Future<List<BondedBluetoothDevice>> bondedBluetoothDevices();
+}
+
 class MockNearbyTransport implements NearbyTransport {
   MockNearbyTransport({
     this.autoAcknowledge = false,
@@ -270,6 +331,7 @@ class MockNearbyTransport implements NearbyTransport {
   final _files = StreamController<NearbyFilePayloadEvent>.broadcast();
   final _transfers = StreamController<NearbyTransferEvent>.broadcast();
   final List<Uint8List> sentPayloads = [];
+  final List<String?> sentPeerIds = [];
   final List<String> sentFiles = [];
   final Map<String, NearbyPeer> peers = {};
   Duration startDelay = Duration.zero;
@@ -495,6 +557,7 @@ class MockNearbyTransport implements NearbyTransport {
       throw const NearbyTransportException('Mock send failure.');
     }
     sentPayloads.add(bytes);
+    sentPeerIds.add(peerId);
   }
 
   @override
@@ -576,6 +639,7 @@ class MockNearbyTransport implements NearbyTransport {
     required String name,
     String? identityFingerprintHint,
     String? authenticationToken,
+    bool isIncomingRequest = true,
   }) {
     final peer = NearbyPeer(
       id: id,
@@ -588,7 +652,7 @@ class MockNearbyTransport implements NearbyTransport {
         peer: peer,
         state: NearbyConnectionState.incomingRequest,
         authenticationToken: authenticationToken,
-        isIncomingRequest: true,
+        isIncomingRequest: isIncomingRequest,
       ),
     );
   }

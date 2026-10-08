@@ -46,6 +46,7 @@ class DriftRelayRepository implements RelayRepository {
 
   @override
   Future<bool> storePacket(RelayEnvelope envelope) async {
+    // ใช้ packetId กันการบันทึกซ้ำ เพื่อให้รับซ้ำแล้วไม่ relay ซ้ำ
     final existing = await getPacket(envelope.packetId);
     if (existing != null) return false;
     await db.customStatement(

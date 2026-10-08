@@ -16,8 +16,10 @@ abstract interface class AuthService {
   });
   Future<void> signOut();
   Future<CloudIdentity?> restoreSession();
+  Future<void> deleteAccount();
 }
 
+// ให้ UI เรียก Auth ผ่าน interface เดียว โดยไม่ผูกกับ Supabase SDK
 class CloudAuthService implements AuthService {
   CloudAuthService(this.source);
   final CloudDataSource source;
@@ -46,4 +48,6 @@ class CloudAuthService implements AuthService {
   Future<void> signOut() => source.signOut();
   @override
   Future<CloudIdentity?> restoreSession() => source.restoreSession();
+  @override
+  Future<void> deleteAccount() => source.deleteMyAccount();
 }

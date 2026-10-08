@@ -43,6 +43,131 @@ void main() {
     expect(await rig.logText(), contains('connection_soft_timeout'));
   });
 
+  test('repeated connect tap submits only one native request', () async {
+    rig.transport.holdConnectionRequests = true;
+    rig.transport.simulatePeer(id: 'paired-peer', name: 'Paired peer');
+    await Future<void>.delayed(Duration.zero);
+
+    await rig.service.connect('paired-peer');
+    await rig.service.connect('paired-peer');
+
+    expect(rig.transport.connectionRequestCount, 1);
+    expect(
+      rig.service.peerStates['paired-peer'],
+      NearbyConnectionState.connecting,
+    );
+  });
+
+  test(
+    'already-connected native status resumes identity handshake instead of failing',
+    () async {
+      rig.transport.holdConnectionRequests = true;
+      rig.transport.simulatePeer(id: 'already-connected-peer', name: 'Peer');
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('already-connected-peer');
+      rig.transport.resolveConnectionRequest(
+        'already-connected-peer',
+        connected: false,
+        rawStatusCode: 8003,
+        rawStatusName: 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        rig.service.peerStates['already-connected-peer'],
+        NearbyConnectionState.connected,
+      );
+      expect(
+        rig.service.connectionPhaseForEndpoint('already-connected-peer'),
+        NearbyConnectionPhase.identityHandshake,
+      );
+      expect(rig.transport.disconnectCount, 0);
+      expect(
+        await rig.logText(),
+        contains('already_connected_status_reconciled'),
+      );
+    },
+  );
+
+  test(
+    'manual initiator accepts its initiated callback exactly once',
+    () async {
+      final fingerprint = List.filled(64, 'c').join();
+      rig.transport.holdConnectionRequests = true;
+      rig.transport.simulatePeer(
+        id: 'initiated-peer',
+        name: 'Peer',
+        identityFingerprintHint: fingerprint,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('initiated-peer');
+      rig.transport.simulateIncomingConnection(
+        id: 'initiated-peer',
+        name: 'Peer',
+        identityFingerprintHint: fingerprint,
+        isIncomingRequest: false,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      rig.transport.simulateIncomingConnection(
+        id: 'initiated-peer',
+        name: 'Peer',
+        identityFingerprintHint: fingerprint,
+        isIncomingRequest: false,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(rig.transport.connectionRequestCount, 1);
+      expect(rig.transport.acceptConnectionCount, 1);
+      expect(
+        rig.service.pendingConnectionRequests.containsKey('initiated-peer'),
+        isFalse,
+      );
+      final logs = await rig.logText();
+      expect(logs, contains('initiator_accepting_connection_initiated'));
+      expect(logs, contains('"connectingAtCallback":true'));
+    },
+  );
+
+  test(
+    'QA Nearby roles start only their selected Google Nearby side',
+    () async {
+      await rig.service.startSession();
+
+      await rig.service.configureDiagnosticRole(
+        NearbyDiagnosticRole.advertiserOnly,
+      );
+      expect(rig.transport.isAdvertising, isTrue);
+      expect(rig.transport.isDiscovering, isFalse);
+      await rig.service.stopSession(reason: 'test_lifecycle_restart');
+      await rig.service.startSession();
+      expect(rig.transport.isAdvertising, isTrue);
+      expect(rig.transport.isDiscovering, isFalse);
+
+      await rig.service.configureDiagnosticRole(
+        NearbyDiagnosticRole.discovererOnly,
+      );
+      expect(rig.transport.isAdvertising, isFalse);
+      expect(rig.transport.isDiscovering, isTrue);
+      await rig.service.stopSession(reason: 'test_lifecycle_restart');
+      await rig.service.startSession();
+      expect(rig.transport.isAdvertising, isFalse);
+      expect(rig.transport.isDiscovering, isTrue);
+
+      await rig.service.configureDiagnosticRole(NearbyDiagnosticRole.stopped);
+      expect(rig.transport.isAdvertising, isFalse);
+      expect(rig.transport.isDiscovering, isFalse);
+      await rig.service.startSession();
+      expect(rig.transport.isAdvertising, isFalse);
+      expect(rig.transport.isDiscovering, isFalse);
+
+      await rig.service.configureDiagnosticRole(NearbyDiagnosticRole.auto);
+      expect(rig.transport.isAdvertising, isTrue);
+      expect(rig.transport.isDiscovering, isTrue);
+    },
+  );
+
   test('old discovery epoch is rejected before native request', () async {
     await rig.service.startDiscovery();
     final oldEpoch = rig.transport.discoveryEpoch;
@@ -424,6 +549,15 @@ void main() {
 
       final deviceA = await pair.identityA.getDeviceId();
       final deviceB = await pair.identityB.getDeviceId();
+      // A transport may re-emit a bonded/discovered endpoint after the
+      // identity handshake. That refresh must not erase authenticated mapping.
+      pair.transportA.discoverPeer();
+      await Future<void>.delayed(Duration.zero);
+      final refreshedPeer = pair.serviceA.discoveredPeers.singleWhere(
+        (peer) => peer.endpointId == 'endpoint-b',
+      );
+      expect(refreshedPeer.deviceId, deviceB);
+      expect(pair.serviceA.isDeviceConnected(deviceB), isTrue);
       final message = await pair.repositoriesA.messages.createOutgoingText(
         conversationId: deviceB,
         senderId: deviceA,
@@ -691,14 +825,22 @@ class _TwoPeerTransport implements NearbyTransport {
     ),
   );
 
-  void simulateIncomingConnection({required String id, required String name}) =>
-      _connections.add(
-        NearbyConnectionEvent(
-          peer: NearbyPeer(id: id, name: name),
-          state: NearbyConnectionState.incomingRequest,
-          isIncomingRequest: true,
-        ),
-      );
+  void simulateIncomingConnection({
+    required String id,
+    required String name,
+    String? identityFingerprintHint,
+    bool isIncomingRequest = true,
+  }) => _connections.add(
+    NearbyConnectionEvent(
+      peer: NearbyPeer(
+        id: id,
+        name: name,
+        identityFingerprintHint: identityFingerprintHint,
+      ),
+      state: NearbyConnectionState.incomingRequest,
+      isIncomingRequest: isIncomingRequest,
+    ),
+  );
 
   void _maybeResolve() {
     if (resultScheduled || !accepted || !other.requested) return;

@@ -34,6 +34,7 @@ class GeolocatorLocationService implements LocationService {
   Future<LocationResult> getCurrentOrLastKnown({
     Duration timeout = const Duration(seconds: 5),
   }) async {
+    // ขอพิกัดเมื่อ feature เรียกใช้อย่างชัดเจน และคืนผลแบบมีสถานะแทนการซ่อน error
     if (!await Geolocator.isLocationServiceEnabled()) {
       return const LocationResult.failure(LocationFailure.serviceDisabled);
     }

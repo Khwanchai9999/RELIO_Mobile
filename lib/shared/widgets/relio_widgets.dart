@@ -266,9 +266,15 @@ class _ConnectivityLine extends StatelessWidget {
 }
 
 class RelioDeviceCard extends StatelessWidget {
-  const RelioDeviceCard({required this.device, this.onTap, super.key});
+  const RelioDeviceCard({
+    required this.device,
+    this.peerIdentifier,
+    this.onTap,
+    super.key,
+  });
 
   final RelioDevice device;
+  final String? peerIdentifier;
   final VoidCallback? onTap;
 
   @override
@@ -321,7 +327,7 @@ class RelioDeviceCard extends StatelessWidget {
                     Text(
                       device.isDemo
                           ? stateLabel
-                          : '$stableDeviceId • $stateLabel',
+                          : '${peerIdentifier ?? stableDeviceId} • $stateLabel',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     if (device.isDemo) ...[

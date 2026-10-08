@@ -137,6 +137,7 @@ class NearbyService extends ChangeNotifier {
   final Duration hardNegotiationTimeout;
   final Duration connectionAttemptTimeout;
   NearbyReadiness? readiness;
+  NearbyDiagnosticRole _diagnosticRole = NearbyDiagnosticRole.auto;
   NearbyApplicationState? _transition;
   bool _sessionFailed = false;
   String? _readinessSignature;
@@ -213,6 +214,8 @@ class NearbyService extends ChangeNotifier {
   final List<NearbyPeer> discoveredPeers = [];
   final List<String> eventLog = [];
   final Map<String, String> _packetMessageIds = {};
+  final Map<String, Set<String>> _pendingSosAcks = {};
+  final Map<String, String> _sosEventIdsByPacketId = {};
   final Set<String> _pendingConversationFlushes = {};
   final Set<String> _incomingTextMessagesInProgress = {};
   final Map<String, RelioPacket> _mediaMetadataByPayload = {};
@@ -240,6 +243,8 @@ class NearbyService extends ChangeNotifier {
   final Map<String, DateTime> _connectionPhaseStartedAt = {};
   final Map<String, _PendingIdentityChallenge> _identityChallenges = {};
   final Set<String> _completedIdentityHandshakes = {};
+  final Set<String> _nativeAcceptInFlight = {};
+  final Set<String> _incomingSosNotificationClaims = {};
   final Map<String, _AppDisconnectRequest> _appDisconnectRequests = {};
   final Set<String> _automaticConnectionAttempts = {};
   final Map<String, String> _reconnectFingerprintByEndpoint = {};
@@ -274,6 +279,89 @@ class NearbyService extends ChangeNotifier {
   bool _discoveryPausedForNegotiation = false;
 
   NearbyTransportTestMode get transportTestMode => transport.testMode;
+
+  NearbyDiagnosticRole get diagnosticRole => _diagnosticRole;
+
+  Future<void> configureDiagnosticRole(NearbyDiagnosticRole role) async {
+    if (!NearbyTransportTestMode.isAvailableIn(RelioBuildInfo.environment) ||
+        !RelioBuildInfo.developerDiagnosticsEnabled) {
+      throw StateError('Nearby role diagnostics are unavailable.');
+    }
+    if (hasActiveConnectionAttempts || connectedPeers.isNotEmpty) {
+      throw StateError('Finish Nearby connections before changing roles.');
+    }
+    if (compatibilityModeActive) {
+      throw StateError('Disable Bluetooth Classic before changing roles.');
+    }
+
+    // รอ startup reconciliation เดิมก่อน เพื่อไม่ให้มันเปิดอีกฝั่งทับ role QA
+    final pendingStart = _startSessionOperation;
+    if (pendingStart != null) await pendingStart;
+
+    await stopDiscovery();
+    await stopAdvertising();
+    _diagnosticRole = role;
+    switch (role) {
+      case NearbyDiagnosticRole.auto:
+        await startAdvertising();
+        if (isAdvertising) await startDiscovery();
+        break;
+      case NearbyDiagnosticRole.advertiserOnly:
+        await startAdvertising();
+        break;
+      case NearbyDiagnosticRole.discovererOnly:
+        await startDiscovery();
+        break;
+      case NearbyDiagnosticRole.stopped:
+        break;
+    }
+    diagnostics?.record(
+      'nearby',
+      'qa_nearby_role_selected',
+      operation: 'configureDiagnosticRole',
+      fields: {
+        'role': role.name,
+        'advertising': isAdvertising,
+        'discovery': isDiscovering,
+        'strategy': transport.strategyName,
+      },
+    );
+    notifyListeners();
+  }
+
+  bool get compatibilityFallbackAvailable =>
+      transport is CompatibilityTransport;
+
+  bool get compatibilityModeActive =>
+      transport is CompatibilityTransport &&
+      (transport as CompatibilityTransport).compatibilityModeActive;
+
+  bool get _diagnosticRoleReady => switch (_diagnosticRole) {
+    NearbyDiagnosticRole.auto => isAdvertising && isDiscovering,
+    NearbyDiagnosticRole.advertiserOnly => isAdvertising && !isDiscovering,
+    NearbyDiagnosticRole.discovererOnly => isDiscovering && !isAdvertising,
+    NearbyDiagnosticRole.stopped => !isAdvertising && !isDiscovering,
+  };
+
+  Future<void> activateCompatibilityMode({
+    required bool serverRole,
+    bool bondedOnly = false,
+  }) async {
+    if (transport is! CompatibilityTransport) return;
+    await (transport as CompatibilityTransport).activateCompatibilityMode(
+      serverRole: serverRole,
+      bondedOnly: bondedOnly,
+    );
+    _sessionFailed = false;
+    lastError = null;
+    lastErrorCode = null;
+    notifyListeners();
+  }
+
+  Future<List<BondedBluetoothDevice>> bondedBluetoothDevices() async {
+    if (transport is! CompatibilityTransport) return const [];
+    return (transport as CompatibilityTransport).bondedBluetoothDevices();
+  }
 
   Map<String, Object?> _radioSnapshotFields() => {
     'bluetoothEnabled': readiness?.bluetoothEnabled,
@@ -620,6 +708,12 @@ class NearbyService extends ChangeNotifier {
     }
     try {
       _log('advertising start');
+      diagnostics?.record(
+        'nearby',
+        'advertising_start_begin',
+        operation: 'startAdvertising',
+        fields: {'qaRole': _diagnosticRole.name},
+      );
       final localIdentity = await identityCrypto.getPublicIdentity();
       diagnostics?.record(
         'trust',
@@ -636,7 +730,7 @@ class NearbyService extends ChangeNotifier {
         'trust',
         'advertising_started_with_trust_hint',
         operation: 'startAdvertising',
-        fields: {'fingerprintAvailable': true},
+        fields: {'fingerprintAvailable': true, 'qaRole': _diagnosticRole.name},
       );
       _log('advertising started');
       notifyListeners();
@@ -656,7 +750,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> startSession() {
-    if (_closed || (isAdvertising && isDiscovering)) return Future.value();
+    if (_closed || _diagnosticRoleReady) return Future.value();
     if (hasActiveConnectionAttempts) {
       _sessionRestartDeferred = true;
       _recordDeferredSessionOperation(
@@ -679,14 +773,26 @@ class NearbyService extends ChangeNotifier {
     _transition = NearbyApplicationState.starting;
     _sessionFailed = false;
     notifyListeners();
-    await startAdvertising();
-    if (isAdvertising) {
-      await startDiscovery();
-    } else {
-      _log('discovery skipped because advertising did not start');
+    switch (_diagnosticRole) {
+      case NearbyDiagnosticRole.auto:
+        await startAdvertising();
+        if (isAdvertising) {
+          await startDiscovery();
+        } else {
+          _log('discovery skipped because advertising did not start');
+        }
+        break;
+      case NearbyDiagnosticRole.advertiserOnly:
+        await startAdvertising();
+        break;
+      case NearbyDiagnosticRole.discovererOnly:
+        await startDiscovery();
+        break;
+      case NearbyDiagnosticRole.stopped:
+        break;
     }
     _transition = null;
-    if (isAdvertising && isDiscovering) {
+    if (_diagnosticRoleReady) {
       lastError = null;
       lastErrorCode = null;
       lastDiagnostic = null;
@@ -789,6 +895,7 @@ class NearbyService extends ChangeNotifier {
           'discoveryEpoch': transport.discoveryEpoch,
           'transportTestMode': transport.testMode.diagnosticName,
           'strategy': transport.strategyName,
+          'qaRole': _diagnosticRole.name,
         },
       );
       _log('discovery started');
@@ -1265,12 +1372,22 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> _expireConnectionAttempt(String endpointId) async {
     if (peerStates[endpointId] != NearbyConnectionState.connecting) return;
+    diagnostics?.record(
+      'connection',
+      'connection_hard_watchdog_fired',
+      severity: 'error',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'connectionNegotiation',
+      peerIdentifier: endpointId,
+      fields: {'phase': _connectionPhases[endpointId]?.name},
+    );
     final traceId = _connectionTraces[endpointId];
     final softTimeoutElapsed = peerErrors[endpointId] == 'connection_slow';
     final operation = _approvedConnectionEndpoints.contains(endpointId)
         ? 'acceptConnection'
         : 'requestConnection';
     _cancelConnectionTimers(endpointId);
+    _nativeAcceptInFlight.remove(endpointId);
     _userInitiatedEndpoints.remove(endpointId);
     _approvedConnectionEndpoints.remove(endpointId);
     peerErrors[endpointId] = 'connection_hard_timeout';
@@ -1370,6 +1487,16 @@ class NearbyService extends ChangeNotifier {
         !isAutomaticTrustedReconnect) {
       return;
     }
+    if (!_nativeAcceptInFlight.add(endpointId)) {
+      diagnostics?.record(
+        'connection',
+        'duplicate_accept_suppressed',
+        connectionTraceId: _connectionTraces[endpointId],
+        operation: 'acceptConnection',
+        peerIdentifier: endpointId,
+      );
+      return;
+    }
     diagnostics?.record(
       'connection',
       isAutomaticTrustedReconnect
@@ -1418,6 +1545,7 @@ class NearbyService extends ChangeNotifier {
         operation: 'acceptConnection',
       );
     } on Object catch (error) {
+      _nativeAcceptInFlight.remove(endpointId);
       _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'failure';
       _markTransportPhase(endpointId, 'acceptConnectionTaskFailure');
       _finishTransportAttempt(
@@ -1581,24 +1709,157 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> sendSos(RelioSosEvent event, {String? peerId}) async {
     final deviceId = await identity.getDeviceId();
-    await _sendPacket(
-      RelioPacket.sos(
-        senderDeviceId: deviceId,
-        senderUserId: event.ownerUserId.isNotEmpty
-            ? event.ownerUserId
-            : deviceId,
-        displayName: await identity.getDisplayName(),
-        sosId: event.id,
-        message: event.message,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        accuracyMeters: event.locationAccuracy,
-        locationCapturedAt: event.locationCapturedAt,
-        createdAt: event.createdAt,
-        isActive: event.isActive,
-      ),
-      description: 'SOS ${event.id}',
-      peerId: peerId,
+    final displayName = await identity.getDisplayName();
+    final packet = RelioPacket.sos(
+      senderDeviceId: deviceId,
+      senderUserId: event.ownerUserId.isNotEmpty ? event.ownerUserId : deviceId,
+      displayName: displayName,
+      sosId: event.id,
+      message: event.message,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      accuracyMeters: event.locationAccuracy,
+      locationCapturedAt: event.locationCapturedAt,
+      createdAt: event.createdAt,
+      isActive: event.isActive,
+    );
+    final candidates = peerId == null
+        ? connectedPeers
+        : connectedPeers.where((peer) => peer.endpointId == peerId);
+    final targetsByDevice = <String, NearbyPeer>{};
+    for (final peer in candidates) {
+      if (_endpointLifecycle[peer.endpointId]?.isLost == true || peer.isLost) {
+        _recordSosSend(
+          'outbound_send_skipped',
+          eventId: event.id,
+          peer: peer,
+          reason: 'endpoint_lost',
+        );
+        continue;
+      }
+      final relioDeviceId = endpointToDeviceId[peer.endpointId];
+      final identityEstablished =
+          relioDeviceId != null &&
+          relioDeviceId == peer.deviceId &&
+          _completedIdentityHandshakes.contains(peer.endpointId);
+      if (!identityEstablished && transport is! MockNearbyTransport) {
+        _recordSosSend(
+          'outbound_send_skipped',
+          eventId: event.id,
+          peer: peer,
+          reason: 'identity_not_established',
+        );
+        continue;
+      }
+      final key = relioDeviceId ?? peer.deviceId ?? peer.endpointId;
+      final previous = targetsByDevice[key];
+      if (previous == null ||
+          (!previous.endpointId.startsWith('classic:') &&
+              peer.endpointId.startsWith('classic:'))) {
+        targetsByDevice[key] = peer;
+      }
+    }
+
+    final targets = targetsByDevice.values.toList(growable: false);
+    if (targets.isEmpty) {
+      _recordSosSend(
+        'outbound_send_failed',
+        eventId: event.id,
+        reason: 'no_established_peer',
+      );
+      _fail('ส่ง SOS ไม่สำเร็จ: ไม่พบ peer ที่เชื่อมต่อและยืนยันตัวตนแล้ว');
+      return;
+    }
+
+    _pendingSosAcks[packet.packetId] = targets
+        .map((peer) => endpointToDeviceId[peer.endpointId] ?? peer.deviceId)
+        .whereType<String>()
+        .toSet();
+    _sosEventIdsByPacketId[packet.packetId] = event.id;
+    var successes = 0;
+    final failures = <String>[];
+    for (final peer in targets) {
+      final transportName = peer.endpointId.startsWith('classic:')
+          ? 'RFCOMM'
+          : 'Nearby';
+      _recordSosSend(
+        'outbound_send_start',
+        eventId: event.id,
+        peer: peer,
+        transportName: transportName,
+      );
+      try {
+        await transport.sendBytes(packet.toBytes(), peerId: peer.endpointId);
+        successes++;
+        _recordSosSend(
+          'outbound_send_success',
+          eventId: event.id,
+          peer: peer,
+          transportName: transportName,
+        );
+        _log(
+          'SOS send success event=${event.id} '
+          'peer=${peer.deviceId ?? 'unknown'} transport=$transportName',
+        );
+      } on Object catch (error) {
+        final relioDeviceId = endpointToDeviceId[peer.endpointId];
+        if (relioDeviceId != null) {
+          _pendingSosAcks[packet.packetId]?.remove(relioDeviceId);
+        }
+        final code = _errorCode(error);
+        failures.add('${peer.endpointId}:$code');
+        _recordSosSend(
+          'outbound_send_failure',
+          eventId: event.id,
+          peer: peer,
+          transportName: transportName,
+          reason: code,
+        );
+        _log(
+          'SOS send failure event=${event.id} '
+          'peer=${peer.deviceId ?? 'unknown'} transport=$transportName code=$code',
+        );
+      }
+    }
+    if (successes == 0) {
+      _pendingSosAcks.remove(packet.packetId);
+      _sosEventIdsByPacketId.remove(packet.packetId);
+      _fail('ส่ง SOS ไม่สำเร็จ: ทุก peer ที่เชื่อมต่อปฏิเสธ packet');
+      return;
+    }
+    lastSentPacket = _diagnosticPacket(packet);
+    _log(
+      'ส่ง SOS ${event.id} สำเร็จ $successes/${targets.length}'
+      '${failures.isEmpty ? '' : ' failed=${failures.length}'}',
+    );
+    notifyListeners();
+  }
+
+  void _recordSosSend(
+    String event, {
+    required String eventId,
+    NearbyPeer? peer,
+    String? transportName,
+    String? reason,
+  }) {
+    diagnostics?.record(
+      'sos',
+      event,
+      severity: event.endsWith('failure') ? 'error' : 'info',
+      connectionTraceId: peer == null
+          ? null
+          : _connectionTraces[peer.endpointId],
+      operation: 'sendSos',
+      peerIdentifier: peer?.endpointId,
+      reason: reason,
+      fields: {
+        'sosEventId': eventId,
+        'remoteRelioDeviceId': peer == null
+            ? null
+            : endpointToDeviceId[peer.endpointId] ?? peer.deviceId,
+        'transport': transportName,
+        'sessionState': peer == null ? null : peerStates[peer.endpointId]?.name,
+      },
     );
   }
 
@@ -1986,7 +2247,26 @@ class NearbyService extends ChangeNotifier {
     if (index == -1) {
       discoveredPeers.add(peer);
     } else {
-      discoveredPeers[index] = peer;
+      final previous = discoveredPeers[index];
+      // Transport refresh callbacks describe an endpoint, not the authenticated
+      // RELIO identity. Keep handshake-owned fields across a metadata refresh.
+      discoveredPeers[index] = NearbyPeer(
+        id: peer.endpointId,
+        name: peer.name,
+        connected:
+            peer.connected ||
+            peerStates[peer.endpointId] == NearbyConnectionState.connected,
+        deviceId: peer.deviceId ?? previous.deviceId,
+        identityFingerprintHint:
+            peer.identityFingerprintHint ?? previous.identityFingerprintHint,
+        capabilities: peer.capabilities.isEmpty
+            ? previous.capabilities
+            : peer.capabilities,
+        discoveryEpoch: peer.discoveryEpoch,
+        foundAt: peer.foundAt,
+        lastSeenAt: peer.lastSeenAt,
+        isCurrent: peer.isCurrent,
+      );
     }
     final activeAttempt = _activeTransportAttempts[peer.endpointId];
     if (activeAttempt != null) {
@@ -2072,6 +2352,17 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _maybeReconnect(NearbyPeer peer) async {
+    if (_diagnosticRole != NearbyDiagnosticRole.auto) {
+      diagnostics?.record(
+        'trust',
+        'auto_reconnect_suppressed',
+        operation: 'candidateLookup',
+        peerIdentifier: peer.endpointId,
+        reason: 'qa_role_control_active',
+        fields: {'qaRole': _diagnosticRole.name},
+      );
+      return;
+    }
     if (peerStates[peer.endpointId] == NearbyConnectionState.connected ||
         peerStates[peer.endpointId] == NearbyConnectionState.connecting ||
         peerStates[peer.endpointId] == NearbyConnectionState.incomingRequest ||
@@ -2234,15 +2525,79 @@ class NearbyService extends ChangeNotifier {
 
   void _onConnection(NearbyConnectionEvent event) {
     final endpointId = event.peer.endpointId;
+    if (event.state == NearbyConnectionState.failed &&
+        event.rawStatusCode == 8003) {
+      diagnostics?.record(
+        'connection',
+        'already_connected_status_reconciled',
+        connectionTraceId:
+            event.connectionTraceId ?? _connectionTraces[endpointId],
+        operation: event.operation ?? 'onConnectionResult',
+        peerIdentifier: endpointId,
+        nativeCode: event.rawStatusCode,
+        reason: 'native_endpoint_already_connected',
+      );
+      // 8003 ยืนยันว่า endpoint เชื่อมต่ออยู่แล้ว จึงเริ่ม identity handshake ต่อ
+      // โดยไม่เปิดทางส่งข้อมูล RELIO จนกว่า peer จะผ่านการยืนยันตัวตน
+      if (peerStates[endpointId] == NearbyConnectionState.connected) return;
+      _onConnection(
+        NearbyConnectionEvent(
+          peer: NearbyPeer(
+            id: endpointId,
+            name: event.peer.name,
+            connected: true,
+            deviceId: event.peer.deviceId ?? endpointToDeviceId[endpointId],
+            identityFingerprintHint: event.peer.identityFingerprintHint,
+          ),
+          state: NearbyConnectionState.connected,
+          rawStatusCode: event.rawStatusCode,
+          rawStatusName:
+              event.rawStatusName ?? 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
+          rawStatusMessage: event.rawStatusMessage,
+          operation: event.operation ?? 'onConnectionResult',
+          role: event.role,
+          connectionTraceId: event.connectionTraceId,
+        ),
+      );
+      return;
+    }
     if (event.state == NearbyConnectionState.connected ||
         event.state == NearbyConnectionState.failed ||
         event.state == NearbyConnectionState.disconnected) {
       // ยกเลิก timer ก่อนบันทึก callback เพื่อไม่ให้ native failure
       // แข่งกับ soft timeout เก่าแล้วถูกระบุสาเหตุผิด
       _cancelConnectionTimers(endpointId);
+      _nativeAcceptInFlight.remove(endpointId);
     }
     if (event.connectionTraceId != null) {
       _connectionTraces.putIfAbsent(endpointId, () => event.connectionTraceId!);
+    }
+    if (event.state == NearbyConnectionState.connected ||
+        event.state == NearbyConnectionState.failed ||
+        event.state == NearbyConnectionState.disconnected) {
+      final traceId = _connectionTraces.putIfAbsent(
+        endpointId,
+        () => const Uuid().v4(),
+      );
+      diagnostics?.record(
+        'connection',
+        'transport_connection_state',
+        connectionTraceId: traceId,
+        operation: event.operation ?? 'connectionEvent',
+        stateFrom: peerStates[endpointId]?.name ?? 'unknown',
+        stateTo: event.state.name,
+        peerIdentifier: endpointId,
+        fields: {
+          'role':
+              event.role ??
+              (event.isIncomingRequest ? 'responder' : 'initiator'),
+          'remoteBluetoothAddress': endpointId.startsWith('classic:')
+              ? endpointId.substring('classic:'.length)
+              : null,
+          'remoteRelioDeviceId': endpointToDeviceId[endpointId],
+          'sessionId': traceId,
+        },
+      );
     }
     if (event.state == NearbyConnectionState.incomingRequest) {
       final traceId = _connectionTraces.putIfAbsent(
@@ -2272,6 +2627,9 @@ class NearbyService extends ChangeNotifier {
         stateTo: 'incomingRequest',
         peerIdentifier: endpointId,
         fields: {
+          'qaRole': _diagnosticRole.name,
+          'callbackRole': event.isIncomingRequest ? 'responder' : 'initiator',
+          'userInitiatedAttempt': _userInitiatedEndpoints.contains(endpointId),
           ..._radioSnapshotFields(),
           'fingerprintHintAvailable':
               event.peer.identityFingerprintHint != null,
@@ -2320,6 +2678,31 @@ class NearbyService extends ChangeNotifier {
           'resolvedHintAvailable': fingerprint != null,
         },
       );
+      // A manual Connect tap is explicit consent to complete Nearby's
+      // bilateral transport acceptance; identity proof still gates RELIO use.
+      final initiatorAttemptIsConnecting =
+          peerStates[endpointId] == NearbyConnectionState.connecting;
+      if (!event.isIncomingRequest &&
+          (_userInitiatedEndpoints.contains(endpointId) ||
+              initiatorAttemptIsConnecting)) {
+        diagnostics?.record(
+          'connection',
+          'initiator_accepting_connection_initiated',
+          connectionTraceId: traceId,
+          operation: 'acceptConnection',
+          peerIdentifier: endpointId,
+          fields: {
+            'qaRole': _diagnosticRole.name,
+            'userInitiatedEndpointTracked': _userInitiatedEndpoints.contains(
+              endpointId,
+            ),
+            'connectingAtCallback': initiatorAttemptIsConnecting,
+          },
+        );
+        _approvedConnectionEndpoints.add(endpointId);
+        _track(acceptConnectionRequest(endpointId));
+        return;
+      }
       if (fingerprint != null) {
         final reservedEndpoint = _fingerprintEndpointReservations[fingerprint];
         if (reservedEndpoint != null && reservedEndpoint != endpointId) {
@@ -2777,6 +3160,16 @@ class NearbyService extends ChangeNotifier {
       );
       return;
     }
+    if (!_nativeAcceptInFlight.add(endpointId)) {
+      diagnostics?.record(
+        'connection',
+        'duplicate_accept_suppressed',
+        connectionTraceId: _connectionTraces[endpointId],
+        operation: 'acceptConnection',
+        peerIdentifier: endpointId,
+      );
+      return;
+    }
     _provisionalConnectionEndpoints.add(endpointId);
     _provisionalIncomingRequests[endpointId] = event;
     peerStates[endpointId] = NearbyConnectionState.connecting;
@@ -2821,6 +3214,7 @@ class NearbyService extends ChangeNotifier {
         operation: 'acceptConnection',
       );
     } on Object catch (error) {
+      _nativeAcceptInFlight.remove(endpointId);
       _activeTransportAttempts[endpointId]?['acceptTaskResult'] = 'failure';
       _markTransportPhase(endpointId, 'acceptConnectionTaskFailure');
       _finishTransportAttempt(
@@ -3411,6 +3805,23 @@ class NearbyService extends ChangeNotifier {
     _pendingVerifiedIdentityApprovals.remove(endpointId);
     _pendingIdentityApprovalReasons.remove(endpointId);
     peerStates[endpointId] = NearbyConnectionState.connected;
+    diagnostics?.record(
+      'connection',
+      'relio_identity_session_established',
+      connectionTraceId: _connectionTraces[endpointId],
+      operation: 'identityProof',
+      stateFrom: 'verifyingIdentity',
+      stateTo: NearbyConnectionState.connected.name,
+      peerIdentifier: endpointId,
+      fields: {
+        'role': _activeTransportAttempts[endpointId]?['role'],
+        'remoteBluetoothAddress': endpointId.startsWith('classic:')
+            ? endpointId.substring('classic:'.length)
+            : null,
+        'remoteRelioDeviceId': deviceId,
+        'sessionId': _connectionTraces[endpointId],
+      },
+    );
     _reconnectFingerprintByEndpoint.remove(endpointId);
     final fingerprint = pending.fingerprint;
     _automaticConnectionAttempts.remove(fingerprint);
@@ -3418,7 +3829,7 @@ class NearbyService extends ChangeNotifier {
     _nextReconnectAt.remove(fingerprint);
     _reconnectAttemptCounts.remove(fingerprint);
     final conversationId = await _conversationIdForDevice(deviceId, deviceId);
-    await conversations.ensureConversation(
+    final conversation = await conversations.ensureConversation(
       id: conversationId,
       participantId: deviceId,
       displayName: payload['displayName']! as String,
@@ -3430,7 +3841,7 @@ class NearbyService extends ChangeNotifier {
     _recordIdentityStage(endpointId, 'identity_handshake_completed');
     _recordIdentityStage(endpointId, 'identity_hello_sent');
     await sendHello(peerId: endpointId);
-    _track(_flushPendingMessages(conversationId));
+    _track(_flushPendingMessages(conversation.id));
     final active = await sos?.readActive(
       ownerDeviceId: await identity.getDeviceId(),
     );
@@ -3547,7 +3958,7 @@ class NearbyService extends ChangeNotifier {
         case RelioPacketType.deviceStatus:
           await _handleDeviceStatus(packet);
         case RelioPacketType.ack:
-          await _handleAck(packet);
+          await _handleAck(event.peerId, packet);
         case RelioPacketType.sos:
           await _handleSos(event.peerId, packet);
         case RelioPacketType.mediaMetadata:
@@ -3687,14 +4098,14 @@ class NearbyService extends ChangeNotifier {
         packet.senderDeviceId,
         packet.senderDeviceId,
       );
-      await conversations.ensureConversation(
+      final conversation = await conversations.ensureConversation(
         id: conversationId,
         participantId: packet.senderDeviceId,
         displayName: _peerName(file.peerId, packet.senderUserId),
         participantStatus: DeviceStatus.normal,
       );
       final message = await messages.createIncomingMedia(
-        conversationId: conversationId,
+        conversationId: conversation.id,
         senderId: packet.senderUserId,
         senderDeviceId: packet.senderDeviceId,
         messageId: payload['messageId']! as String,
@@ -3706,6 +4117,7 @@ class NearbyService extends ChangeNotifier {
       if (await attachments!.getById(attachmentId) == null) {
         await attachments!.createPending(
           id: attachmentId,
+          conversationId: conversation.id,
           messageId: message.id,
           transferId: payload['transferId']! as String,
           mediaType: _mediaType(payload['mediaType']! as String),
@@ -3716,13 +4128,13 @@ class NearbyService extends ChangeNotifier {
         );
       }
       await attachments!.markCompleted(attachmentId, localPath: storedPath);
-      await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+      await _markIncomingReadIfVisible(conversation.id, packet.senderDeviceId);
       if (existingMessage == null) {
         await _notifyIncoming(
           id: payload['messageId']! as String,
           title: _peerName(file.peerId, packet.senderUserId),
           preview: payload['mediaType'] == 'video' ? 'ส่งวิดีโอ' : 'ส่งรูปภาพ',
-          route: '/chat/$conversationId',
+          route: '/chat/${conversation.id}',
         );
       }
       _recordMediaStage(
@@ -3777,14 +4189,14 @@ class NearbyService extends ChangeNotifier {
       packet.senderDeviceId,
       payload['conversationId']! as String,
     );
-    await conversations.ensureConversation(
+    final conversation = await conversations.ensureConversation(
       id: conversationId,
       participantId: packet.senderDeviceId,
       displayName: _peerName(endpointId, packet.senderUserId),
       participantStatus: DeviceStatus.normal,
     );
     await messages.createIncomingLocation(
-      conversationId: conversationId,
+      conversationId: conversation.id,
       senderId: packet.senderUserId,
       senderDeviceId: packet.senderDeviceId,
       messageId: payload['messageId']! as String,
@@ -3796,11 +4208,11 @@ class NearbyService extends ChangeNotifier {
         source: 'nearby',
       ),
     );
-    await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+    await _markIncomingReadIfVisible(conversation.id, packet.senderDeviceId);
     await _notifyIncoming(
       id: packet.payload['messageId']! as String,
       title: 'ได้รับตำแหน่งใหม่',
-      route: '/chat/$conversationId',
+      route: '/chat/${conversation.id}',
     );
     await _sendAck(endpointId, packet);
   }
@@ -3940,7 +4352,7 @@ class NearbyService extends ChangeNotifier {
       packet.senderDeviceId,
       packet.senderDeviceId,
     );
-    await conversations.ensureConversation(
+    final conversation = await conversations.ensureConversation(
       id: conversationId,
       participantId: packet.senderDeviceId,
       displayName: displayName,
@@ -3960,7 +4372,7 @@ class NearbyService extends ChangeNotifier {
     if (identityCrypto is MockPeerIdentityCrypto) {
       _recordIdentityStage(endpointId, 'identity_handshake_completed');
     }
-    _track(_flushPendingMessages(conversationId));
+    _track(_flushPendingMessages(conversation.id));
     _log(
       'peer established: endpoint ${DiagnosticsLogService.peerAlias(endpointId)} '
       '↔ ${DiagnosticsLogService.peerAlias(packet.senderDeviceId)}',
@@ -4024,26 +4436,26 @@ class NearbyService extends ChangeNotifier {
         packet.senderDeviceId,
         packet.payload['conversationId']! as String,
       );
-      await conversations.ensureConversation(
+      final conversation = await conversations.ensureConversation(
         id: conversationId,
         participantId: packet.senderDeviceId,
         displayName: _peerName(endpointId, packet.senderUserId),
         participantStatus: DeviceStatus.normal,
       );
       await messages.createIncomingText(
-        conversationId: conversationId,
+        conversationId: conversation.id,
         senderId: packet.senderUserId,
         senderDeviceId: packet.senderDeviceId,
         messageId: messageId,
         text: packet.payload['text']! as String,
         createdAt: DateTime.parse(packet.payload['timestamp']! as String),
       );
-      await _markIncomingReadIfVisible(conversationId, packet.senderDeviceId);
+      await _markIncomingReadIfVisible(conversation.id, packet.senderDeviceId);
       await _notifyIncoming(
         id: messageId,
         title: _peerName(endpointId, packet.senderUserId),
         preview: packet.payload['text']! as String,
-        route: '/chat/$conversationId',
+        route: '/chat/${conversation.id}',
       );
       await _sendAck(endpointId, packet);
     } finally {
@@ -4068,17 +4480,55 @@ class NearbyService extends ChangeNotifier {
     );
   }
 
-  Future<void> _handleAck(RelioPacket packet) async {
+  Future<void> _handleAck(String endpointId, RelioPacket packet) async {
+    final acknowledgedPacketId = packet.payload['packetId']! as String;
     final messageId =
         packet.payload['messageId'] as String? ??
-        _packetMessageIds[packet.payload['packetId']];
-    if (messageId == null) return;
-    final message = await messages.getMessage(messageId);
-    if (message == null || message.status == DeliveryStatus.delivered) return;
-    await messages.updateDeliveryStatus(messageId, DeliveryStatus.delivered);
+        _packetMessageIds[acknowledgedPacketId];
+    if (messageId != null) {
+      final message = await messages.getMessage(messageId);
+      if (message == null || message.status == DeliveryStatus.delivered) return;
+      await messages.updateDeliveryStatus(messageId, DeliveryStatus.delivered);
+      acknowledgementCount += 1;
+      _log('ACK message delivered');
+      _log('รับ ACK ของข้อความ $messageId');
+      return;
+    }
+
+    final expectedPeers = _pendingSosAcks[acknowledgedPacketId];
+    final senderDeviceId = endpointToDeviceId[endpointId];
+    if (expectedPeers == null ||
+        senderDeviceId == null ||
+        !expectedPeers.remove(senderDeviceId)) {
+      return;
+    }
+    if (expectedPeers.isEmpty) {
+      _pendingSosAcks.remove(acknowledgedPacketId);
+    }
     acknowledgementCount += 1;
-    _log('ACK message delivered');
-    _log('รับ ACK ของข้อความ $messageId');
+    final sosEventId = _sosEventIdsByPacketId[acknowledgedPacketId];
+    final transportName = endpointId.startsWith('classic:')
+        ? 'RFCOMM'
+        : 'Nearby';
+    _recordSosSend(
+      'outbound_ack_received',
+      eventId: sosEventId ?? acknowledgedPacketId,
+      peer: NearbyPeer(
+        id: endpointId,
+        name: _peerName(endpointId, senderDeviceId),
+        connected: peerStates[endpointId] == NearbyConnectionState.connected,
+        deviceId: senderDeviceId,
+      ),
+      transportName: transportName,
+    );
+    _log(
+      'SOS ACK received event=${sosEventId ?? 'unknown'} '
+      'packet=$acknowledgedPacketId '
+      'peer=$senderDeviceId transport=$transportName',
+    );
+    if (expectedPeers.isEmpty) {
+      _sosEventIdsByPacketId.remove(acknowledgedPacketId);
+    }
   }
 
   Future<void> sendReadReceipt({
@@ -4112,8 +4562,10 @@ class NearbyService extends ChangeNotifier {
       return;
     }
     final payload = packet.payload;
+    final sosId = payload['sosId']! as String;
+    final existingEvent = await sos!.getById(sosId);
     final event = await sos!.createIncoming(
-      id: payload['sosId']! as String,
+      id: sosId,
       ownerDeviceId: payload['ownerDeviceId']! as String,
       ownerUserId: payload['ownerUserId']! as String,
       message: payload['message'] as String?,
@@ -4128,7 +4580,9 @@ class NearbyService extends ChangeNotifier {
     );
     final displayName = payload['displayName']! as String;
     final status = event.isActive ? DeviceStatus.sos : DeviceStatus.normal;
-    if (event.isActive) {
+    if (event.isActive &&
+        existingEvent == null &&
+        _incomingSosNotificationClaims.add(event.id)) {
       await _notifyIncoming(
         id: event.id,
         title: displayName,

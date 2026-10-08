@@ -20,6 +20,15 @@ Cloud states are `notConfigured`, `signedOut`, `ready`, `offline`, and `error`.
 Signing out immediately prevents account-bound claims and uploads; it never
 deletes local SQLite, queue rows, owner IDs, or RELIO-managed media.
 
+Account deletion is separate from sign-out. The authenticated Edge Function
+replaces the account's sign-in identity with an inaccessible, banned tombstone,
+removes personal profile details, device registrations, push tokens, SOS and
+rescue state, reports, and read receipts. It preserves shared conversations,
+messages, memberships, and attachments so another participant's history is
+not erased; the profile name becomes `บัญชีที่ลบแล้ว`. This retained UUID is an
+opaque foreign-key anchor, not a usable account. No service-role credential is
+sent to the app.
+
 ## Ownership gate
 
 Every queue row has a nullable `ownerUserId`. A non-null row is eligible only
@@ -33,6 +42,13 @@ Message, SOS, and attachment work uses the same gate. An attachment also waits
 for its parent message and metadata operation, and its private Storage path is
 derived from the verified current user ID. Exact SOS coordinates and message
 content are not written to ordinary diagnostics.
+
+Local conversations are scoped to the active Cloud account in SQLite. A single
+phone can therefore keep separate Nearby histories for different accounts;
+account IDs are stored in a local scope table and are never embedded in Nearby
+conversation IDs. Existing conversations with no reliable owner remain Guest
+data until the user explicitly adopts them. The adoption action moves Guest
+conversation scopes along with eligible offline queue rows.
 
 Retries, stale-processing recovery, account switches, and app restarts retain
 the original owner. A retry always re-checks the current identity before the
