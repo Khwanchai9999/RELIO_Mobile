@@ -400,3 +400,28 @@ redacted diagnostics ZIP from both devices and retain the reported native status
 code/name, role, strategy, elapsed time, and Google Play Services version. Do
 not continue into chat/media/reconnect testing until native transport succeeds.
 The development agent does not install or physically test Build 31.
+
+## U. Nearby Map and peer Battery — BUILD 38 PHYSICAL ACCEPTANCE
+
+Run on Huawei Y9s `YDVNW19B23003867` and Samsung Galaxy S9+
+`22add16c2b027ece`, using the approved QA build. Preserve app data; install via
+`adb install -r`. Do not clear storage or infer device behavior from emulator,
+widget, or packet tests.
+
+With Wi-Fi and Bluetooth enabled, open Nearby on both phones and verify the
+canonical names and battery/charging labels cross over only after verified
+identity. Switch Map ↔ List, collapse/expand controls, use All/SOS/Rescue
+filters, refresh Internet status, and run manual discovery. Tap a peer marker
+and verify its detail sheet, battery freshness, location age, straight-line
+distance/bearing, and connected-peer Chat action. Verify Rescue is blue and SOS
+red, with SOS precedence, then return through BLUE → NORMAL after clearing the
+states. A location marker is expected only after that peer explicitly shares a
+one-shot location; denied permission/GPS-off must leave Nearby usable.
+
+Finally test map style/network failure using a safe reversible network outage
+or a QA-only invalid style override. The unavailable map state must leave List,
+discovery, chat, SOS, Rescue, battery, and Nearby location transport usable.
+Restore networking/configuration and verify map retry. Record Android 10
+rendering, crashes/ANR, battery update volume, and `dumpsys meminfo`; do not put
+coordinates or private diagnostics in this document. Physical acceptance is
+pending until each phone and cross-device check is recorded with evidence.

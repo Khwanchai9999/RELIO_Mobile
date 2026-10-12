@@ -69,14 +69,21 @@ physically verified: Build 33 still requires the two-phone checklist.
 - Foreground Nearby starts advertising and discovery when readiness is met,
   retries after resume/radio changes, and shows Thai blockers. Wi-Fi off is
   reported as reduced capability while P2P_CLUSTER can continue over Bluetooth.
-- Nearby device list with All, SOS, Rescue, and Normal filters
+- Map-first Nearby screen with lazy MapLibre rendering, a collapsible status
+  panel, Map/List switching, All/SOS/Rescue filters, and manual discovery
+- Peer battery and optional last-known location metadata flow through the
+  verified `hello`/`deviceStatus` handshake and repository-backed peer records;
+  unknown battery/location remain unknown rather than simulated
+- One-shot current-location sharing from an explicit Nearby Map action, with
+  last-known peer markers, freshness warnings, straight-line distance/bearing,
+  and connected-peer-only Chat actions
 - Seeded peers are marked and grouped as `DEMO`; actual peers use transport
   discovery and a hello handshake before stable device identity is accepted
 - Nearby discovery/advertising/connect/disconnect coordination with explicit
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 7 with conversations, persistent unread/read
+- Drift database schema version 9 with conversations, persistent unread/read
   state, trusted/blocked peer metadata, messages, attachments,
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables
@@ -106,8 +113,9 @@ physically verified: Build 33 still requires the two-phone checklist.
   idempotence, and user retry
 - RELIO-owned media storage, MIME/signature validation, bounded image/video
   policy, native Nearby file payloads, progress, completion ACK, and retry
-- On-demand LocationService for location messages and SOS, with current/last
-  known fallback and bounded timeout; no background tracking
+- On-demand LocationService for location messages, SOS, and explicit Nearby Map
+  location sharing, with current/last-known fallback and bounded timeout; no
+  background tracking
 - Local SOS packet receive/deduplication/deactivation and Rescue status
   propagation; status precedence is SOS > Rescue > Normal
 - Permission service architecture and Android Nearby-related declarations

@@ -72,6 +72,14 @@ class NearbyDevices extends Table {
       boolean().withDefault(const Constant(false))();
   TextColumn get publicIdentityKey => text().nullable()();
   TextColumn get publicIdentityFingerprint => text().nullable()();
+  IntColumn get batteryLevel => integer().nullable()();
+  BoolColumn get isCharging => boolean().nullable()();
+  DateTimeColumn get batteryUpdatedAt => dateTime().nullable()();
+  RealColumn get peerLatitude => real().nullable()();
+  RealColumn get peerLongitude => real().nullable()();
+  RealColumn get peerLocationAccuracy => real().nullable()();
+  DateTimeColumn get peerLocationCapturedAt => dateTime().nullable()();
+  TextColumn get peerDeviceModel => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {deviceId};
@@ -204,7 +212,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -285,6 +293,22 @@ class AppDatabase extends _$AppDatabase {
           GROUP BY messages.conversation_id
           HAVING COUNT(DISTINCT sync_queue.owner_user_id) = 1
         ''');
+      }
+      if (from < 9) {
+        await migrator.addColumn(nearbyDevices, nearbyDevices.batteryLevel);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.isCharging);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.batteryUpdatedAt);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.peerLatitude);
+        await migrator.addColumn(nearbyDevices, nearbyDevices.peerLongitude);
+        await migrator.addColumn(
+          nearbyDevices,
+          nearbyDevices.peerLocationAccuracy,
+        );
+        await migrator.addColumn(
+          nearbyDevices,
+          nearbyDevices.peerLocationCapturedAt,
+        );
+        await migrator.addColumn(nearbyDevices, nearbyDevices.peerDeviceModel);
       }
     },
     beforeOpen: (OpeningDetails details) async {

@@ -12,6 +12,7 @@ import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
 import 'cloud/supabase_cloud_data_source.dart';
 import 'diagnostics/diagnostics_log_service.dart';
+import 'device/battery_info_service.dart';
 import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
 import 'notifications/local_notification_service.dart';
@@ -34,6 +35,7 @@ class RelioDependencies {
     NearbyTransport? transport,
     bool? useMockTransport,
     LocationService? locationService,
+    BatteryInfoService? batteryInfoService,
     MediaStorageService? mediaStorage,
     ProfileAvatarRepository? profileAvatarRepository,
     LocalNotificationSink? localNotificationSink,
@@ -70,6 +72,8 @@ class RelioDependencies {
             : FakeLocationService(
                 const LocationResult.failure(LocationFailure.unavailable),
               ));
+    this.batteryInfoService =
+        batteryInfoService ?? (_isAndroid ? BatteryPlusInfoService() : null);
     mediaStorageService = mediaStorage ?? MediaStorageService();
     localNotificationService =
         localNotificationSink ??
@@ -120,6 +124,7 @@ class RelioDependencies {
       localNotifications: localNotificationService,
       relayEngine: relayEngine,
       diagnostics: diagnostics,
+      batteryInfo: this.batteryInfoService,
       connectionAttemptTimeout: connectionAttemptTimeout,
       incomingApprovalTimeout: incomingApprovalTimeout,
       hardNegotiationTimeout: hardNegotiationTimeout,
@@ -143,6 +148,7 @@ class RelioDependencies {
   final bool useMockTransport;
   late final ConnectivityStatusService connectivityStatus;
   late final DiagnosticsLogService diagnostics;
+  late final BatteryInfoService? batteryInfoService;
   late final RelioRepositories repositories;
   late final RelioDeviceIdentityRepository identity;
   late final ProfileAvatarRepository profileAvatarRepository;

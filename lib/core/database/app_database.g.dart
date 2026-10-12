@@ -2447,6 +2447,98 @@ class $NearbyDevicesTable extends NearbyDevices
         type: DriftSqlType.string,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _batteryLevelMeta = const VerificationMeta(
+    'batteryLevel',
+  );
+  @override
+  late final GeneratedColumn<int> batteryLevel = GeneratedColumn<int>(
+    'battery_level',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _isChargingMeta = const VerificationMeta(
+    'isCharging',
+  );
+  @override
+  late final GeneratedColumn<bool> isCharging = GeneratedColumn<bool>(
+    'is_charging',
+    aliasedName,
+    true,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_charging" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _batteryUpdatedAtMeta = const VerificationMeta(
+    'batteryUpdatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> batteryUpdatedAt =
+      GeneratedColumn<DateTime>(
+        'battery_updated_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _peerLatitudeMeta = const VerificationMeta(
+    'peerLatitude',
+  );
+  @override
+  late final GeneratedColumn<double> peerLatitude = GeneratedColumn<double>(
+    'peer_latitude',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _peerLongitudeMeta = const VerificationMeta(
+    'peerLongitude',
+  );
+  @override
+  late final GeneratedColumn<double> peerLongitude = GeneratedColumn<double>(
+    'peer_longitude',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _peerLocationAccuracyMeta =
+      const VerificationMeta('peerLocationAccuracy');
+  @override
+  late final GeneratedColumn<double> peerLocationAccuracy =
+      GeneratedColumn<double>(
+        'peer_location_accuracy',
+        aliasedName,
+        true,
+        type: DriftSqlType.double,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _peerLocationCapturedAtMeta =
+      const VerificationMeta('peerLocationCapturedAt');
+  @override
+  late final GeneratedColumn<DateTime> peerLocationCapturedAt =
+      GeneratedColumn<DateTime>(
+        'peer_location_captured_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _peerDeviceModelMeta = const VerificationMeta(
+    'peerDeviceModel',
+  );
+  @override
+  late final GeneratedColumn<String> peerDeviceModel = GeneratedColumn<String>(
+    'peer_device_model',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     deviceId,
@@ -2460,6 +2552,14 @@ class $NearbyDevicesTable extends NearbyDevices
     autoReconnectEnabled,
     publicIdentityKey,
     publicIdentityFingerprint,
+    batteryLevel,
+    isCharging,
+    batteryUpdatedAt,
+    peerLatitude,
+    peerLongitude,
+    peerLocationAccuracy,
+    peerLocationCapturedAt,
+    peerDeviceModel,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -2568,6 +2668,75 @@ class $NearbyDevicesTable extends NearbyDevices
         ),
       );
     }
+    if (data.containsKey('battery_level')) {
+      context.handle(
+        _batteryLevelMeta,
+        batteryLevel.isAcceptableOrUnknown(
+          data['battery_level']!,
+          _batteryLevelMeta,
+        ),
+      );
+    }
+    if (data.containsKey('is_charging')) {
+      context.handle(
+        _isChargingMeta,
+        isCharging.isAcceptableOrUnknown(data['is_charging']!, _isChargingMeta),
+      );
+    }
+    if (data.containsKey('battery_updated_at')) {
+      context.handle(
+        _batteryUpdatedAtMeta,
+        batteryUpdatedAt.isAcceptableOrUnknown(
+          data['battery_updated_at']!,
+          _batteryUpdatedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('peer_latitude')) {
+      context.handle(
+        _peerLatitudeMeta,
+        peerLatitude.isAcceptableOrUnknown(
+          data['peer_latitude']!,
+          _peerLatitudeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('peer_longitude')) {
+      context.handle(
+        _peerLongitudeMeta,
+        peerLongitude.isAcceptableOrUnknown(
+          data['peer_longitude']!,
+          _peerLongitudeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('peer_location_accuracy')) {
+      context.handle(
+        _peerLocationAccuracyMeta,
+        peerLocationAccuracy.isAcceptableOrUnknown(
+          data['peer_location_accuracy']!,
+          _peerLocationAccuracyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('peer_location_captured_at')) {
+      context.handle(
+        _peerLocationCapturedAtMeta,
+        peerLocationCapturedAt.isAcceptableOrUnknown(
+          data['peer_location_captured_at']!,
+          _peerLocationCapturedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('peer_device_model')) {
+      context.handle(
+        _peerDeviceModelMeta,
+        peerDeviceModel.isAcceptableOrUnknown(
+          data['peer_device_model']!,
+          _peerDeviceModelMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -2621,6 +2790,38 @@ class $NearbyDevicesTable extends NearbyDevices
         DriftSqlType.string,
         data['${effectivePrefix}public_identity_fingerprint'],
       ),
+      batteryLevel: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}battery_level'],
+      ),
+      isCharging: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_charging'],
+      ),
+      batteryUpdatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}battery_updated_at'],
+      ),
+      peerLatitude: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}peer_latitude'],
+      ),
+      peerLongitude: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}peer_longitude'],
+      ),
+      peerLocationAccuracy: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}peer_location_accuracy'],
+      ),
+      peerLocationCapturedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}peer_location_captured_at'],
+      ),
+      peerDeviceModel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_device_model'],
+      ),
     );
   }
 
@@ -2642,6 +2843,14 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
   final bool autoReconnectEnabled;
   final String? publicIdentityKey;
   final String? publicIdentityFingerprint;
+  final int? batteryLevel;
+  final bool? isCharging;
+  final DateTime? batteryUpdatedAt;
+  final double? peerLatitude;
+  final double? peerLongitude;
+  final double? peerLocationAccuracy;
+  final DateTime? peerLocationCapturedAt;
+  final String? peerDeviceModel;
   const NearbyDevice({
     required this.deviceId,
     required this.displayName,
@@ -2654,6 +2863,14 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     required this.autoReconnectEnabled,
     this.publicIdentityKey,
     this.publicIdentityFingerprint,
+    this.batteryLevel,
+    this.isCharging,
+    this.batteryUpdatedAt,
+    this.peerLatitude,
+    this.peerLongitude,
+    this.peerLocationAccuracy,
+    this.peerLocationCapturedAt,
+    this.peerDeviceModel,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -2678,6 +2895,32 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       map['public_identity_fingerprint'] = Variable<String>(
         publicIdentityFingerprint,
       );
+    }
+    if (!nullToAbsent || batteryLevel != null) {
+      map['battery_level'] = Variable<int>(batteryLevel);
+    }
+    if (!nullToAbsent || isCharging != null) {
+      map['is_charging'] = Variable<bool>(isCharging);
+    }
+    if (!nullToAbsent || batteryUpdatedAt != null) {
+      map['battery_updated_at'] = Variable<DateTime>(batteryUpdatedAt);
+    }
+    if (!nullToAbsent || peerLatitude != null) {
+      map['peer_latitude'] = Variable<double>(peerLatitude);
+    }
+    if (!nullToAbsent || peerLongitude != null) {
+      map['peer_longitude'] = Variable<double>(peerLongitude);
+    }
+    if (!nullToAbsent || peerLocationAccuracy != null) {
+      map['peer_location_accuracy'] = Variable<double>(peerLocationAccuracy);
+    }
+    if (!nullToAbsent || peerLocationCapturedAt != null) {
+      map['peer_location_captured_at'] = Variable<DateTime>(
+        peerLocationCapturedAt,
+      );
+    }
+    if (!nullToAbsent || peerDeviceModel != null) {
+      map['peer_device_model'] = Variable<String>(peerDeviceModel);
     }
     return map;
   }
@@ -2704,6 +2947,30 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           publicIdentityFingerprint == null && nullToAbsent
           ? const Value.absent()
           : Value(publicIdentityFingerprint),
+      batteryLevel: batteryLevel == null && nullToAbsent
+          ? const Value.absent()
+          : Value(batteryLevel),
+      isCharging: isCharging == null && nullToAbsent
+          ? const Value.absent()
+          : Value(isCharging),
+      batteryUpdatedAt: batteryUpdatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(batteryUpdatedAt),
+      peerLatitude: peerLatitude == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerLatitude),
+      peerLongitude: peerLongitude == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerLongitude),
+      peerLocationAccuracy: peerLocationAccuracy == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerLocationAccuracy),
+      peerLocationCapturedAt: peerLocationCapturedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerLocationCapturedAt),
+      peerDeviceModel: peerDeviceModel == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerDeviceModel),
     );
   }
 
@@ -2730,6 +2997,20 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       publicIdentityFingerprint: serializer.fromJson<String?>(
         json['publicIdentityFingerprint'],
       ),
+      batteryLevel: serializer.fromJson<int?>(json['batteryLevel']),
+      isCharging: serializer.fromJson<bool?>(json['isCharging']),
+      batteryUpdatedAt: serializer.fromJson<DateTime?>(
+        json['batteryUpdatedAt'],
+      ),
+      peerLatitude: serializer.fromJson<double?>(json['peerLatitude']),
+      peerLongitude: serializer.fromJson<double?>(json['peerLongitude']),
+      peerLocationAccuracy: serializer.fromJson<double?>(
+        json['peerLocationAccuracy'],
+      ),
+      peerLocationCapturedAt: serializer.fromJson<DateTime?>(
+        json['peerLocationCapturedAt'],
+      ),
+      peerDeviceModel: serializer.fromJson<String?>(json['peerDeviceModel']),
     );
   }
   @override
@@ -2749,6 +3030,16 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       'publicIdentityFingerprint': serializer.toJson<String?>(
         publicIdentityFingerprint,
       ),
+      'batteryLevel': serializer.toJson<int?>(batteryLevel),
+      'isCharging': serializer.toJson<bool?>(isCharging),
+      'batteryUpdatedAt': serializer.toJson<DateTime?>(batteryUpdatedAt),
+      'peerLatitude': serializer.toJson<double?>(peerLatitude),
+      'peerLongitude': serializer.toJson<double?>(peerLongitude),
+      'peerLocationAccuracy': serializer.toJson<double?>(peerLocationAccuracy),
+      'peerLocationCapturedAt': serializer.toJson<DateTime?>(
+        peerLocationCapturedAt,
+      ),
+      'peerDeviceModel': serializer.toJson<String?>(peerDeviceModel),
     };
   }
 
@@ -2764,6 +3055,14 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     bool? autoReconnectEnabled,
     Value<String?> publicIdentityKey = const Value.absent(),
     Value<String?> publicIdentityFingerprint = const Value.absent(),
+    Value<int?> batteryLevel = const Value.absent(),
+    Value<bool?> isCharging = const Value.absent(),
+    Value<DateTime?> batteryUpdatedAt = const Value.absent(),
+    Value<double?> peerLatitude = const Value.absent(),
+    Value<double?> peerLongitude = const Value.absent(),
+    Value<double?> peerLocationAccuracy = const Value.absent(),
+    Value<DateTime?> peerLocationCapturedAt = const Value.absent(),
+    Value<String?> peerDeviceModel = const Value.absent(),
   }) => NearbyDevice(
     deviceId: deviceId ?? this.deviceId,
     displayName: displayName ?? this.displayName,
@@ -2784,6 +3083,24 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     publicIdentityFingerprint: publicIdentityFingerprint.present
         ? publicIdentityFingerprint.value
         : this.publicIdentityFingerprint,
+    batteryLevel: batteryLevel.present ? batteryLevel.value : this.batteryLevel,
+    isCharging: isCharging.present ? isCharging.value : this.isCharging,
+    batteryUpdatedAt: batteryUpdatedAt.present
+        ? batteryUpdatedAt.value
+        : this.batteryUpdatedAt,
+    peerLatitude: peerLatitude.present ? peerLatitude.value : this.peerLatitude,
+    peerLongitude: peerLongitude.present
+        ? peerLongitude.value
+        : this.peerLongitude,
+    peerLocationAccuracy: peerLocationAccuracy.present
+        ? peerLocationAccuracy.value
+        : this.peerLocationAccuracy,
+    peerLocationCapturedAt: peerLocationCapturedAt.present
+        ? peerLocationCapturedAt.value
+        : this.peerLocationCapturedAt,
+    peerDeviceModel: peerDeviceModel.present
+        ? peerDeviceModel.value
+        : this.peerDeviceModel,
   );
   NearbyDevice copyWithCompanion(NearbyDevicesCompanion data) {
     return NearbyDevice(
@@ -2812,6 +3129,30 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
       publicIdentityFingerprint: data.publicIdentityFingerprint.present
           ? data.publicIdentityFingerprint.value
           : this.publicIdentityFingerprint,
+      batteryLevel: data.batteryLevel.present
+          ? data.batteryLevel.value
+          : this.batteryLevel,
+      isCharging: data.isCharging.present
+          ? data.isCharging.value
+          : this.isCharging,
+      batteryUpdatedAt: data.batteryUpdatedAt.present
+          ? data.batteryUpdatedAt.value
+          : this.batteryUpdatedAt,
+      peerLatitude: data.peerLatitude.present
+          ? data.peerLatitude.value
+          : this.peerLatitude,
+      peerLongitude: data.peerLongitude.present
+          ? data.peerLongitude.value
+          : this.peerLongitude,
+      peerLocationAccuracy: data.peerLocationAccuracy.present
+          ? data.peerLocationAccuracy.value
+          : this.peerLocationAccuracy,
+      peerLocationCapturedAt: data.peerLocationCapturedAt.present
+          ? data.peerLocationCapturedAt.value
+          : this.peerLocationCapturedAt,
+      peerDeviceModel: data.peerDeviceModel.present
+          ? data.peerDeviceModel.value
+          : this.peerDeviceModel,
     );
   }
 
@@ -2828,7 +3169,15 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           ..write('isBlocked: $isBlocked, ')
           ..write('autoReconnectEnabled: $autoReconnectEnabled, ')
           ..write('publicIdentityKey: $publicIdentityKey, ')
-          ..write('publicIdentityFingerprint: $publicIdentityFingerprint')
+          ..write('publicIdentityFingerprint: $publicIdentityFingerprint, ')
+          ..write('batteryLevel: $batteryLevel, ')
+          ..write('isCharging: $isCharging, ')
+          ..write('batteryUpdatedAt: $batteryUpdatedAt, ')
+          ..write('peerLatitude: $peerLatitude, ')
+          ..write('peerLongitude: $peerLongitude, ')
+          ..write('peerLocationAccuracy: $peerLocationAccuracy, ')
+          ..write('peerLocationCapturedAt: $peerLocationCapturedAt, ')
+          ..write('peerDeviceModel: $peerDeviceModel')
           ..write(')'))
         .toString();
   }
@@ -2846,6 +3195,14 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
     autoReconnectEnabled,
     publicIdentityKey,
     publicIdentityFingerprint,
+    batteryLevel,
+    isCharging,
+    batteryUpdatedAt,
+    peerLatitude,
+    peerLongitude,
+    peerLocationAccuracy,
+    peerLocationCapturedAt,
+    peerDeviceModel,
   );
   @override
   bool operator ==(Object other) =>
@@ -2861,7 +3218,15 @@ class NearbyDevice extends DataClass implements Insertable<NearbyDevice> {
           other.isBlocked == this.isBlocked &&
           other.autoReconnectEnabled == this.autoReconnectEnabled &&
           other.publicIdentityKey == this.publicIdentityKey &&
-          other.publicIdentityFingerprint == this.publicIdentityFingerprint);
+          other.publicIdentityFingerprint == this.publicIdentityFingerprint &&
+          other.batteryLevel == this.batteryLevel &&
+          other.isCharging == this.isCharging &&
+          other.batteryUpdatedAt == this.batteryUpdatedAt &&
+          other.peerLatitude == this.peerLatitude &&
+          other.peerLongitude == this.peerLongitude &&
+          other.peerLocationAccuracy == this.peerLocationAccuracy &&
+          other.peerLocationCapturedAt == this.peerLocationCapturedAt &&
+          other.peerDeviceModel == this.peerDeviceModel);
 }
 
 class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
@@ -2876,6 +3241,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
   final Value<bool> autoReconnectEnabled;
   final Value<String?> publicIdentityKey;
   final Value<String?> publicIdentityFingerprint;
+  final Value<int?> batteryLevel;
+  final Value<bool?> isCharging;
+  final Value<DateTime?> batteryUpdatedAt;
+  final Value<double?> peerLatitude;
+  final Value<double?> peerLongitude;
+  final Value<double?> peerLocationAccuracy;
+  final Value<DateTime?> peerLocationCapturedAt;
+  final Value<String?> peerDeviceModel;
   final Value<int> rowid;
   const NearbyDevicesCompanion({
     this.deviceId = const Value.absent(),
@@ -2889,6 +3262,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     this.autoReconnectEnabled = const Value.absent(),
     this.publicIdentityKey = const Value.absent(),
     this.publicIdentityFingerprint = const Value.absent(),
+    this.batteryLevel = const Value.absent(),
+    this.isCharging = const Value.absent(),
+    this.batteryUpdatedAt = const Value.absent(),
+    this.peerLatitude = const Value.absent(),
+    this.peerLongitude = const Value.absent(),
+    this.peerLocationAccuracy = const Value.absent(),
+    this.peerLocationCapturedAt = const Value.absent(),
+    this.peerDeviceModel = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   NearbyDevicesCompanion.insert({
@@ -2903,6 +3284,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     this.autoReconnectEnabled = const Value.absent(),
     this.publicIdentityKey = const Value.absent(),
     this.publicIdentityFingerprint = const Value.absent(),
+    this.batteryLevel = const Value.absent(),
+    this.isCharging = const Value.absent(),
+    this.batteryUpdatedAt = const Value.absent(),
+    this.peerLatitude = const Value.absent(),
+    this.peerLongitude = const Value.absent(),
+    this.peerLocationAccuracy = const Value.absent(),
+    this.peerLocationCapturedAt = const Value.absent(),
+    this.peerDeviceModel = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : deviceId = Value(deviceId),
        displayName = Value(displayName),
@@ -2920,6 +3309,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Expression<bool>? autoReconnectEnabled,
     Expression<String>? publicIdentityKey,
     Expression<String>? publicIdentityFingerprint,
+    Expression<int>? batteryLevel,
+    Expression<bool>? isCharging,
+    Expression<DateTime>? batteryUpdatedAt,
+    Expression<double>? peerLatitude,
+    Expression<double>? peerLongitude,
+    Expression<double>? peerLocationAccuracy,
+    Expression<DateTime>? peerLocationCapturedAt,
+    Expression<String>? peerDeviceModel,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -2936,6 +3333,16 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       if (publicIdentityKey != null) 'public_identity_key': publicIdentityKey,
       if (publicIdentityFingerprint != null)
         'public_identity_fingerprint': publicIdentityFingerprint,
+      if (batteryLevel != null) 'battery_level': batteryLevel,
+      if (isCharging != null) 'is_charging': isCharging,
+      if (batteryUpdatedAt != null) 'battery_updated_at': batteryUpdatedAt,
+      if (peerLatitude != null) 'peer_latitude': peerLatitude,
+      if (peerLongitude != null) 'peer_longitude': peerLongitude,
+      if (peerLocationAccuracy != null)
+        'peer_location_accuracy': peerLocationAccuracy,
+      if (peerLocationCapturedAt != null)
+        'peer_location_captured_at': peerLocationCapturedAt,
+      if (peerDeviceModel != null) 'peer_device_model': peerDeviceModel,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -2952,6 +3359,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
     Value<bool>? autoReconnectEnabled,
     Value<String?>? publicIdentityKey,
     Value<String?>? publicIdentityFingerprint,
+    Value<int?>? batteryLevel,
+    Value<bool?>? isCharging,
+    Value<DateTime?>? batteryUpdatedAt,
+    Value<double?>? peerLatitude,
+    Value<double?>? peerLongitude,
+    Value<double?>? peerLocationAccuracy,
+    Value<DateTime?>? peerLocationCapturedAt,
+    Value<String?>? peerDeviceModel,
     Value<int>? rowid,
   }) {
     return NearbyDevicesCompanion(
@@ -2967,6 +3382,15 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
       publicIdentityKey: publicIdentityKey ?? this.publicIdentityKey,
       publicIdentityFingerprint:
           publicIdentityFingerprint ?? this.publicIdentityFingerprint,
+      batteryLevel: batteryLevel ?? this.batteryLevel,
+      isCharging: isCharging ?? this.isCharging,
+      batteryUpdatedAt: batteryUpdatedAt ?? this.batteryUpdatedAt,
+      peerLatitude: peerLatitude ?? this.peerLatitude,
+      peerLongitude: peerLongitude ?? this.peerLongitude,
+      peerLocationAccuracy: peerLocationAccuracy ?? this.peerLocationAccuracy,
+      peerLocationCapturedAt:
+          peerLocationCapturedAt ?? this.peerLocationCapturedAt,
+      peerDeviceModel: peerDeviceModel ?? this.peerDeviceModel,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3011,6 +3435,34 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
         publicIdentityFingerprint.value,
       );
     }
+    if (batteryLevel.present) {
+      map['battery_level'] = Variable<int>(batteryLevel.value);
+    }
+    if (isCharging.present) {
+      map['is_charging'] = Variable<bool>(isCharging.value);
+    }
+    if (batteryUpdatedAt.present) {
+      map['battery_updated_at'] = Variable<DateTime>(batteryUpdatedAt.value);
+    }
+    if (peerLatitude.present) {
+      map['peer_latitude'] = Variable<double>(peerLatitude.value);
+    }
+    if (peerLongitude.present) {
+      map['peer_longitude'] = Variable<double>(peerLongitude.value);
+    }
+    if (peerLocationAccuracy.present) {
+      map['peer_location_accuracy'] = Variable<double>(
+        peerLocationAccuracy.value,
+      );
+    }
+    if (peerLocationCapturedAt.present) {
+      map['peer_location_captured_at'] = Variable<DateTime>(
+        peerLocationCapturedAt.value,
+      );
+    }
+    if (peerDeviceModel.present) {
+      map['peer_device_model'] = Variable<String>(peerDeviceModel.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3031,6 +3483,14 @@ class NearbyDevicesCompanion extends UpdateCompanion<NearbyDevice> {
           ..write('autoReconnectEnabled: $autoReconnectEnabled, ')
           ..write('publicIdentityKey: $publicIdentityKey, ')
           ..write('publicIdentityFingerprint: $publicIdentityFingerprint, ')
+          ..write('batteryLevel: $batteryLevel, ')
+          ..write('isCharging: $isCharging, ')
+          ..write('batteryUpdatedAt: $batteryUpdatedAt, ')
+          ..write('peerLatitude: $peerLatitude, ')
+          ..write('peerLongitude: $peerLongitude, ')
+          ..write('peerLocationAccuracy: $peerLocationAccuracy, ')
+          ..write('peerLocationCapturedAt: $peerLocationCapturedAt, ')
+          ..write('peerDeviceModel: $peerDeviceModel, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -8309,6 +8769,14 @@ typedef $$NearbyDevicesTableCreateCompanionBuilder =
       Value<bool> autoReconnectEnabled,
       Value<String?> publicIdentityKey,
       Value<String?> publicIdentityFingerprint,
+      Value<int?> batteryLevel,
+      Value<bool?> isCharging,
+      Value<DateTime?> batteryUpdatedAt,
+      Value<double?> peerLatitude,
+      Value<double?> peerLongitude,
+      Value<double?> peerLocationAccuracy,
+      Value<DateTime?> peerLocationCapturedAt,
+      Value<String?> peerDeviceModel,
       Value<int> rowid,
     });
 typedef $$NearbyDevicesTableUpdateCompanionBuilder =
@@ -8324,6 +8792,14 @@ typedef $$NearbyDevicesTableUpdateCompanionBuilder =
       Value<bool> autoReconnectEnabled,
       Value<String?> publicIdentityKey,
       Value<String?> publicIdentityFingerprint,
+      Value<int?> batteryLevel,
+      Value<bool?> isCharging,
+      Value<DateTime?> batteryUpdatedAt,
+      Value<double?> peerLatitude,
+      Value<double?> peerLongitude,
+      Value<double?> peerLocationAccuracy,
+      Value<DateTime?> peerLocationCapturedAt,
+      Value<String?> peerDeviceModel,
       Value<int> rowid,
     });
 
@@ -8388,6 +8864,46 @@ class $$NearbyDevicesTableFilterComposer
 
   ColumnFilters<String> get publicIdentityFingerprint => $composableBuilder(
     column: $table.publicIdentityFingerprint,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get batteryLevel => $composableBuilder(
+    column: $table.batteryLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isCharging => $composableBuilder(
+    column: $table.isCharging,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get batteryUpdatedAt => $composableBuilder(
+    column: $table.batteryUpdatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get peerLatitude => $composableBuilder(
+    column: $table.peerLatitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get peerLongitude => $composableBuilder(
+    column: $table.peerLongitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get peerLocationAccuracy => $composableBuilder(
+    column: $table.peerLocationAccuracy,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get peerLocationCapturedAt => $composableBuilder(
+    column: $table.peerLocationCapturedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerDeviceModel => $composableBuilder(
+    column: $table.peerDeviceModel,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -8455,6 +8971,46 @@ class $$NearbyDevicesTableOrderingComposer
     column: $table.publicIdentityFingerprint,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get batteryLevel => $composableBuilder(
+    column: $table.batteryLevel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isCharging => $composableBuilder(
+    column: $table.isCharging,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get batteryUpdatedAt => $composableBuilder(
+    column: $table.batteryUpdatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get peerLatitude => $composableBuilder(
+    column: $table.peerLatitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get peerLongitude => $composableBuilder(
+    column: $table.peerLongitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get peerLocationAccuracy => $composableBuilder(
+    column: $table.peerLocationAccuracy,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get peerLocationCapturedAt => $composableBuilder(
+    column: $table.peerLocationCapturedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get peerDeviceModel => $composableBuilder(
+    column: $table.peerDeviceModel,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$NearbyDevicesTableAnnotationComposer
@@ -8512,6 +9068,46 @@ class $$NearbyDevicesTableAnnotationComposer
     column: $table.publicIdentityFingerprint,
     builder: (column) => column,
   );
+
+  GeneratedColumn<int> get batteryLevel => $composableBuilder(
+    column: $table.batteryLevel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isCharging => $composableBuilder(
+    column: $table.isCharging,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get batteryUpdatedAt => $composableBuilder(
+    column: $table.batteryUpdatedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get peerLatitude => $composableBuilder(
+    column: $table.peerLatitude,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get peerLongitude => $composableBuilder(
+    column: $table.peerLongitude,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<double> get peerLocationAccuracy => $composableBuilder(
+    column: $table.peerLocationAccuracy,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get peerLocationCapturedAt => $composableBuilder(
+    column: $table.peerLocationCapturedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get peerDeviceModel => $composableBuilder(
+    column: $table.peerDeviceModel,
+    builder: (column) => column,
+  );
 }
 
 class $$NearbyDevicesTableTableManager
@@ -8556,6 +9152,14 @@ class $$NearbyDevicesTableTableManager
                 Value<bool> autoReconnectEnabled = const Value.absent(),
                 Value<String?> publicIdentityKey = const Value.absent(),
                 Value<String?> publicIdentityFingerprint = const Value.absent(),
+                Value<int?> batteryLevel = const Value.absent(),
+                Value<bool?> isCharging = const Value.absent(),
+                Value<DateTime?> batteryUpdatedAt = const Value.absent(),
+                Value<double?> peerLatitude = const Value.absent(),
+                Value<double?> peerLongitude = const Value.absent(),
+                Value<double?> peerLocationAccuracy = const Value.absent(),
+                Value<DateTime?> peerLocationCapturedAt = const Value.absent(),
+                Value<String?> peerDeviceModel = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion(
                 deviceId: deviceId,
@@ -8569,6 +9173,14 @@ class $$NearbyDevicesTableTableManager
                 autoReconnectEnabled: autoReconnectEnabled,
                 publicIdentityKey: publicIdentityKey,
                 publicIdentityFingerprint: publicIdentityFingerprint,
+                batteryLevel: batteryLevel,
+                isCharging: isCharging,
+                batteryUpdatedAt: batteryUpdatedAt,
+                peerLatitude: peerLatitude,
+                peerLongitude: peerLongitude,
+                peerLocationAccuracy: peerLocationAccuracy,
+                peerLocationCapturedAt: peerLocationCapturedAt,
+                peerDeviceModel: peerDeviceModel,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -8584,6 +9196,14 @@ class $$NearbyDevicesTableTableManager
                 Value<bool> autoReconnectEnabled = const Value.absent(),
                 Value<String?> publicIdentityKey = const Value.absent(),
                 Value<String?> publicIdentityFingerprint = const Value.absent(),
+                Value<int?> batteryLevel = const Value.absent(),
+                Value<bool?> isCharging = const Value.absent(),
+                Value<DateTime?> batteryUpdatedAt = const Value.absent(),
+                Value<double?> peerLatitude = const Value.absent(),
+                Value<double?> peerLongitude = const Value.absent(),
+                Value<double?> peerLocationAccuracy = const Value.absent(),
+                Value<DateTime?> peerLocationCapturedAt = const Value.absent(),
+                Value<String?> peerDeviceModel = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => NearbyDevicesCompanion.insert(
                 deviceId: deviceId,
@@ -8597,6 +9217,14 @@ class $$NearbyDevicesTableTableManager
                 autoReconnectEnabled: autoReconnectEnabled,
                 publicIdentityKey: publicIdentityKey,
                 publicIdentityFingerprint: publicIdentityFingerprint,
+                batteryLevel: batteryLevel,
+                isCharging: isCharging,
+                batteryUpdatedAt: batteryUpdatedAt,
+                peerLatitude: peerLatitude,
+                peerLongitude: peerLongitude,
+                peerLocationAccuracy: peerLocationAccuracy,
+                peerLocationCapturedAt: peerLocationCapturedAt,
+                peerDeviceModel: peerDeviceModel,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

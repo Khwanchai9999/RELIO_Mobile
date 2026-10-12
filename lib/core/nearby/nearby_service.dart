@@ -10,6 +10,7 @@ import '../../app/environment.dart';
 import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
 import '../diagnostics/diagnostics_log_service.dart';
+import '../device/battery_info_service.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
 import '../notifications/notification_preview.dart';
@@ -107,6 +108,7 @@ class NearbyService extends ChangeNotifier {
     this.localNotifications,
     this.relayEngine,
     this.diagnostics,
+    this.batteryInfo,
     PeerIdentityCrypto? identityCrypto,
     this.handshakeTimeout = const Duration(seconds: 30),
     this.connectionAttemptTimeout = const Duration(seconds: 35),
@@ -131,6 +133,7 @@ class NearbyService extends ChangeNotifier {
   final LocalNotificationSink? localNotifications;
   final RelayEngine? relayEngine;
   final DiagnosticsLogService? diagnostics;
+  final BatteryInfoService? batteryInfo;
   final PeerIdentityCrypto identityCrypto;
   final Duration handshakeTimeout;
   final Duration incomingApprovalTimeout;
@@ -286,6 +289,99 @@ class NearbyService extends ChangeNotifier {
   NearbyConnectionEvent? lastNativeConnectionFailure;
   bool _sessionRestartDeferred = false;
   bool _discoveryPausedForNegotiation = false;
+  final BatteryPublishPolicy _batteryPublishPolicy =
+      const BatteryPublishPolicy();
+  BatterySnapshot? _lastPublishedBattery;
+  StreamSubscription<void>? _batteryStateSubscription;
+  Timer? _batteryRefreshTimer;
+
+  void startBatteryMetadataUpdates() {
+    final source = batteryInfo;
+    if (source == null || _batteryStateSubscription != null) return;
+    _batteryStateSubscription = source.stateChanges.listen((_) {
+      unawaited(_publishBatteryMetadata());
+    });
+    _batteryRefreshTimer = Timer.periodic(
+      _batteryPublishPolicy.refreshInterval,
+      (_) => unawaited(_publishBatteryMetadata()),
+    );
+  }
+
+  void stopBatteryMetadataUpdates() {
+    _batteryRefreshTimer?.cancel();
+    _batteryRefreshTimer = null;
+    unawaited(_batteryStateSubscription?.cancel());
+    _batteryStateSubscription = null;
+  }
+
+  Future<void> _publishBatteryMetadata() async {
+    final source = batteryInfo;
+    if (source == null || connectedPeers.isEmpty) return;
+    final battery = await source.readSnapshot();
+    if (battery == null ||
+        !_batteryPublishPolicy.shouldPublish(
+          previous: _lastPublishedBattery,
+          current: battery,
+          now: DateTime.now(),
+        )) {
+      return;
+    }
+    final deviceId = await identity.getDeviceId();
+    final status = await currentStatus();
+    final rescueActive =
+        settings != null &&
+        await settings!.getBool('rescue_mode', defaultValue: false);
+    for (final peer in connectedPeers) {
+      if (!_completedIdentityHandshakes.contains(peer.endpointId)) continue;
+      await _sendPacket(
+        RelioPacket.deviceStatus(
+          senderDeviceId: deviceId,
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: status,
+          rescueActive: rescueActive,
+          batteryLevel: battery.level,
+          isCharging: battery.isCharging,
+          batteryUpdatedAt: battery.updatedAt,
+          deviceModel: _deviceModel,
+        ),
+        description: 'peer battery update',
+        peerId: peer.endpointId,
+      );
+    }
+    _lastPublishedBattery = battery;
+  }
+
+  Future<void> publishMapLocation(LocationData location) async {
+    final deviceId = await identity.getDeviceId();
+    final status = await currentStatus();
+    final rescueActive =
+        settings != null &&
+        await settings!.getBool('rescue_mode', defaultValue: false);
+    final battery = await batteryInfo?.readSnapshot();
+    for (final peer in connectedPeers) {
+      if (!_completedIdentityHandshakes.contains(peer.endpointId)) continue;
+      await _sendPacket(
+        RelioPacket.deviceStatus(
+          senderDeviceId: deviceId,
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: status,
+          rescueActive: rescueActive,
+          batteryLevel: battery?.level,
+          isCharging: battery?.isCharging,
+          batteryUpdatedAt: battery?.updatedAt,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          locationAccuracy: location.accuracyMeters,
+          locationCapturedAt: location.capturedAt,
+          deviceModel: _deviceModel,
+        ),
+        description: 'shared nearby location',
+        peerId: peer.endpointId,
+      );
+    }
+  }
 
   NearbyTransportTestMode get transportTestMode => transport.testMode;
 
@@ -1695,14 +1791,20 @@ class NearbyService extends ChangeNotifier {
     final rescueActive =
         settings != null &&
         await settings!.getBool('rescue_mode', defaultValue: false);
+    final battery = await batteryInfo?.readSnapshot();
     final packet = RelioPacket.hello(
       senderDeviceId: await identity.getDeviceId(),
       senderUserId: await _senderUserId(),
       displayName: await identity.getDisplayName(),
       status: status,
       rescueActive: rescueActive,
+      batteryLevel: battery?.level,
+      isCharging: battery?.isCharging,
+      batteryUpdatedAt: battery?.updatedAt,
+      deviceModel: _deviceModel,
     );
     await _sendPacket(packet, description: 'Hello RELIO', peerId: peerId);
+    if (battery?.isValid == true) _lastPublishedBattery = battery;
   }
 
   Future<void> propagateCurrentStatus() async {
@@ -1711,6 +1813,7 @@ class NearbyService extends ChangeNotifier {
     final rescueActive =
         settings != null &&
         await settings!.getBool('rescue_mode', defaultValue: false);
+    final battery = await batteryInfo?.readSnapshot();
     await _sendPacket(
       RelioPacket.deviceStatus(
         senderDeviceId: deviceId,
@@ -1718,6 +1821,10 @@ class NearbyService extends ChangeNotifier {
         displayName: await identity.getDisplayName(),
         status: status,
         rescueActive: rescueActive,
+        batteryLevel: battery?.level,
+        isCharging: battery?.isCharging,
+        batteryUpdatedAt: battery?.updatedAt,
+        deviceModel: _deviceModel,
       ),
       description: 'deviceStatus ${status.name}',
     );
@@ -4392,10 +4499,19 @@ class NearbyService extends ChangeNotifier {
     );
     peerStatuses[packet.senderDeviceId] = status;
     final displayName = packet.payload['displayName']! as String;
+    final metadata = _peerMetadataRepositoryFields(packet);
     await nearbyDevices.upsert(
       deviceId: packet.senderDeviceId,
       displayName: displayName,
       status: status,
+      batteryLevel: metadata['batteryLevel'] as int?,
+      isCharging: metadata['isCharging'] as bool?,
+      batteryUpdatedAt: metadata['batteryUpdatedAt'] as DateTime?,
+      peerLatitude: metadata['peerLatitude'] as double?,
+      peerLongitude: metadata['peerLongitude'] as double?,
+      peerLocationAccuracy: metadata['peerLocationAccuracy'] as double?,
+      peerLocationCapturedAt: metadata['peerLocationCapturedAt'] as DateTime?,
+      peerDeviceModel: metadata['peerDeviceModel'] as String?,
     );
     diagnostics?.record(
       'nearby',
@@ -4540,13 +4656,14 @@ class NearbyService extends ChangeNotifier {
     final previousUpdatedAt = _lastPeerStatusUpdatedAt[packet.senderDeviceId];
     if (updatedAt != null &&
         previousUpdatedAt != null &&
-        !updatedAt.isAfter(previousUpdatedAt)) {
+        updatedAt.isBefore(previousUpdatedAt)) {
       diagnostics?.record(
         'nearby_status',
         'device_status_stale_ignored',
         peerIdentifier: deviceToEndpointId[packet.senderDeviceId],
         fields: {'reportedStatus': reportedStatus.name},
       );
+      await _persistPeerMetadata(packet);
       return;
     }
     if (updatedAt != null) {
@@ -4559,11 +4676,7 @@ class NearbyService extends ChangeNotifier {
     );
     peerStatuses[packet.senderDeviceId] = status;
     final displayName = packet.payload['displayName']! as String;
-    await nearbyDevices.upsert(
-      deviceId: packet.senderDeviceId,
-      displayName: displayName,
-      status: status,
-    );
+    await _persistPeerMetadata(packet, status: status);
     await conversations.updateParticipantStatus(packet.senderDeviceId, status);
     _updatePeerIdentity(
       deviceToEndpointId[packet.senderDeviceId],
@@ -4897,6 +5010,58 @@ class NearbyService extends ChangeNotifier {
     orElse: () => DeviceStatus.normal,
   );
 
+  Map<String, Object?> _peerMetadataRepositoryFields(RelioPacket packet) {
+    final payload = packet.payload;
+    final rawLatitude = payload['latitude'];
+    final rawLongitude = payload['longitude'];
+    return {
+      if (payload['batteryLevel'] is int)
+        'batteryLevel': payload['batteryLevel'],
+      if (payload['isCharging'] is bool) 'isCharging': payload['isCharging'],
+      if (payload['deviceModel'] is String)
+        'peerDeviceModel': payload['deviceModel'],
+      if (DateTime.tryParse(payload['batteryUpdatedAt'] as String? ?? '')
+          case final DateTime updatedAt)
+        'batteryUpdatedAt': updatedAt,
+      if (rawLatitude is num && rawLongitude is num) ...{
+        'peerLatitude': rawLatitude.toDouble(),
+        'peerLongitude': rawLongitude.toDouble(),
+        if (payload['locationAccuracy'] is num)
+          'peerLocationAccuracy': (payload['locationAccuracy']! as num)
+              .toDouble(),
+        if (DateTime.tryParse(payload['locationCapturedAt'] as String? ?? '')
+            case final DateTime capturedAt)
+          'peerLocationCapturedAt': capturedAt,
+      },
+    };
+  }
+
+  Future<void> _persistPeerMetadata(
+    RelioPacket packet, {
+    DeviceStatus? status,
+  }) async {
+    final metadata = _peerMetadataRepositoryFields(packet);
+    if (metadata.isEmpty && status == null) return;
+    final existing = await nearbyDevices.getDevice(packet.senderDeviceId);
+    await nearbyDevices.upsert(
+      deviceId: packet.senderDeviceId,
+      displayName: packet.payload['displayName']! as String,
+      status:
+          status ??
+          peerStatuses[packet.senderDeviceId] ??
+          existing?.status ??
+          DeviceStatus.normal,
+      batteryLevel: metadata['batteryLevel'] as int?,
+      isCharging: metadata['isCharging'] as bool?,
+      batteryUpdatedAt: metadata['batteryUpdatedAt'] as DateTime?,
+      peerLatitude: metadata['peerLatitude'] as double?,
+      peerLongitude: metadata['peerLongitude'] as double?,
+      peerLocationAccuracy: metadata['peerLocationAccuracy'] as double?,
+      peerLocationCapturedAt: metadata['peerLocationCapturedAt'] as DateTime?,
+      peerDeviceModel: metadata['peerDeviceModel'] as String?,
+    );
+  }
+
   Future<DeviceStatus> _statusWithSosPrecedence(
     String deviceId,
     DeviceStatus reportedStatus,
@@ -5005,6 +5170,7 @@ class NearbyService extends ChangeNotifier {
       reason: 'service_dispose',
     );
     _closed = true;
+    stopBatteryMetadataUpdates();
     for (final timer in _identityHandshakeTimeouts.values) {
       timer.cancel();
     }

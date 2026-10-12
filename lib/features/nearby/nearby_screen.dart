@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/relio_colors.dart';
-import '../../app/theme/relio_spacing.dart';
 import '../../core/connectivity/runtime_connectivity.dart';
 import '../../core/domain/relio_entities.dart';
+import '../../core/location/nearby_map_calculations.dart';
+import '../../core/location/location_service.dart';
 import '../../core/nearby/nearby_service.dart';
 import '../../core/nearby/nearby_readiness.dart';
 import '../../core/nearby/nearby_transport.dart';
@@ -14,6 +15,7 @@ import '../../core/nearby/bluetooth_classic_transport.dart';
 import '../../core/relio_dependencies.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
+import 'nearby_map_canvas.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 enum NearbyFilter { all, sos, rescue, normal }
@@ -28,6 +30,11 @@ class NearbyScreen extends StatefulWidget {
 class _NearbyScreenState extends State<NearbyScreen> {
   NearbyFilter _filter = NearbyFilter.all;
   bool _loaded = false;
+  bool _panelExpanded = true;
+  bool _listMode = false;
+  bool _sharingLocation = false;
+  LocationData? _myLocation;
+  String? _navigationTargetId;
   late RelioDependencies _dependencies;
   late NearbyService _nearby;
   List<RelioNearbyDevice> _savedDevices = const [];
@@ -41,6 +48,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
     _dependencies = RelioDependencyScope.of(context);
     _nearby = _dependencies.nearbyService;
     _nearby.addListener(_onNearbyChanged);
+    _nearby.startBatteryMetadataUpdates();
     _dependencies.connectivityStatus.addListener(_onNearbyChanged);
     unawaited(_dependencies.startNearbySessionIfPermitted());
     unawaited(_loadSavedDevices());
@@ -49,6 +57,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   void dispose() {
     _nearby.removeListener(_onNearbyChanged);
+    _nearby.stopBatteryMetadataUpdates();
     _dependencies.connectivityStatus.removeListener(_onNearbyChanged);
     super.dispose();
   }
@@ -65,6 +74,123 @@ class _NearbyScreenState extends State<NearbyScreen> {
     if (!mounted) return;
     setState(() => _savedDevices = devices);
   }
+
+  Future<void> _shareCurrentLocation() async {
+    if (_sharingLocation) return;
+    setState(() => _sharingLocation = true);
+    try {
+      final result = await _dependencies.locationService
+          .getCurrentOrLastKnown();
+      if (!mounted) return;
+      final location = result.location;
+      if (location == null) {
+        final detail = switch (result.failure) {
+          LocationFailure.permissionDenied => 'ต้องอนุญาตตำแหน่งก่อน',
+          LocationFailure.permissionDeniedForever =>
+            'เปิดสิทธิ์ตำแหน่งจากการตั้งค่า Android',
+          LocationFailure.serviceDisabled => 'เปิด Location/GPS ก่อน',
+          _ => 'ยังอ่านตำแหน่งไม่ได้ ลองอีกครั้งภายหลัง',
+        };
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(detail)));
+        return;
+      }
+      setState(() => _myLocation = location);
+      await _nearby.publishMapLocation(location);
+      if (!mounted) return;
+      final count = _nearby.connectedPeers
+          .where((peer) => _nearby.deviceIdForEndpoint(peer.endpointId) != null)
+          .length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            count == 0
+                ? 'แสดงตำแหน่งของคุณบนเครื่องนี้แล้ว ยังไม่มี peer ที่ยืนยันและเชื่อมต่อ'
+                : 'แชร์ตำแหน่งล่าสุดให้ peer ที่ยืนยันแล้ว $count เครื่อง',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _sharingLocation = false);
+    }
+  }
+
+  void _showPeerDetails(String deviceId) {
+    final device = _mapPeers.where((peer) => peer.id == deviceId).firstOrNull;
+    if (device == null) return;
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (sheetContext) => _PeerDetailSheet(
+          device: device,
+          myLocation: _myLocation,
+          onChat: () {
+            Navigator.of(sheetContext).pop();
+            final endpointId = _nearby.deviceToEndpointId[device.id];
+            if (endpointId == null ||
+                _nearby.peerStates[endpointId] !=
+                    NearbyConnectionState.connected) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('peer ยังไม่ได้เชื่อมต่อ Nearby')),
+              );
+              return;
+            }
+            context.push('/chat/${device.id}');
+          },
+          onNavigate: () {
+            Navigator.of(sheetContext).pop();
+            if (!NearbyMapCalculations.isValidPoint(
+              device.locationLatitude,
+              device.locationLongitude,
+            )) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('peer ยังไม่ได้แชร์ตำแหน่ง')),
+              );
+              return;
+            }
+            setState(() => _navigationTargetId = device.id);
+          },
+        ),
+      ),
+    );
+  }
+
+  List<RelioDevice> get _mapPeers => _savedDevices
+      .where(
+        (saved) =>
+            !RelioMockData.isDemoId(saved.deviceId) &&
+            NearbyMapCalculations.isValidPoint(
+              saved.peerLatitude,
+              saved.peerLongitude,
+            ) &&
+            _matches(_nearby.peerStatuses[saved.deviceId] ?? saved.status),
+      )
+      .map((saved) {
+        final status = _nearby.peerStatuses[saved.deviceId] ?? saved.status;
+        return RelioDevice(
+          id: saved.deviceId,
+          name: saved.displayName,
+          status: status,
+          signalQuality: 0,
+          isConnected: _nearby.isDeviceConnected(saved.deviceId),
+          isDemo: false,
+          presence: _nearby.isDeviceConnected(saved.deviceId)
+              ? PeerPresence.connected
+              : PeerPresence.stale,
+          lastSeenAt: saved.lastSeenAt,
+          batteryLevel: saved.batteryLevel,
+          isCharging: saved.isCharging,
+          peerDeviceModel: saved.peerDeviceModel,
+          locationLatitude: saved.peerLatitude,
+          locationLongitude: saved.peerLongitude,
+          locationAccuracyMeters: saved.peerLocationAccuracy,
+          locationCapturedAt: saved.peerLocationCapturedAt,
+        );
+      })
+      .toList(growable: false);
 
   Future<void> _loadBondedDevices() async {
     final devices = await _nearby.bondedBluetoothDevices();
@@ -203,6 +329,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 ? PeerPresence.stale
                 : PeerPresence.disconnected,
             lastSeenAt: device.lastSeenAt,
+            batteryLevel: device.batteryLevel,
+            isCharging: device.isCharging,
+            peerDeviceModel: device.peerDeviceModel,
+            locationLatitude: device.peerLatitude,
+            locationLongitude: device.peerLongitude,
+            locationAccuracyMeters: device.peerLocationAccuracy,
+            locationCapturedAt: device.peerLocationCapturedAt,
           );
         })
         .toList(growable: false);
@@ -239,8 +372,21 @@ class _NearbyScreenState extends State<NearbyScreen> {
               null => PeerPresence.discovered,
               NearbyConnectionState.failed => PeerPresence.failed,
             },
+      batteryLevel: _savedDevice(peer.deviceId)?.batteryLevel,
+      isCharging: _savedDevice(peer.deviceId)?.isCharging,
+      peerDeviceModel: _savedDevice(peer.deviceId)?.peerDeviceModel,
+      locationLatitude: _savedDevice(peer.deviceId)?.peerLatitude,
+      locationLongitude: _savedDevice(peer.deviceId)?.peerLongitude,
+      locationAccuracyMeters: _savedDevice(peer.deviceId)?.peerLocationAccuracy,
+      locationCapturedAt: _savedDevice(peer.deviceId)?.peerLocationCapturedAt,
     );
   }
+
+  RelioNearbyDevice? _savedDevice(String? deviceId) => deviceId == null
+      ? null
+      : _savedDevices
+            .where((device) => device.deviceId == deviceId)
+            .firstOrNull;
 
   @override
   Widget build(BuildContext context) {
@@ -256,307 +402,440 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final demoDevices = RelioMockData.devices
         .where((device) => _matches(device.status))
         .toList(growable: false);
+    final urgentCount = _savedDevices
+        .where((device) => device.status == DeviceStatus.sos)
+        .length;
 
     return Scaffold(
-      appBar: RelioAppBar(
-        title: 'อุปกรณ์ใกล้เคียง',
-        subtitle: 'ค้นหาและเชื่อมต่อโทรศัพท์จริงแบบออฟไลน์',
-        actions: [
-          IconButton(
-            onPressed: _dependencies.connectivityStatus.refresh,
-            tooltip: 'ตรวจสอบ Internet',
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          RelioSpacing.lg,
-          4,
-          RelioSpacing.lg,
-          24,
-        ),
+      body: Stack(
+        fit: StackFit.expand,
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(RelioSpacing.md),
-              child: Wrap(
-                spacing: 16,
-                runSpacing: 8,
+          NearbyMapCanvas(
+            peers: _mapPeers,
+            myLocation: _myLocation,
+            navigationTargetId: _navigationTargetId,
+            onPeerSelected: _showPeerDetails,
+          ),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: _nearbyPanel(
+                  status: status,
+                  readiness: readiness,
+                  peerCount: realDevices.length,
+                  urgentCount: urgentCount,
+                ),
+              ),
+            ),
+          ),
+          DraggableScrollableSheet(
+            key: ValueKey(_listMode),
+            initialChildSize: _listMode ? 0.56 : 0.13,
+            minChildSize: 0.12,
+            maxChildSize: 0.78,
+            snap: true,
+            snapSizes: const [0.13, 0.56, 0.78],
+            builder: (context, scrollController) => Material(
+              color: Theme.of(context).colorScheme.surface,
+              elevation: 8,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
                 children: [
-                  Text('Internet • ${_internetLabel(status.reachability)}'),
-                  Text('Wi-Fi • ${_radioLabel(status.runtime.wifiEnabled)}'),
-                  Text(
-                    'Bluetooth • ${_radioLabel(status.runtime.bluetoothEnabled)}',
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(99),
+                    ),
                   ),
-                  if (readiness.policy.locationRequired)
-                    Text(
-                      'Location • ${_radioLabel(status.runtime.locationEnabled)}',
+                  if (!_listMode)
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setState(() => _listMode = true),
+                        child: Center(
+                          child: Text(
+                            'อุปกรณ์ที่พบจริง • ${realDevices.length} เครื่อง  ดูรายการ',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: _nearbyList(
+                        scrollController: scrollController,
+                        realDevices: realDevices,
+                        livePeers: livePeers,
+                        demoDevices: demoDevices,
+                        readiness: readiness,
+                      ),
                     ),
-                  Text('Nearby • ${_nearby.statusLabel}'),
-                  if (readiness.wifiDegraded)
-                    const Text(
-                      'Wi-Fi ไม่พร้อม: ใช้ Bluetooth โดยความเร็วอาจลดลง',
-                    ),
-                  Text('เชื่อมต่อแล้ว • ${_nearby.connectedPeerCount} เครื่อง'),
                 ],
               ),
             ),
           ),
-          if (!readiness.ready)
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: ListTile(
-                leading: const Icon(Icons.admin_panel_settings_outlined),
-                title: const Text('Nearby ยังไม่พร้อม'),
-                subtitle: Text(readiness.summary),
-                trailing:
-                    readiness.blockers.contains(
-                      NearbyBlocker.transportPermissionMissing,
+          Positioned(
+            right: 16,
+            bottom: 160,
+            child: FloatingActionButton.small(
+              heroTag: 'nearby-share-location',
+              onPressed: _sharingLocation ? null : _shareCurrentLocation,
+              tooltip: 'แชร์ตำแหน่งล่าสุดกับ peer ที่เชื่อมต่อ',
+              child: _sharingLocation
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                    ? null
-                    : TextButton(
-                        onPressed: _resolveBlocker,
-                        child: const Text('ตรวจสอบ'),
-                      ),
-              ),
-            ),
-          if (_nearby.compatibilityFallbackAvailable &&
-              !_nearby.compatibilityModeActive)
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(RelioSpacing.md),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.bluetooth_searching),
-                      title: Text('Bluetooth Classic สำหรับ QA'),
-                      subtitle: Text(
-                        'Realme เปิด listener; Samsung ค้นหาและเป็นฝ่ายเชื่อมต่อ',
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () async {
-                              await _nearby.activateCompatibilityMode(
-                                serverRole: true,
-                              );
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'RFCOMM listener พร้อมรับการเชื่อมต่อ',
-                                  ),
-                                ),
-                              );
-                            },
-                            child: const Text('Realme • Listener'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () async {
-                              await _nearby.activateCompatibilityMode(
-                                serverRole: false,
-                                bondedOnly: true,
-                              );
-                              await _loadBondedDevices();
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'โหลดอุปกรณ์ Bluetooth ที่จับคู่แล้ว',
-                                  ),
-                                ),
-                              );
-                            },
-                            child: const Text('Samsung • Paired'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          if (_nearby.compatibilityModeActive)
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.bluetooth_connected),
-                title: Text('Bluetooth Classic QA ทำงานอยู่'),
-                subtitle: Text(
-                  'Realme = RFCOMM Listener • Samsung = bonded client',
-                ),
-              ),
-            ),
-          const SizedBox(height: 8),
-          if (_nearby.compatibilityModeActive && _bondedDevices.isNotEmpty) ...[
-            Text(
-              'PAIRED DEVICES',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            ..._bondedDevices.map((device) {
-              final peer = NearbyPeer(id: device.endpointId, name: device.name);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.bluetooth_connected),
-                    title: Text(device.name),
-                    subtitle: Text(
-                      'Paired • ${bluetoothClassicAddressSuffix(device.endpointId)}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _openRealPeer(peer),
-                  ),
-                ),
-              );
-            }),
-            const SizedBox(height: 12),
-          ],
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: NearbyFilter.values
-                  .map(
-                    (filter) => Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(
-                          _filterLabel(filter, realDevices, demoDevices),
-                        ),
-                        selected: _filter == filter,
-                        selectedColor: _filterColor(filter),
-                        labelStyle: TextStyle(
-                          color: _filter == filter ? Colors.white : null,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        onSelected: (_) => setState(() => _filter = filter),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _nearby.isDiscovering ? null : _startSearching,
-                  icon: const Icon(Icons.radar_rounded),
-                  label: const Text('ค้นหาอุปกรณ์จริง'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'อุปกรณ์ที่พบจริง',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          if (realDevices.isEmpty)
-            const Card(
-              child: ListTile(
-                leading: Icon(Icons.radar_outlined),
-                title: Text('ยังไม่พบอุปกรณ์จริง'),
-                subtitle: Text(
-                  'เปิด RELIO และ Nearby บนอุปกรณ์ทั้งสองเครื่อง โดยไม่จำเป็นต้องมี Internet',
-                ),
-              ),
-            )
-          else
-            ...realDevices.map((device) {
-              final peer = livePeers.cast<NearbyPeer?>().firstWhere(
-                (item) =>
-                    item?.deviceId == device.id ||
-                    (device.id.startsWith('pending:') &&
-                        item?.endpointId == device.id.substring(8)),
-                orElse: () => null,
-              );
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: RelioDeviceCard(
-                        device: device,
-                        peerIdentifier: peer == null
-                            ? null
-                            : bluetoothClassicAddressSuffix(peer.endpointId),
-                        onTap: peer == null ? null : () => _openRealPeer(peer),
-                      ),
-                    ),
-                    if (!device.id.startsWith('pending:'))
-                      PopupMenuButton<String>(
-                        tooltip: 'ตั้งค่าอุปกรณ์ที่บันทึกไว้',
-                        onSelected: (action) => unawaited(
-                          _updateSavedPeer(
-                            _savedDevices.firstWhere(
-                              (saved) => saved.deviceId == device.id,
-                            ),
-                            action,
-                          ),
-                        ),
-                        itemBuilder: (context) {
-                          final saved = _savedDevices
-                              .where((item) => item.deviceId == device.id)
-                              .firstOrNull;
-                          if (saved == null) return const [];
-                          return [
-                            PopupMenuItem(
-                              value: saved.isTrusted ? 'untrust' : 'trust',
-                              child: Text(
-                                saved.isTrusted
-                                    ? 'เลิกเชื่อถืออุปกรณ์'
-                                    : 'เชื่อถืออุปกรณ์นี้',
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: saved.isBlocked ? 'unblock' : 'block',
-                              child: Text(
-                                saved.isBlocked
-                                    ? 'ยกเลิกการบล็อก'
-                                    : 'บล็อกอุปกรณ์นี้',
-                              ),
-                            ),
-                          ];
-                        },
-                      ),
-                  ],
-                ),
-              );
-            }),
-          const SizedBox(height: 20),
-          Text(
-            'ข้อมูลตัวอย่าง',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'ข้อมูล DEMO ใช้ประกอบการนำเสนอ ไม่ใช่อุปกรณ์ที่ค้นพบจริง',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          ...demoDevices.map(
-            (device) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: RelioDeviceCard(
-                device: device,
-                onTap: () => context.push('/chat/${device.id}'),
-              ),
+                  : const Icon(Icons.my_location_rounded),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _nearbyPanel({
+    required InternetStatus status,
+    required NearbyReadiness readiness,
+    required int peerCount,
+    required int urgentCount,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 5,
+      color: colors.surface.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(22),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () =>
+                        setState(() => _panelExpanded = !_panelExpanded),
+                    child: Text(
+                      _panelExpanded
+                          ? 'อุปกรณ์ใกล้เคียง'
+                          : 'อุปกรณ์ใกล้เคียง • $peerCount เครื่อง • SOS $urgentCount',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'ตรวจสอบ Internet',
+                  onPressed: _dependencies.connectivityStatus.refresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  tooltip: _panelExpanded ? 'ย่อแผงควบคุม' : 'ขยายแผงควบคุม',
+                  onPressed: () =>
+                      setState(() => _panelExpanded = !_panelExpanded),
+                  icon: Icon(
+                    _panelExpanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            if (_panelExpanded) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${_internetLabel(status.reachability)} • Wi-Fi ${_radioLabel(status.runtime.wifiEnabled)} • Bluetooth ${_radioLabel(status.runtime.bluetoothEnabled)} • $peerCount เครื่อง',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              if (!readiness.ready)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Nearby ยังไม่พร้อม • ${readiness.summary}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: colors.error),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed:
+                            readiness.blockers.contains(
+                              NearbyBlocker.transportPermissionMissing,
+                            )
+                            ? null
+                            : _resolveBlocker,
+                        child: const Text('ตรวจสอบ'),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  ChoiceChip(
+                    label: const Text('รายการ'),
+                    selected: _listMode,
+                    onSelected: (_) => setState(() => _listMode = true),
+                  ),
+                  ChoiceChip(
+                    label: const Text('แผนที่'),
+                    selected: !_listMode,
+                    onSelected: (_) => setState(() => _listMode = false),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _nearby.isDiscovering ? null : _startSearching,
+                    icon: const Icon(Icons.radar_rounded, size: 18),
+                    label: const Text('ค้นหาอุปกรณ์'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: NearbyFilter.values
+                      .where((filter) => filter != NearbyFilter.normal)
+                      .map(
+                        (filter) => Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(
+                              _filterLabel(
+                                filter,
+                                _livePeers
+                                    .map(_toLiveDevice)
+                                    .toList(growable: false),
+                                RelioMockData.devices,
+                              ),
+                            ),
+                            selected: _filter == filter,
+                            selectedColor: _filterColor(filter),
+                            labelStyle: TextStyle(
+                              color: _filter == filter ? Colors.white : null,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            onSelected: (_) => setState(() {
+                              _filter = filter;
+                              _listMode = true;
+                            }),
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _nearbyList({
+    required ScrollController scrollController,
+    required List<RelioDevice> realDevices,
+    required List<NearbyPeer> livePeers,
+    required List<RelioDevice> demoDevices,
+    required NearbyReadiness readiness,
+  }) {
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+      children: [
+        Text(
+          'อุปกรณ์ที่พบจริง • ${realDevices.length} เครื่อง',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        if (realDevices.isEmpty)
+          const Card(
+            child: ListTile(
+              leading: Icon(Icons.radar_outlined),
+              title: Text('ยังไม่พบอุปกรณ์จริง'),
+              subtitle: Text(
+                'เปิด RELIO และ Nearby บนอุปกรณ์ที่ต้องการเชื่อมต่อ โดยไม่จำเป็นต้องมี Internet',
+              ),
+            ),
+          )
+        else
+          ...realDevices.map((device) {
+            final peer = livePeers.cast<NearbyPeer?>().firstWhere(
+              (item) =>
+                  item?.deviceId == device.id ||
+                  (device.id.startsWith('pending:') &&
+                      item?.endpointId == device.id.substring(8)),
+              orElse: () => null,
+            );
+            final saved = _savedDevice(device.id);
+            final noLocation = !NearbyMapCalculations.isValidPoint(
+              device.locationLatitude,
+              device.locationLongitude,
+            );
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        RelioDeviceCard(
+                          device: device,
+                          peerIdentifier: peer == null
+                              ? null
+                              : bluetoothClassicAddressSuffix(peer.endpointId),
+                          onTap: peer == null
+                              ? (saved == null
+                                    ? null
+                                    : () => _showPeerDetails(saved.deviceId))
+                              : () => _openRealPeer(peer),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 12, bottom: 4),
+                          child: Text(
+                            noLocation
+                                ? 'ยังไม่มีตำแหน่ง • peer ยังอยู่ในรายการ'
+                                : NearbyMapCalculations.freshnessLabel(
+                                    device.locationCapturedAt,
+                                    DateTime.now(),
+                                  ),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (saved != null)
+                    PopupMenuButton<String>(
+                      tooltip: 'ตั้งค่าอุปกรณ์ที่บันทึกไว้',
+                      onSelected: (action) =>
+                          unawaited(_updateSavedPeer(saved, action)),
+                      itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: saved.isTrusted ? 'untrust' : 'trust',
+                          child: Text(
+                            saved.isTrusted
+                                ? 'เลิกเชื่อถืออุปกรณ์'
+                                : 'เชื่อถืออุปกรณ์นี้',
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: saved.isBlocked ? 'unblock' : 'block',
+                          child: Text(
+                            saved.isBlocked
+                                ? 'ยกเลิกการบล็อก'
+                                : 'บล็อกอุปกรณ์นี้',
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            );
+          }),
+        const SizedBox(height: 8),
+        Text('ข้อมูลตัวอย่าง', style: Theme.of(context).textTheme.titleMedium),
+        Text(
+          'ข้อมูล DEMO แยกจากอุปกรณ์จริงและไม่แสดงเป็น marker',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: 8),
+        ...demoDevices.map(
+          (device) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: RelioDeviceCard(
+              device: device,
+              onTap: () => context.push('/chat/${device.id}'),
+            ),
+          ),
+        ),
+        ExpansionTile(
+          leading: const Icon(Icons.build_circle_outlined),
+          title: const Text('เครื่องมือ QA / Diagnostics'),
+          subtitle: const Text('ใช้เฉพาะการทดสอบ Bluetooth Classic'),
+          children: [
+            if (_nearby.compatibilityFallbackAvailable &&
+                !_nearby.compatibilityModeActive)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          await _nearby.activateCompatibilityMode(
+                            serverRole: true,
+                          );
+                          if (mounted) {
+                            _showSnack('RFCOMM listener พร้อมรับการเชื่อมต่อ');
+                          }
+                        },
+                        child: const Text('Listener'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () async {
+                          await _nearby.activateCompatibilityMode(
+                            serverRole: false,
+                            bondedOnly: true,
+                          );
+                          await _loadBondedDevices();
+                          if (mounted) _showSnack('โหลดอุปกรณ์ที่จับคู่แล้ว');
+                        },
+                        child: const Text('อุปกรณ์ที่จับคู่'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_nearby.compatibilityModeActive)
+              const ListTile(
+                leading: Icon(Icons.bluetooth_connected),
+                title: Text('Bluetooth Classic QA ทำงานอยู่'),
+                subtitle: Text('ใช้หน้า Diagnostics เพื่อเปลี่ยนโหมด'),
+              ),
+            ..._bondedDevices.map(
+              (device) => ListTile(
+                leading: const Icon(Icons.bluetooth_connected),
+                title: Text(device.name),
+                subtitle: Text(
+                  'Paired • ${bluetoothClassicAddressSuffix(device.endpointId)}',
+                ),
+                onTap: () => _openRealPeer(
+                  NearbyPeer(id: device.endpointId, name: device.name),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _showSnack(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   String _filterLabel(
@@ -596,3 +875,114 @@ String _radioLabel(bool? enabled) => switch (enabled) {
   false => 'ปิด',
   null => 'ไม่ทราบ',
 };
+
+class _PeerDetailSheet extends StatelessWidget {
+  const _PeerDetailSheet({
+    required this.device,
+    required this.myLocation,
+    required this.onChat,
+    required this.onNavigate,
+  });
+
+  final RelioDevice device;
+  final LocationData? myLocation;
+  final VoidCallback onChat;
+  final VoidCallback onNavigate;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final distance = NearbyMapCalculations.distanceMeters(
+      fromLatitude: myLocation?.latitude,
+      fromLongitude: myLocation?.longitude,
+      toLatitude: device.locationLatitude,
+      toLongitude: device.locationLongitude,
+    );
+    final bearing = NearbyMapCalculations.bearingDegrees(
+      fromLatitude: myLocation?.latitude,
+      fromLongitude: myLocation?.longitude,
+      toLatitude: device.locationLatitude,
+      toLongitude: device.locationLongitude,
+    );
+    final hasLocation = NearbyMapCalculations.isValidPoint(
+      device.locationLatitude,
+      device.locationLongitude,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(device.name, style: Theme.of(context).textTheme.titleLarge),
+          if (device.peerDeviceModel?.isNotEmpty == true)
+            Text(
+              device.peerDeviceModel!,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          const SizedBox(height: 12),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.circle, color: device.status.color),
+            title: Text('สถานะ ${device.status.label}'),
+            subtitle: Text(
+              device.isConnected
+                  ? 'เชื่อมต่อ Nearby'
+                  : 'ไม่ได้เชื่อมต่อ Nearby',
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.battery_std_rounded),
+            title: Text(
+              device.batteryLevel == null
+                  ? 'แบตเตอรี่ไม่ทราบ'
+                  : 'แบตเตอรี่ ${device.batteryLevel}%${device.isCharging == true ? ' • กำลังชาร์จ' : ''}',
+            ),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.location_on_outlined),
+            title: Text(hasLocation ? 'ตำแหน่ง peer' : 'ยังไม่มีตำแหน่ง peer'),
+            subtitle: Text(
+              hasLocation
+                  ? '${NearbyMapCalculations.freshnessLabel(device.locationCapturedAt, now)} • ${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)}'
+                  : 'peer ต้องแชร์ตำแหน่งด้วยตนเองก่อน',
+            ),
+          ),
+          if (NearbyMapCalculations.freshness(
+                    device.locationCapturedAt ??
+                        DateTime.fromMillisecondsSinceEpoch(0),
+                    now,
+                  ) !=
+                  LocationFreshness.fresh &&
+              hasLocation)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Text('ตำแหน่งเก่าอาจไม่ตรงกับตำแหน่งปัจจุบัน'),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: device.isConnected ? onChat : null,
+                  icon: const Icon(Icons.chat_bubble_outline_rounded),
+                  label: const Text('แชท'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: hasLocation ? onNavigate : null,
+                  icon: const Icon(Icons.navigation_rounded),
+                  label: const Text('ดูเส้นทาง'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}

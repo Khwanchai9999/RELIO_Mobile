@@ -42,8 +42,17 @@ into it.
   file copying, SQLite queries, or geolocator calls.
 - Never put image/video bytes in JSON packets. Use Nearby file payloads and
   correlate them with persistent `transferId` plus native payload ID metadata.
-- Request location only for explicit Send Location or SOS actions. Do not add
+- Request location only for explicit Send Location, SOS, or Nearby Map
+  location-share actions. Map sharing is one-shot and user initiated; do not add
   background location, continuous tracking, or a location history.
+- Nearby Map is a presentation layer over repository-backed peer state. Keep
+  MapLibre initialization lazy and non-blocking; Map style/network failure must
+  leave Nearby discovery, List, chat, SOS, Rescue, and location transport usable.
+- Peer battery and last-known map location are optional `hello`/`deviceStatus`
+  metadata. Validate ranges, persist through `NearbyDeviceRepository`, and keep
+  missing/stale metadata distinct from live runtime facts.
+- Show map attribution for the configured style provider. Do not bulk-download
+  public map tiles or imply turn-by-turn road routing from straight-line bearing.
 - Use `MockNearbyTransport` for deterministic development and automated tests.
 - Use `FakeCloudDataSource` for deterministic cloud/auth tests; never require
   internet in the normal test suite.

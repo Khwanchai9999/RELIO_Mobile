@@ -53,7 +53,30 @@ then sends `ack`.
 ACKs are safe. A sender transitions `pending → nearbySent → delivered`; the
 cloud-only `synced` state is not used by v0.4.
 
-`deviceStatus` carries `normal`, `sos`, or `rescue`.
+`deviceStatus` carries `normal`, `sos`, or `rescue`. `hello` and
+`deviceStatus` may also carry optional peer metadata:
+
+| Field | Meaning | Validation |
+|---|---|---|
+| `batteryLevel` | Battery percentage | Integer from 0 to 100 |
+| `isCharging` | Charging state when the platform reports it | Boolean |
+| `batteryUpdatedAt` | Snapshot time | Parseable ISO-8601 timestamp |
+| `deviceModel` | Sanitized platform model label | Bounded string |
+| `latitude`, `longitude` | User-shared last-known position | Both required together; valid coordinate ranges |
+| `locationAccuracy` | Reported accuracy in metres | Finite non-negative number |
+| `locationCapturedAt` | Position capture time | Parseable ISO-8601 timestamp |
+
+All fields are optional for older peers. Battery snapshots are sent on
+handshake/reconnect, after a meaningful level change (5 percentage points),
+on charging-state changes, and at a conservative ten-minute refresh while the
+Nearby screen is active. They are not chat messages and are not polled every
+second. Status ordering must not discard otherwise valid metadata.
+
+Map coordinates are shared only after an explicit one-shot Nearby Map action
+and only to connected endpoints whose RELIO identity handshake is complete.
+Receivers persist them with the canonical peer row and display capture age; no
+fake/default coordinates are generated. Location sharing does not enable
+continuous/background GPS.
 
 `sos` carries `sosId`, owner identity, optional message and coordinates,
 creation time, optional location capture metadata, and `isActive`. Duplicate
@@ -63,6 +86,12 @@ event. Missing location is valid; no fake coordinates are generated.
 `locationMessage` carries a message ID, conversation ID, latitude/longitude,
 optional accuracy, and the capture timestamp. It is an offline location card,
 not a map link.
+
+The Nearby Map is a presentation layer over local repository state. It uses a
+MapLibre-compatible style configured by the app, displays provider attribution,
+and must degrade without blocking Nearby, chat, SOS, Rescue, or List when map
+tiles/style cannot load. Distance and bearing are straight-line estimates, not
+road routing. Public map tiles must not be bulk-downloaded.
 
 `hello.capabilities` advertises `relay-v1` when the node can store and forward
 bounded envelopes. `relayEnvelope` carries a `RelayEnvelope` with a relay

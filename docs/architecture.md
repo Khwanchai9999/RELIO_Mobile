@@ -29,8 +29,12 @@ Flutter screens
   `FakeCloudDataSource` is the isolated test implementation.
 - `MediaStorageService` copies and validates media under app-managed storage.
   Protocol JSON carries metadata, while Nearby file payloads carry bytes.
-- `LocationService` is called only for an explicit Send Location or SOS
-  action. There is no background location history.
+- `LocationService` is called only for an explicit Send Location, SOS, or
+  Nearby Map location-share action. Map sharing is one-shot; there is no
+  background location history.
+- `NearbyDeviceRepository` persists optional battery and last-known peer
+  location metadata received only after the stable identity handshake. The
+  MapLibre canvas renders that state lazily and does not gate Nearby services.
 
 ## Offline-first and trust
 

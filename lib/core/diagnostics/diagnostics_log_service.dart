@@ -259,9 +259,6 @@ class DiagnosticsLogService {
       archive.addFile(ArchiveFile(item.key, data.length, data));
     }
     final bytes = ZipEncoder().encode(archive);
-    if (bytes == null) {
-      throw const FileSystemException('Could not encode diagnostics archive');
-    }
     final stamp = DateTime.now().toLocal();
     final filename =
         'relio-diagnostics-${stamp.year.toString().padLeft(4, '0')}${stamp.month.toString().padLeft(2, '0')}${stamp.day.toString().padLeft(2, '0')}-${stamp.hour.toString().padLeft(2, '0')}${stamp.minute.toString().padLeft(2, '0')}${stamp.second.toString().padLeft(2, '0')}.zip';

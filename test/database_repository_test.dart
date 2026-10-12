@@ -980,6 +980,20 @@ void main() {
         displayName: 'Peer',
         participantStatus: DeviceStatus.offline,
       );
+      for (final column in [
+        'battery_level',
+        'is_charging',
+        'battery_updated_at',
+        'peer_latitude',
+        'peer_longitude',
+        'peer_location_accuracy',
+        'peer_location_captured_at',
+        'peer_device_model',
+      ]) {
+        await previous.customStatement(
+          'ALTER TABLE nearby_devices DROP COLUMN $column',
+        );
+      }
       await previous.customStatement('PRAGMA user_version = 6');
       await previous.customStatement('DROP TABLE cloud_conversation_links');
       await previous.close();
@@ -996,7 +1010,7 @@ void main() {
         await upgradedRepositories.cloudLinks.listForOwner('account-a'),
         isEmpty,
       );
-      expect(upgraded.schemaVersion, 8);
+      expect(upgraded.schemaVersion, 9);
       await upgraded.close();
     },
   );
@@ -1031,6 +1045,14 @@ void main() {
         deviceId: 'trusted-peer',
         displayName: 'Trusted Peer',
         status: DeviceStatus.normal,
+        batteryLevel: 64,
+        isCharging: true,
+        batteryUpdatedAt: DateTime.utc(2026, 10, 12, 8),
+        peerLatitude: 10.25,
+        peerLongitude: 101.5,
+        peerLocationAccuracy: 12,
+        peerLocationCapturedAt: DateTime.utc(2026, 10, 12, 8),
+        peerDeviceModel: 'QA Phone',
       );
       await firstRepositories.nearbyDevices.setTrustedIdentity(
         deviceId: 'trusted-peer',
@@ -1083,6 +1105,15 @@ void main() {
         ))?.publicIdentityFingerprint,
         List.filled(64, 'b').join(),
       );
+      final savedPeer = await reopenedRepositories.nearbyDevices.getDevice(
+        'trusted-peer',
+      );
+      expect(savedPeer?.batteryLevel, 64);
+      expect(savedPeer?.isCharging, isTrue);
+      expect(savedPeer?.peerLatitude, 10.25);
+      expect(savedPeer?.peerLongitude, 101.5);
+      expect(savedPeer?.peerLocationAccuracy, 12);
+      expect(savedPeer?.peerDeviceModel, 'QA Phone');
       expect(
         await reopenedRepositories.attachments.getById('persistent-attachment'),
         isNotNull,

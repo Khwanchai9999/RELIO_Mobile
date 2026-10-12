@@ -109,6 +109,14 @@ class RelioPacket {
     DeviceStatus status = DeviceStatus.normal,
     bool? rescueActive,
     DateTime? updatedAt,
+    int? batteryLevel,
+    bool? isCharging,
+    DateTime? batteryUpdatedAt,
+    double? latitude,
+    double? longitude,
+    double? locationAccuracy,
+    DateTime? locationCapturedAt,
+    String? deviceModel,
     List<String> capabilities = const [
       'textMessage',
       'deviceStatus',
@@ -128,6 +136,16 @@ class RelioPacket {
       'rescueActive': rescueActive ?? status == DeviceStatus.rescue,
       'updatedAt': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
       'capabilities': capabilities,
+      ..._peerMetadataFields(
+        batteryLevel: batteryLevel,
+        isCharging: isCharging,
+        batteryUpdatedAt: batteryUpdatedAt,
+        latitude: latitude,
+        longitude: longitude,
+        locationAccuracy: locationAccuracy,
+        locationCapturedAt: locationCapturedAt,
+        deviceModel: deviceModel,
+      ),
     },
   );
 
@@ -178,6 +196,14 @@ class RelioPacket {
     required DeviceStatus status,
     bool? rescueActive,
     DateTime? updatedAt,
+    int? batteryLevel,
+    bool? isCharging,
+    DateTime? batteryUpdatedAt,
+    double? latitude,
+    double? longitude,
+    double? locationAccuracy,
+    DateTime? locationCapturedAt,
+    String? deviceModel,
   }) => RelioPacket(
     protocolVersion: 1,
     packetId: const Uuid().v4(),
@@ -191,8 +217,52 @@ class RelioPacket {
       'status': status.name,
       'rescueActive': rescueActive ?? status == DeviceStatus.rescue,
       'updatedAt': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
+      ..._peerMetadataFields(
+        batteryLevel: batteryLevel,
+        isCharging: isCharging,
+        batteryUpdatedAt: batteryUpdatedAt,
+        latitude: latitude,
+        longitude: longitude,
+        locationAccuracy: locationAccuracy,
+        locationCapturedAt: locationCapturedAt,
+        deviceModel: deviceModel,
+      ),
     },
   );
+
+  static Map<String, Object?> _peerMetadataFields({
+    int? batteryLevel,
+    bool? isCharging,
+    DateTime? batteryUpdatedAt,
+    double? latitude,
+    double? longitude,
+    double? locationAccuracy,
+    DateTime? locationCapturedAt,
+    String? deviceModel,
+  }) => {
+    ...?(batteryLevel == null ? null : {'batteryLevel': batteryLevel}),
+    ...?(isCharging == null ? null : {'isCharging': isCharging}),
+    ...?(batteryLevel == null && isCharging == null
+        ? null
+        : {
+            'batteryUpdatedAt': (batteryUpdatedAt ?? DateTime.now())
+                .toUtc()
+                .toIso8601String(),
+          }),
+    ...?(latitude == null ? null : {'latitude': latitude}),
+    ...?(longitude == null ? null : {'longitude': longitude}),
+    ...?(locationAccuracy == null
+        ? null
+        : {'locationAccuracy': locationAccuracy}),
+    ...?(latitude == null || longitude == null
+        ? null
+        : {
+            'locationCapturedAt': (locationCapturedAt ?? DateTime.now())
+                .toUtc()
+                .toIso8601String(),
+          }),
+    ...?(deviceModel == null ? null : {'deviceModel': deviceModel}),
+  };
 
   factory RelioPacket.sos({
     required String senderDeviceId,
@@ -498,6 +568,7 @@ class RelioPacket {
         if (payload.containsKey('status')) _statusField();
         if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
         if (payload.containsKey('updatedAt')) _payloadString('updatedAt');
+        _validatePeerMetadata();
       case RelioPacketType.textMessage:
         _payloadString('messageId');
         _payloadString('conversationId');
@@ -509,6 +580,7 @@ class RelioPacket {
         _statusField();
         _payloadString('updatedAt');
         if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
+        _validatePeerMetadata();
       case RelioPacketType.ack:
         _payloadString('packetId');
         if (payload.containsKey('messageId')) _payloadString('messageId');
@@ -630,6 +702,56 @@ class RelioPacket {
     final value = payload[key];
     if (value != null && value is! num) {
       throw RelioPacketException('Invalid payload field: $key');
+    }
+  }
+
+  void _validatePeerMetadata() {
+    if (payload.containsKey('deviceModel')) {
+      final model = payload['deviceModel'];
+      if (model is! String || model.length > 100) {
+        throw const RelioPacketException('Invalid peer device model.');
+      }
+    }
+    if (payload.containsKey('batteryLevel')) {
+      final level = payload['batteryLevel'];
+      if (level is! int || level < 0 || level > 100) {
+        throw const RelioPacketException('Invalid battery level.');
+      }
+    }
+    if (payload.containsKey('isCharging')) _payloadBool('isCharging');
+    if (payload.containsKey('batteryUpdatedAt') &&
+        DateTime.tryParse(_payloadString('batteryUpdatedAt')) == null) {
+      throw const RelioPacketException('Invalid battery timestamp.');
+    }
+    final hasLatitude = payload.containsKey('latitude');
+    final hasLongitude = payload.containsKey('longitude');
+    if (hasLatitude != hasLongitude) {
+      throw const RelioPacketException('Incomplete peer location.');
+    }
+    if (hasLatitude) {
+      final latitude = _requiredNumber('latitude').toDouble();
+      final longitude = _requiredNumber('longitude').toDouble();
+      if (latitude < -90 ||
+          latitude > 90 ||
+          longitude < -180 ||
+          longitude > 180) {
+        throw const RelioPacketException('Peer location is out of range.');
+      }
+      final capturedAt = DateTime.tryParse(
+        _payloadString('locationCapturedAt'),
+      );
+      if (capturedAt == null) {
+        throw const RelioPacketException('Invalid peer location timestamp.');
+      }
+      if (payload.containsKey('locationAccuracy')) {
+        final accuracy = _requiredNumber('locationAccuracy');
+        if (accuracy < 0) {
+          throw const RelioPacketException('Invalid peer location accuracy.');
+        }
+      }
+    } else if (payload.containsKey('locationCapturedAt') ||
+        payload.containsKey('locationAccuracy')) {
+      throw const RelioPacketException('Peer location metadata has no point.');
     }
   }
 

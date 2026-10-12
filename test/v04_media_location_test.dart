@@ -110,7 +110,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 8);
+      expect(db.schemaVersion, 9);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',

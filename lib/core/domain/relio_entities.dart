@@ -117,6 +117,14 @@ class RelioNearbyDevice {
     this.autoReconnectEnabled = false,
     this.publicIdentityKey,
     this.publicIdentityFingerprint,
+    this.batteryLevel,
+    this.isCharging,
+    this.batteryUpdatedAt,
+    this.peerLatitude,
+    this.peerLongitude,
+    this.peerLocationAccuracy,
+    this.peerLocationCapturedAt,
+    this.peerDeviceModel,
   });
 
   final String deviceId;
@@ -132,6 +140,14 @@ class RelioNearbyDevice {
   final bool autoReconnectEnabled;
   final String? publicIdentityKey;
   final String? publicIdentityFingerprint;
+  final int? batteryLevel;
+  final bool? isCharging;
+  final DateTime? batteryUpdatedAt;
+  final double? peerLatitude;
+  final double? peerLongitude;
+  final double? peerLocationAccuracy;
+  final DateTime? peerLocationCapturedAt;
+  final String? peerDeviceModel;
 }
 
 class RelioSosEvent {

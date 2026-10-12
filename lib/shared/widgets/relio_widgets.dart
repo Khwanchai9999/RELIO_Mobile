@@ -332,6 +332,17 @@ class RelioDeviceCard extends StatelessWidget {
                           : '${peerIdentifier ?? stableDeviceId} • $stateLabel',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    if (!device.isDemo && device.batteryLevel != null) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        '${device.isCharging == true ? '⚡ ' : '🔋 '}${device.batteryLevel}%',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: device.batteryLevel! <= 15
+                              ? RelioColors.warning
+                              : null,
+                        ),
+                      ),
+                    ],
                     if (device.isDemo) ...[
                       const SizedBox(height: 3),
                       _SignalBars(quality: device.signalQuality, color: color),

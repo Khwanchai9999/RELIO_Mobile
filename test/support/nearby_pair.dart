@@ -8,6 +8,7 @@ import 'package:drift/drift.dart' hide isNull;
 import 'package:relio_mobile/core/media/media_storage_service.dart';
 import 'package:relio_mobile/core/notifications/local_notification_service.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
+import 'package:relio_mobile/core/device/battery_info_service.dart';
 
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/diagnostics/diagnostics_log_service.dart';
@@ -80,6 +81,8 @@ class HandshakePair {
     bool corruptSignatureB = false,
     String displayNameA = 'สมชาย',
     String? displayNameB,
+    BatteryInfoService? batteryInfoA,
+    BatteryInfoService? batteryInfoB,
   }) async {
     final databaseA = AppDatabase.memory();
     final databaseB = AppDatabase.memory();
@@ -137,6 +140,7 @@ class HandshakePair {
       ),
       settings: repositoriesA.settings,
       localNotifications: notificationsA,
+      batteryInfo: batteryInfoA,
     );
     final serviceB = NearbyService(
       transport: transportB,
@@ -153,6 +157,7 @@ class HandshakePair {
       ),
       settings: repositoriesB.settings,
       localNotifications: notificationsB,
+      batteryInfo: batteryInfoB,
     );
     transportA.incomingDirectory = logsA.directory!;
     transportB.incomingDirectory = logsB.directory!;

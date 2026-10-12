@@ -260,6 +260,14 @@ abstract interface class NearbyDeviceRepository {
     required DeviceStatus status,
     int? signalQuality,
     int? approxDistance,
+    int? batteryLevel,
+    bool? isCharging,
+    DateTime? batteryUpdatedAt,
+    double? peerLatitude,
+    double? peerLongitude,
+    double? peerLocationAccuracy,
+    DateTime? peerLocationCapturedAt,
+    String? peerDeviceModel,
   });
   Future<void> updateStatus(String deviceId, DeviceStatus status);
   Future<void> setTrusted(String deviceId, bool trusted);
@@ -2162,6 +2170,14 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     required DeviceStatus status,
     int? signalQuality,
     int? approxDistance,
+    int? batteryLevel,
+    bool? isCharging,
+    DateTime? batteryUpdatedAt,
+    double? peerLatitude,
+    double? peerLongitude,
+    double? peerLocationAccuracy,
+    DateTime? peerLocationCapturedAt,
+    String? peerDeviceModel,
   }) async {
     final existing = await (db.select(
       db.nearbyDevices,
@@ -2178,6 +2194,18 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
       autoReconnectEnabled: Value(existing?.autoReconnectEnabled ?? false),
       publicIdentityKey: Value(existing?.publicIdentityKey),
       publicIdentityFingerprint: Value(existing?.publicIdentityFingerprint),
+      batteryLevel: Value(batteryLevel ?? existing?.batteryLevel),
+      isCharging: Value(isCharging ?? existing?.isCharging),
+      batteryUpdatedAt: Value(batteryUpdatedAt ?? existing?.batteryUpdatedAt),
+      peerLatitude: Value(peerLatitude ?? existing?.peerLatitude),
+      peerLongitude: Value(peerLongitude ?? existing?.peerLongitude),
+      peerLocationAccuracy: Value(
+        peerLocationAccuracy ?? existing?.peerLocationAccuracy,
+      ),
+      peerLocationCapturedAt: Value(
+        peerLocationCapturedAt ?? existing?.peerLocationCapturedAt,
+      ),
+      peerDeviceModel: Value(peerDeviceModel ?? existing?.peerDeviceModel),
     );
     await db.into(db.nearbyDevices).insertOnConflictUpdate(companion);
   }
@@ -2280,6 +2308,14 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     autoReconnectEnabled: row.autoReconnectEnabled,
     publicIdentityKey: row.publicIdentityKey,
     publicIdentityFingerprint: row.publicIdentityFingerprint,
+    batteryLevel: row.batteryLevel,
+    isCharging: row.isCharging,
+    batteryUpdatedAt: row.batteryUpdatedAt,
+    peerLatitude: row.peerLatitude,
+    peerLongitude: row.peerLongitude,
+    peerLocationAccuracy: row.peerLocationAccuracy,
+    peerLocationCapturedAt: row.peerLocationCapturedAt,
+    peerDeviceModel: row.peerDeviceModel,
   );
 }
 

@@ -39,6 +39,13 @@ class RelioDevice {
     this.isDemo = true,
     this.presence = PeerPresence.demo,
     this.lastSeenAt,
+    this.batteryLevel,
+    this.isCharging,
+    this.peerDeviceModel,
+    this.locationLatitude,
+    this.locationLongitude,
+    this.locationAccuracyMeters,
+    this.locationCapturedAt,
   });
 
   final String id;
@@ -53,6 +60,13 @@ class RelioDevice {
   final bool isDemo;
   final PeerPresence presence;
   final DateTime? lastSeenAt;
+  final int? batteryLevel;
+  final bool? isCharging;
+  final String? peerDeviceModel;
+  final double? locationLatitude;
+  final double? locationLongitude;
+  final double? locationAccuracyMeters;
+  final DateTime? locationCapturedAt;
 
   String get approximateDistance => distanceMetersApprox == null
       ? 'อยู่ใกล้เคียง'
