@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
@@ -72,6 +73,19 @@ void main() {
           attachmentId: attachment.id,
           messageId: attachment.messageId,
         );
+        final receiverUpdate = Completer<RelioMessage>();
+        final messageSubscription = pair.repositoriesB.messages
+            .watchMessages('device-a')
+            .listen((items) {
+              for (final item in items) {
+                if (item.id == message.id &&
+                    item.localFilePath != null &&
+                    !receiverUpdate.isCompleted) {
+                  receiverUpdate.complete(item);
+                }
+              }
+            });
+        addTearDown(messageSubscription.cancel);
         for (var attempt = 1; attempt <= 2; attempt++) {
           await pair.serviceA.sendMediaMessage(message, attachment);
           await waitFor(
@@ -97,6 +111,10 @@ void main() {
           attachment.id,
         ))!;
         expect(await File(received.localPath).readAsBytes(), bytes);
+        final streamed = await receiverUpdate.future.timeout(
+          const Duration(seconds: 2),
+        );
+        expect(streamed.localFilePath, received.localPath);
         expect(
           await pair.repositoriesB.messages.listMessages('device-a'),
           hasLength(1),
@@ -157,6 +175,19 @@ void main() {
       addTearDown(pair.close);
       pair.transportA.fileBeforeMetadata = fileFirst;
       final media = await prepareImage(pair);
+      final receiverUpdate = Completer<RelioMessage>();
+      final messageSubscription = pair.repositoriesB.messages
+          .watchMessages('device-a')
+          .listen((items) {
+            for (final item in items) {
+              if (item.id == media.message.id &&
+                  item.localFilePath != null &&
+                  !receiverUpdate.isCompleted) {
+                receiverUpdate.complete(item);
+              }
+            }
+          });
+      addTearDown(messageSubscription.cancel);
       await pair.serviceA.sendMediaMessage(media.message, media.attachment);
       await waitFor(
         () async =>
@@ -180,6 +211,10 @@ void main() {
         ))?.localFilePath,
         received.localPath,
       );
+      final streamed = await receiverUpdate.future.timeout(
+        const Duration(seconds: 2),
+      );
+      expect(streamed.localFilePath, received.localPath);
       final metadata = pair.transportA.packets.firstWhere(
         (p) => p.type == RelioPacketType.mediaMetadata,
       );

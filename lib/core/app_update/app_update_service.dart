@@ -255,6 +255,7 @@ class AppUpdateService extends ChangeNotifier {
     String? currentBuild,
     this.cooldown = const Duration(minutes: 30),
     bool? enabled,
+    bool Function()? internetAvailable,
   }) : _provider =
            provider ??
            (gateway == null
@@ -272,6 +273,7 @@ class AppUpdateService extends ChangeNotifier {
            const PathProviderAppUpdateTemporaryDirectory(),
        _enabled =
            enabled ?? (RelioBuildInfo.environment == RelioEnvironment.test),
+       _internetAvailable = internetAvailable ?? _alwaysOnline,
        _diagnosticLogging = RelioBuildInfo.environment == RelioEnvironment.test,
        _snapshot = AppUpdateSnapshot.initial(
          currentBuild: currentBuild ?? RelioBuildInfo.buildLabel,
@@ -283,6 +285,7 @@ class AppUpdateService extends ChangeNotifier {
   final AppUpdateClock _clock;
   final AppUpdateTemporaryDirectory _temporaryDirectory;
   final bool _enabled;
+  final bool Function() _internetAvailable;
   final bool _diagnosticLogging;
   final Duration cooldown;
   final _changes = StreamController<AppUpdateSnapshot>.broadcast();
@@ -299,9 +302,14 @@ class AppUpdateService extends ChangeNotifier {
 
   bool get isAvailable => _enabled && _provider.isAvailable;
 
+  static bool _alwaysOnline() => true;
+
   Stream<AppUpdateSnapshot> watchState() => _changes.stream;
 
   Future<AppUpdateSnapshot> checkForUpdate({bool manual = false}) {
+    if (!_internetAvailable()) {
+      return Future.value(_setUnavailable('simulatedOffline'));
+    }
     if (!isAvailable) {
       _setSnapshot(
         AppUpdateSnapshot(
@@ -406,6 +414,9 @@ class AppUpdateService extends ChangeNotifier {
   }
 
   Future<AppUpdateSnapshot> downloadAndInstall() {
+    if (!_internetAvailable()) {
+      return Future.value(_setUnavailable('simulatedOffline'));
+    }
     final currentOperation = _operation;
     if (currentOperation != null) return currentOperation;
     final manifest = _snapshot.manifest;
@@ -418,6 +429,17 @@ class AppUpdateService extends ChangeNotifier {
     final operation = _downloadAndInstall(manifest);
     _operation = operation;
     return operation.whenComplete(() => _operation = null);
+  }
+
+  AppUpdateSnapshot _setUnavailable(String code) {
+    final snapshot = AppUpdateSnapshot(
+      status: AppUpdateStatus.unavailable,
+      currentBuild: _snapshot.currentBuild,
+      environment: _snapshot.environment,
+      code: code,
+    );
+    _setSnapshot(snapshot);
+    return snapshot;
   }
 
   void cancelDownload() {

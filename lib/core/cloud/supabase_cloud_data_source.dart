@@ -4,17 +4,23 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import '../media/media_storage_service.dart';
+import '../connectivity/qa_internet_simulator.dart';
 import 'cloud_data_source.dart';
 import 'cloud_error_mapper.dart';
 import 'cloud_models.dart';
 import 'cloud_storage_policy.dart';
 
 class SupabaseCloudDataSource implements CloudDataSource {
-  SupabaseCloudDataSource({SupabaseConfig? configuration})
-    : configuration = configuration ?? const SupabaseConfig.fromEnvironment();
+  SupabaseCloudDataSource({
+    SupabaseConfig? configuration,
+    this.internetSimulator,
+  }) : configuration = configuration ?? const SupabaseConfig.fromEnvironment() {
+    internetSimulator?.addListener(_onInternetSimulatorChanged);
+  }
 
   @override
   final SupabaseConfig configuration;
+  final QaInternetSimulator? internetSimulator;
   SupabaseClient? _client;
   StreamSubscription<dynamic>? _authSubscription;
   CloudState _state = CloudState.notConfigured;
@@ -26,7 +32,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
   final _authStates = StreamController<AuthState>.broadcast();
 
   @override
-  CloudState get cloudState => _state;
+  CloudState get cloudState =>
+      _isInternetUnavailable ? CloudState.offline : _state;
   @override
   AuthState get authState => _authState;
   @override
@@ -45,6 +52,10 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   Future<void> _initialize() async {
+    if (_isInternetUnavailable) {
+      _state = CloudState.offline;
+      return;
+    }
     if (!configuration.isConfigured) {
       _state = CloudState.notConfigured;
       _initialized = true;
@@ -82,6 +93,12 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   Future<SupabaseClient> _ready() async {
+    if (_isInternetUnavailable) {
+      throw const CloudException(
+        'Cloud ถูกบล็อกโดย QA Offline Simulator',
+        code: 'offline',
+      );
+    }
     await initialize();
     if (!configuration.isConfigured || _client == null) {
       throw const CloudException(
@@ -90,6 +107,26 @@ class SupabaseCloudDataSource implements CloudDataSource {
       );
     }
     return _client!;
+  }
+
+  bool get _isInternetUnavailable =>
+      internetSimulator?.internetAvailable == false;
+
+  void _onInternetSimulatorChanged() {
+    final client = _client;
+    if (client != null) {
+      if (_isInternetUnavailable) {
+        client.auth.stopAutoRefresh();
+      } else {
+        client.auth.startAutoRefresh();
+      }
+    }
+    if (_isInternetUnavailable) {
+      _state = CloudState.offline;
+    } else if (_initialized) {
+      _state = _identity == null ? CloudState.signedOut : CloudState.ready;
+    }
+    _cloudStates.add(_state);
   }
 
   void _requireAuth() {
@@ -722,6 +759,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
 
   @override
   Future<void> dispose() async {
+    internetSimulator?.removeListener(_onInternetSimulatorChanged);
     await _authSubscription?.cancel();
     await _cloudStates.close();
     await _authStates.close();

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'database/app_database.dart';
 import '../app/environment.dart';
 import 'connectivity/runtime_connectivity.dart';
+import 'connectivity/qa_internet_simulator.dart';
 import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
@@ -42,6 +43,7 @@ class RelioDependencies {
     CloudDataSource? cloudDataSource,
     AppUpdateService? appUpdateService,
     ConnectivityStatusService? connectivityStatusService,
+    QaInternetSimulator? internetSimulator,
     PermissionService? permissionService,
     bool? androidPlatformOverride,
     Duration connectionAttemptTimeout = const Duration(seconds: 35),
@@ -61,8 +63,10 @@ class RelioDependencies {
                    primary: AndroidNearbyTransport(),
                    compatibility: BluetoothClassicTransport(),
                  )) {
+    this.internetSimulator = internetSimulator ?? QaInternetSimulator();
     connectivityStatus =
-        connectivityStatusService ?? ConnectivityStatusService();
+        connectivityStatusService ??
+        ConnectivityStatusService(internetSimulator: this.internetSimulator);
     diagnostics = DiagnosticsLogService();
     this.locationService =
         locationService ??
@@ -80,7 +84,9 @@ class RelioDependencies {
         (_isAndroid
             ? AndroidLocalNotificationService()
             : const NoopLocalNotificationService());
-    this.cloudDataSource = cloudDataSource ?? SupabaseCloudDataSource();
+    this.cloudDataSource =
+        cloudDataSource ??
+        SupabaseCloudDataSource(internetSimulator: this.internetSimulator);
     authService = CloudAuthService(this.cloudDataSource);
     repositories = RelioRepositories(
       this.database,
@@ -136,10 +142,15 @@ class RelioDependencies {
       mediaStorage: mediaStorageService,
       localNotifications: localNotificationService,
       diagnostics: diagnostics,
+      internetSimulator: this.internetSimulator,
       isConversationActive: (conversationId) =>
           nearbyService.isConversationVisible(conversationId),
     );
-    this.appUpdateService = appUpdateService ?? AppUpdateService();
+    this.appUpdateService =
+        appUpdateService ??
+        AppUpdateService(
+          internetAvailable: () => this.internetSimulator.internetAvailable,
+        );
   }
 
   final AppDatabase database;
@@ -147,6 +158,7 @@ class RelioDependencies {
   final NearbyTransport transport;
   final bool useMockTransport;
   late final ConnectivityStatusService connectivityStatus;
+  late final QaInternetSimulator internetSimulator;
   late final DiagnosticsLogService diagnostics;
   late final BatteryInfoService? batteryInfoService;
   late final RelioRepositories repositories;
@@ -165,6 +177,7 @@ class RelioDependencies {
   late final AppUpdateService appUpdateService;
   Future<void>? _initialization;
   Future<void>? _authInitialization;
+  Future<void>? _internetSimulatorInitialization;
   bool _authInitialized = false;
   StreamSubscription<InternetStatus>? _readinessSubscription;
   Future<bool>? _nearbySyncOperation;
@@ -186,8 +199,27 @@ class RelioDependencies {
 
   Future<void> initializeAuth() => _authInitialization ??= _initializeAuth();
 
+  Future<void> _restoreInternetSimulator() =>
+      _internetSimulatorInitialization ??= _loadInternetSimulatorState();
+
+  Future<void> _loadInternetSimulatorState() async {
+    if (!internetSimulator.available) return;
+    final offline = await repositories.settings.getBool(
+      'qa_simulated_internet_offline',
+      defaultValue: internetSimulator.bootOfflineOverride,
+    );
+    internetSimulator.restore(offline);
+    if (internetSimulator.bootOfflineOverride) {
+      await repositories.settings.setBool(
+        'qa_simulated_internet_offline',
+        offline,
+      );
+    }
+  }
+
   Future<void> _initializeAuth() async {
     try {
+      await _restoreInternetSimulator();
       await cloudDataSource.initialize();
       await authService.restoreSession();
       unawaited(syncPushRegistration());
@@ -451,6 +483,7 @@ class RelioDependencies {
   ].join('/');
 
   Future<void> _initialize() async {
+    await _restoreInternetSimulator();
     unawaited(diagnostics.initialize());
     if (_isAndroid && !useMockTransport) {
       _readinessSubscription = connectivityStatus.changes.listen((_) {
@@ -505,6 +538,7 @@ class RelioDependencies {
     await _readinessSubscription?.cancel();
     await _nearbySyncOperation;
     await connectivityStatus.dispose();
+    internetSimulator.dispose();
     await relayEngine.dispose();
     await nearbyService.close();
     await syncEngine.dispose();

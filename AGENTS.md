@@ -218,6 +218,19 @@ one sanitized ZIP (maximum 6 MiB) at app-specific external
 this mirror or become debuggable. Keep physical acceptance evidence separate
 from automated coverage and preserve earlier applicable physical passes.
 
+The QA-only Internet offline simulator defaults OFF on a clean install and
+persists an explicitly selected QA state. Restore that state before Cloud/Auth,
+connectivity probes, or SyncEngine initialization so an app restart cannot
+briefly resume Cloud work during an offline acceptance run. It blocks RELIO
+connectivity probes, Supabase/Auth/Storage operations and the QA updater while
+enabled; it does not change Wi-Fi/Bluetooth readiness, Nearby, SQLite, SOS,
+Rescue, or local media. The control and persistent in-app banner must remain
+absent outside the QA flavor. Cloud sync retries pause while the simulator is
+active and resume only after it is switched OFF.
+For controlled local QA first-launch checks only, `RELIO_QA_BOOT_OFFLINE=true`
+starts a QA build offline and persists that choice. Ordinary QA builds omit
+this define and remain OFF on a clean install; DEV and PROD cannot activate it.
+
 - Do not add a background worker, cloud-first UI, or live credentials; live
   Supabase uploads require an explicitly authorized QA test. The
   foreground/lifecycle SyncEngine is implemented and ownership-gated. Public QA update behavior and the full Firebase App

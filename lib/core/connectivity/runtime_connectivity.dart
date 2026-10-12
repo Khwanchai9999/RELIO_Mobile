@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../nearby/nearby_readiness.dart';
+import 'qa_internet_simulator.dart';
 
 class RuntimeConnectivitySnapshot {
   const RuntimeConnectivitySnapshot({
@@ -211,6 +212,7 @@ class ConnectivityStatusService extends ChangeNotifier {
   ConnectivityStatusService({
     RuntimeConnectivitySource? source,
     InternetReachabilityProbe? probe,
+    QaInternetSimulator? internetSimulator,
     DateTime Function()? clock,
     this.probeCooldown = const Duration(seconds: 20),
   }) : _source =
@@ -219,10 +221,14 @@ class ConnectivityStatusService extends ChangeNotifier {
                ? MethodChannelRuntimeConnectivitySource()
                : const UnsupportedRuntimeConnectivitySource()),
        _probe = probe ?? HttpsInternetReachabilityProbe(),
-       _clock = clock ?? DateTime.now;
+       _internetSimulator = internetSimulator ?? QaInternetSimulator(),
+       _clock = clock ?? DateTime.now {
+    _internetSimulator.addListener(_onInternetSimulatorChanged);
+  }
 
   final RuntimeConnectivitySource _source;
   final InternetReachabilityProbe _probe;
+  final QaInternetSimulator _internetSimulator;
   final DateTime Function() _clock;
   final Duration probeCooldown;
   final _changes = StreamController<InternetStatus>.broadcast();
@@ -268,6 +274,15 @@ class ConnectivityStatusService extends ChangeNotifier {
 
   Future<InternetStatus> _refresh({required bool initial}) async {
     final runtime = await _source.read();
+    if (!_internetSimulator.internetAvailable) {
+      final offline = InternetStatus(
+        reachability: InternetReachability.offline,
+        runtime: runtime,
+        lastCheckedAt: _clock(),
+      );
+      _setStatus(offline);
+      return offline;
+    }
     if (runtime.hasInternetRoute == false) {
       final offline = InternetStatus(
         reachability: InternetReachability.offline,
@@ -312,6 +327,15 @@ class ConnectivityStatusService extends ChangeNotifier {
     );
     _lastProbeAt = now;
     final reachable = await _probe.reachableEndpointCount();
+    if (!_internetSimulator.internetAvailable) {
+      final offline = InternetStatus(
+        reachability: InternetReachability.offline,
+        runtime: runtime,
+        lastCheckedAt: _clock(),
+      );
+      _setStatus(offline);
+      return offline;
+    }
     final state = reachable > 0
         ? InternetReachability.online
         : runtime.hasInternetRoute == true
@@ -328,6 +352,16 @@ class ConnectivityStatusService extends ChangeNotifier {
 
   void _onRuntimeChanged(RuntimeConnectivitySnapshot runtime) {
     if (_disposed) return;
+    if (!_internetSimulator.internetAvailable) {
+      _setStatus(
+        InternetStatus(
+          reachability: InternetReachability.offline,
+          runtime: runtime,
+          lastCheckedAt: _clock(),
+        ),
+      );
+      return;
+    }
     if (runtime.hasInternetRoute == false) {
       _refreshDebounce?.cancel();
       _setStatus(
@@ -352,6 +386,22 @@ class ConnectivityStatusService extends ChangeNotifier {
     });
   }
 
+  void _onInternetSimulatorChanged() {
+    if (_disposed) return;
+    if (!_internetSimulator.internetAvailable) {
+      _refreshDebounce?.cancel();
+      _setStatus(
+        InternetStatus(
+          reachability: InternetReachability.offline,
+          runtime: _status.runtime,
+          lastCheckedAt: _clock(),
+        ),
+      );
+    } else {
+      unawaited(refresh(initial: true));
+    }
+  }
+
   void _setStatus(InternetStatus next) {
     if (_status.reachability == next.reachability &&
         _status.runtime == next.runtime &&
@@ -367,6 +417,7 @@ class ConnectivityStatusService extends ChangeNotifier {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _internetSimulator.removeListener(_onInternetSimulatorChanged);
     _refreshDebounce?.cancel();
     await _runtimeSubscription?.cancel();
     await _changes.close();

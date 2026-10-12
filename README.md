@@ -48,6 +48,13 @@ physically verified: Build 33 still requires the two-phone checklist.
   ownership through retry and crash recovery
 - `FakeCloudDataSource` is the deterministic automated test path; routine tests
   do not upload live user data
+  - QA-only Internet offline simulation defaults OFF on a clean install and
+    restores the explicit Settings choice before Cloud startup, so a restart
+    does not open a sync window during D2D acceptance. It suppresses RELIO
+    reachability probes, Supabase/Auth/Storage calls and QA updater traffic
+    while leaving Nearby radios, SQLite, SOS/Rescue and local media available.
+    Its banner and control are QA-only. Local first-launch verification may use
+    `RELIO_QA_BOOT_OFFLINE=true`; ordinary QA builds omit it and default OFF.
 - Local Nearby conversations are isolated per Cloud account on a shared device;
   old unowned Guest history stays local until the user explicitly adopts it
 - Public QA update checks use a small HTTPS manifest and are enabled only in

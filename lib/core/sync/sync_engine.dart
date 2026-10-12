@@ -4,6 +4,7 @@ import '../diagnostics/diagnostics_log_service.dart';
 import '../cloud/cloud_data_source.dart';
 import '../cloud/cloud_models.dart';
 import '../cloud/cloud_storage_policy.dart';
+import '../connectivity/qa_internet_simulator.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
@@ -102,11 +103,13 @@ class SyncEngine {
     this.localNotifications,
     this.diagnostics,
     this.isConversationActive,
+    QaInternetSimulator? internetSimulator,
     SyncClock? clock,
     SyncRetryPolicy? retryPolicy,
     this.staleProcessingAge = const Duration(minutes: 10),
   }) : clock = clock ?? const SystemSyncClock(),
-       retryPolicy = retryPolicy ?? const SyncRetryPolicy();
+       retryPolicy = retryPolicy ?? const SyncRetryPolicy(),
+       _internetSimulator = internetSimulator ?? QaInternetSimulator();
 
   final RelioRepositories repositories;
   final CloudDataSource cloud;
@@ -117,6 +120,7 @@ class SyncEngine {
   final bool Function(String conversationId)? isConversationActive;
   final SyncClock clock;
   final SyncRetryPolicy retryPolicy;
+  final QaInternetSimulator _internetSimulator;
   final Duration staleProcessingAge;
 
   final _stateController = StreamController<SyncEngineSnapshot>.broadcast();
@@ -139,6 +143,7 @@ class SyncEngine {
       clock.now().subtract(staleProcessingAge),
     );
     _started = true;
+    _internetSimulator.addListener(_onInternetSimulatorChanged);
     _subscriptions.add(cloud.watchCloudState().listen((_) => _scheduleRun()));
     _subscriptions.add(cloud.watchAuthState().listen((_) => _scheduleRun()));
     _subscriptions.add(
@@ -241,7 +246,7 @@ class SyncEngine {
 
   Future<void> _run({required bool adoptUnownedItems}) async {
     if (_disposed) return;
-    if (!_isCloudReady) {
+    if (!_internetSimulator.internetAvailable || !_isCloudReady) {
       await _setWaitingForCloud();
       return;
     }
@@ -1181,6 +1186,7 @@ class SyncEngine {
   }
 
   bool get _isCloudReady =>
+      _internetSimulator.internetAvailable &&
       cloud.cloudState == CloudState.ready &&
       cloud.authState == AuthState.authenticated &&
       cloud.currentIdentity != null;
@@ -1188,6 +1194,18 @@ class SyncEngine {
   void _scheduleRun() {
     if (!_started || _disposed || _runOperation != null) return;
     unawaited(run());
+  }
+
+  void _onInternetSimulatorChanged() {
+    if (_internetSimulator.internetAvailable) {
+      _scheduleRun();
+      return;
+    }
+    _queueRetryTimer?.cancel();
+    _queueRetryTimer = null;
+    _pullRetryTimer?.cancel();
+    _pullRetryTimer = null;
+    unawaited(_setWaitingForCloud());
   }
 
   Future<void> _setWaitingForCloud() async {
@@ -1265,6 +1283,7 @@ class SyncEngine {
 
   Future<void> dispose() async {
     _disposed = true;
+    _internetSimulator.removeListener(_onInternetSimulatorChanged);
     _queueRetryTimer?.cancel();
     _pullRetryTimer?.cancel();
     for (final subscription in _subscriptions) {

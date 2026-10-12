@@ -32,6 +32,12 @@ abstract final class RelioBuildInfo {
     'RELIO_ENV',
     defaultValue: 'development',
   );
+  // This local QA-only override makes first-launch physical offline checks
+  // safe when no simulator preference has been saved yet.
+  static const qaBootOffline = bool.fromEnvironment(
+    'RELIO_QA_BOOT_OFFLINE',
+    defaultValue: false,
+  );
   static const publicQaUpdateConfig = PublicQaBuildConfig(
     enabled: environmentName == 'test',
     manifestUrl: publicUpdateManifestUrl,

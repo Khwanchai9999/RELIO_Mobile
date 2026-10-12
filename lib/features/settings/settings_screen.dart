@@ -317,6 +317,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 8),
           const ConnectivityDiagnosticsCard(),
+          if (RelioBuildInfo.isTest) ...[
+            const SizedBox(height: 8),
+            AnimatedBuilder(
+              animation: RelioDependencyScope.of(context).internetSimulator,
+              builder: (context, _) {
+                final simulator = RelioDependencyScope.of(
+                  context,
+                ).internetSimulator;
+                return Card(
+                  child: SwitchListTile(
+                    secondary: const Icon(Icons.wifi_off_rounded),
+                    title: const Text('จำลองอินเทอร์เน็ต Offline (QA)'),
+                    subtitle: Text(
+                      simulator.simulatedOffline
+                          ? 'QA: Internet ถูกจำลองเป็น Offline • Cloud ถูกบล็อก แต่ Nearby ยังทำงาน'
+                          : 'ปิดอยู่ตามค่าเริ่มต้น • ใช้ทดสอบ Nearby โดยไม่พึ่ง Cloud',
+                    ),
+                    value: simulator.simulatedOffline,
+                    onChanged: (value) {
+                      simulator.setSimulatedOffline(value);
+                      unawaited(
+                        RelioDependencyScope.of(context).repositories.settings
+                            .setBool('qa_simulated_internet_offline', value),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.sync_rounded,

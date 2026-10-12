@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/cloud/cloud_models.dart';
+import 'package:relio_mobile/core/connectivity/qa_internet_simulator.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
 import 'package:relio_mobile/core/media/media_storage_service.dart';
@@ -14,6 +15,66 @@ import 'package:relio_mobile/core/sync/sync_types.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 void main() {
+  test(
+    'QA simulated offline keeps local writes and blocks SyncEngine Cloud work',
+    () async {
+      final simulator = QaInternetSimulator.forTesting();
+      final cloud = _CountingSyncCloud();
+      final identity = await cloud.register(
+        email: 'offline-qa@example.invalid',
+        password: 'not-a-real-password',
+        displayName: 'Offline QA',
+      );
+      cloud.operationCount = 0;
+      final harness = await SyncHarness.create(
+        cloud: cloud,
+        internetSimulator: simulator,
+      );
+      addTearDown(() async {
+        await harness.dispose();
+        await cloud.dispose();
+        simulator.dispose();
+      });
+      final conversation = await harness.repositories.conversations
+          .ensureConversation(
+            id: 'offline-local-chat',
+            participantId: 'peer-device',
+            displayName: 'Peer',
+            participantStatus: DeviceStatus.normal,
+          );
+      await harness.repositories.cloudLinks.save(
+        CloudConversationBinding(
+          localConversationId: conversation.id,
+          cloudConversationId: 'cloud-conversation',
+          ownerUserId: identity.userId,
+          peerUserId: 'peer-user',
+        ),
+      );
+      simulator.setSimulatedOffline(true);
+      await harness.engine.initialize();
+
+      final message = await harness.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: identity.userId,
+        senderDeviceId: 'local-device',
+        text: 'D2D remains local while simulated offline',
+      );
+      await harness.engine.run();
+
+      expect(
+        await harness.repositories.messages.getMessage(message.id),
+        isNotNull,
+      );
+      expect(cloud.operationCount, 0);
+      expect(
+        (await harness.repositories.syncQueue.listAll()).any(
+          (item) => item.entityId == message.id && item.status == 'pending',
+        ),
+        isTrue,
+      );
+    },
+  );
+
   test(
     'direct Cloud chat pulls, dedupes, and reconciles read receipts',
     () async {
@@ -998,6 +1059,7 @@ class SyncHarness {
   static Future<SyncHarness> create({
     SyncClock? clock,
     FakeCloudDataSource? cloud,
+    QaInternetSimulator? internetSimulator,
     bool Function(String conversationId)? isConversationActive,
     LocalNotificationSink? localNotifications,
   }) async {
@@ -1016,6 +1078,7 @@ class SyncHarness {
       isConversationActive: isConversationActive,
       localNotifications: localNotifications,
       clock: clock,
+      internetSimulator: internetSimulator,
     );
     return SyncHarness._(
       database,
@@ -1058,6 +1121,16 @@ class SyncHarness {
     if (ownsCloud) await cloud.dispose();
     await database.close();
     await tempDirectory.delete(recursive: true);
+  }
+}
+
+class _CountingSyncCloud extends FakeCloudDataSource {
+  int operationCount = 0;
+
+  @override
+  Future<List<CloudConversationDto>> listMyDirectConversations() {
+    operationCount++;
+    return super.listMyDirectConversations();
   }
 }
 
