@@ -7,6 +7,7 @@ import 'package:relio_mobile/core/app_update/public_update_errors.dart';
 import 'package:relio_mobile/core/app_update/app_update_service.dart';
 import 'package:relio_mobile/core/app_update/public_update_manifest.dart';
 import 'package:relio_mobile/core/app_update/public_update_provider.dart';
+import 'package:relio_mobile/core/connectivity/qa_internet_simulator.dart';
 
 class _FakeGateway implements AppUpdateGateway {
   _FakeGateway(this.nextResult);
@@ -54,6 +55,39 @@ void main() {
       expect(gateway.calls, 1);
       service.dispose();
     });
+
+    test(
+      'QA offline blocks updater before gateway execution and recovers',
+      () async {
+        final simulator = QaInternetSimulator.forTesting();
+        final gateway = _FakeGateway(
+          const AppUpdateGatewayResult(status: AppUpdateStatus.checked),
+        );
+        final service = AppUpdateService(
+          gateway: gateway,
+          enabled: true,
+          environment: RelioEnvironment.test,
+          internetAvailable: () => simulator.internetAvailable,
+        );
+        addTearDown(() {
+          service.dispose();
+          simulator.dispose();
+        });
+
+        simulator.setSimulatedOffline(true);
+        final blocked = await service.checkForUpdate(manual: true);
+
+        expect(blocked.status, AppUpdateStatus.unavailable);
+        expect(blocked.code, 'simulatedOffline');
+        expect(gateway.calls, 0);
+
+        simulator.setSimulatedOffline(false);
+        final allowed = await service.checkForUpdate(manual: true);
+
+        expect(allowed.status, AppUpdateStatus.checked);
+        expect(gateway.calls, 1);
+      },
+    );
 
     test('DEV and PROD are unavailable without calling the gateway', () async {
       for (final environment in [

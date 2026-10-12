@@ -9,7 +9,6 @@ import '../core/cloud/cloud_models.dart';
 import '../core/relio_dependencies.dart';
 import 'environment.dart';
 import 'router.dart';
-import 'theme/relio_colors.dart';
 import 'theme/relio_theme.dart';
 
 abstract interface class RelioThemePreferenceStore {
@@ -216,51 +215,25 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
           routerConfig: _router,
           builder: (context, child) {
             final brightness = Theme.of(context).brightness;
-            return AnimatedBuilder(
-              animation: _dependencies.internetSimulator,
-              builder: (context, _) => Column(
-                children: [
-                  if (_dependencies.internetSimulator.simulatedOffline)
-                    Container(
-                      width: double.infinity,
-                      color: RelioColors.warning,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 7,
-                      ),
-                      child: const Text(
-                        'QA: Internet ถูกจำลองเป็น Offline',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: IncomingConnectionPromptHost(
-                      dependencies: _dependencies,
-                      router: _router,
-                      navigatorKey: _router.routerDelegate.navigatorKey,
-                      child: AnnotatedRegion<SystemUiOverlayStyle>(
-                        value: SystemUiOverlayStyle(
-                          statusBarColor: Colors.transparent,
-                          statusBarIconBrightness: brightness == Brightness.dark
-                              ? Brightness.light
-                              : Brightness.dark,
-                          systemNavigationBarColor: Theme.of(
-                            context,
-                          ).scaffoldBackgroundColor,
-                          systemNavigationBarIconBrightness:
-                              brightness == Brightness.dark
-                              ? Brightness.light
-                              : Brightness.dark,
-                        ),
-                        child: child ?? const SizedBox.shrink(),
-                      ),
-                    ),
-                  ),
-                ],
+            return IncomingConnectionPromptHost(
+              dependencies: _dependencies,
+              router: _router,
+              navigatorKey: _router.routerDelegate.navigatorKey,
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle(
+                  statusBarColor: Colors.transparent,
+                  statusBarIconBrightness: brightness == Brightness.dark
+                      ? Brightness.light
+                      : Brightness.dark,
+                  systemNavigationBarColor: Theme.of(
+                    context,
+                  ).scaffoldBackgroundColor,
+                  systemNavigationBarIconBrightness:
+                      brightness == Brightness.dark
+                      ? Brightness.light
+                      : Brightness.dark,
+                ),
+                child: child ?? const SizedBox.shrink(),
               ),
             );
           },
