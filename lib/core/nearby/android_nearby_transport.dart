@@ -31,6 +31,9 @@ class AndroidNearbyTransport implements NearbyTransport {
   final Map<String, String> _peerNames = {};
   final Map<String, String> _peerFingerprintHints = {};
   final Map<String, NearbyPeer> _discoveredEndpoints = {};
+  final Map<(String, int), Payload> _incomingFiles = {};
+  final Map<(String, int), PayloadStatus> _terminalPayloads = {};
+  final Set<(String, int)> _handledFiles = {};
   bool _advertising = false;
   bool _discovering = false;
   bool _disposed = false;
@@ -353,6 +356,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   @override
   Future<void> disconnect(String peerId) async {
     await _nearby.disconnectFromEndpoint(peerId);
+    _clearIncomingFiles(peerId);
     _connectedPeers.remove(peerId);
     _connectionRequests.remove(peerId);
   }
@@ -434,11 +438,24 @@ class AndroidNearbyTransport implements NearbyTransport {
     if (payload.type == PayloadType.BYTES && payload.bytes != null) {
       _payloads.add(NearbyPayloadEvent(peerId: id, bytes: payload.bytes!));
     } else if (payload.type == PayloadType.FILE) {
-      unawaited(_emitIncomingFile(id, payload));
+      final key = (id, payload.id);
+      if (_handledFiles.contains(key)) return;
+      _incomingFiles[key] = payload;
+      _completeIncomingFile(key);
     }
   }
 
   void _payloadTransferUpdated(String id, PayloadTransferUpdate update) {
+    if (update.status == PayloadStatus.SUCCESS ||
+        update.status == PayloadStatus.FAILURE ||
+        update.status == PayloadStatus.CANCELED) {
+      final key = (id, update.id);
+      _terminalPayloads[key] = update.status;
+      if (_terminalPayloads.length > 256) {
+        _terminalPayloads.remove(_terminalPayloads.keys.first);
+      }
+      _completeIncomingFile(key);
+    }
     _transfers.add(
       NearbyTransferEvent(
         peerId: id,
@@ -456,6 +473,24 @@ class AndroidNearbyTransport implements NearbyTransport {
     );
   }
 
+  void _completeIncomingFile((String, int) key) {
+    final status = _terminalPayloads[key];
+    if (status == null) return;
+    final payload = _incomingFiles.remove(key);
+    if (payload == null || !_handledFiles.add(key)) return;
+    if (_handledFiles.length > 256) _handledFiles.remove(_handledFiles.first);
+    // FILE callback มาเมื่อเริ่มรับ ต้องรอ SUCCESS ก่อนคัดลอก/ลบ URI ไม่เช่นนั้นได้ไฟล์ไม่ครบ
+    if (status == PayloadStatus.SUCCESS) {
+      unawaited(_emitIncomingFile(key.$1, payload));
+    }
+  }
+
+  void _clearIncomingFiles(String endpointId) {
+    _incomingFiles.removeWhere((key, _) => key.$1 == endpointId);
+    _terminalPayloads.removeWhere((key, _) => key.$1 == endpointId);
+    _handledFiles.removeWhere((key) => key.$1 == endpointId);
+  }
+
   Future<void> _emitIncomingFile(String endpointId, Payload payload) async {
     // nearby_connections exposes a file path on older Android versions and a
     // content URI on newer versions. Normalize both to a real local path here
@@ -463,6 +498,7 @@ class AndroidNearbyTransport implements NearbyTransport {
     // ignore: deprecated_member_use
     final directPath = payload.filePath;
     if (directPath != null && directPath.isNotEmpty) {
+      if (_disposed) return;
       _files.add(
         NearbyFilePayloadEvent(
           peerId: endpointId,
@@ -482,7 +518,7 @@ class AndroidNearbyTransport implements NearbyTransport {
         'relio-incoming-${const Uuid().v4()}',
       );
       final copied = await _nearby.copyFileAndDeleteOriginal(uri, destination);
-      if (!copied || !await File(destination).exists()) return;
+      if (_disposed || !copied || !await File(destination).exists()) return;
       _files.add(
         NearbyFilePayloadEvent(
           peerId: endpointId,
@@ -571,6 +607,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   }
 
   void _disconnected(String endpointId) {
+    _clearIncomingFiles(endpointId);
     _connectedPeers.remove(endpointId);
     _connections.add(
       NearbyConnectionEvent(
@@ -662,6 +699,9 @@ class AndroidNearbyTransport implements NearbyTransport {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _incomingFiles.clear();
+    _terminalPayloads.clear();
+    _handledFiles.clear();
     _discoveryEpoch++;
     await _nearby.stopAdvertising();
     await _nearby.stopDiscovery();

@@ -236,6 +236,170 @@ void main() {
   });
 
   test(
+    'owned message syncs while its legacy conversation and Guest rows stay unowned',
+    () async {
+      final harness = await SyncHarness.create();
+      addTearDown(harness.dispose);
+      final accountA = await harness.cloud.register(
+        email: 'mixed-owner@example.com',
+        password: 'password',
+      );
+      final peer = harness.cloud.createTestIdentity(
+        email: 'mixed-peer@example.com',
+      );
+      final conversation = await harness.repositories.conversations
+          .ensureConversation(
+            id: 'mixed-conversation',
+            participantId: 'mixed-peer-device',
+            displayName: 'Peer',
+            participantStatus: DeviceStatus.offline,
+          );
+      await harness.engine.linkConversationToCloud(
+        localConversationId: conversation.id,
+        peerUserId: peer.userId,
+      );
+      await harness.cloud.signOut();
+      final guestOne = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'guest-one',
+        operation: SyncOperation.profileUpsert.value,
+      );
+      final guestTwo = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'guest-two',
+        operation: SyncOperation.profileUpsert.value,
+      );
+      final legacyConversation = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.conversation.value,
+        entityId: conversation.id,
+        operation: SyncOperation.conversationUpsert.value,
+      );
+      await harness.cloud.signIn(
+        email: 'mixed-owner@example.com',
+        password: 'password',
+      );
+      final message = await harness.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: 'local-sender-label',
+        senderDeviceId: 'mixed-owner-device',
+        text: 'owned message with legacy Guest queue rows',
+      );
+
+      await harness.engine.initialize();
+      await harness.engine.run();
+
+      final messageQueue = (await harness.repositories.syncQueue.listAll())
+          .singleWhere((item) => item.entityId == message.id);
+      expect(messageQueue.ownerUserId, accountA.userId);
+      expect(messageQueue.status, SyncQueueStatus.completed.value);
+      expect(harness.cloud.messages[message.id]?.senderId, accountA.userId);
+      expect(
+        (await harness.repositories.messages.getMessage(
+          message.id,
+        ))?.cloudSyncStatus,
+        CloudSyncStatus.synced.value,
+      );
+
+      final rows = await harness.repositories.syncQueue.listAll();
+      for (final guest in [guestOne, guestTwo, legacyConversation]) {
+        final unchanged = rows.singleWhere((item) => item.id == guest.id);
+        expect(unchanged.ownerUserId, isNull);
+        expect(unchanged.status, SyncQueueStatus.pending.value);
+      }
+      expect(
+        harness.engine.snapshot.state,
+        SyncEngineState.waitingForOwnership,
+      );
+    },
+  );
+
+  test(
+    'mixed Account A, Account B, and Guest rows process only the current owner',
+    () async {
+      final harness = await SyncHarness.create();
+      addTearDown(harness.dispose);
+      final guestOne = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'mixed-guest-one',
+        operation: SyncOperation.profileUpsert.value,
+      );
+      final guestTwo = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'mixed-guest-two',
+        operation: SyncOperation.profileUpsert.value,
+      );
+      final accountA = await harness.cloud.register(
+        email: 'mixed-a@example.com',
+        password: 'password',
+      );
+      final accountAQueue = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'account-a-profile',
+        operation: SyncOperation.profileUpsert.value,
+      );
+      await harness.cloud.signOut();
+      final accountB = await harness.cloud.register(
+        email: 'mixed-b@example.com',
+        password: 'password',
+      );
+      final accountBQueue = await harness.repositories.syncQueue.enqueue(
+        entityType: SyncEntityType.profile.value,
+        entityId: 'account-b-profile',
+        operation: SyncOperation.profileUpsert.value,
+      );
+
+      await harness.engine.initialize();
+      await harness.engine.run();
+      var rows = await harness.repositories.syncQueue.listAll();
+      expect(
+        rows.singleWhere((item) => item.id == accountBQueue.id).status,
+        SyncQueueStatus.completed.value,
+      );
+      expect(
+        rows.singleWhere((item) => item.id == accountAQueue.id).status,
+        SyncQueueStatus.pending.value,
+      );
+      for (final guest in [guestOne, guestTwo]) {
+        final unchanged = rows.singleWhere((item) => item.id == guest.id);
+        expect(unchanged.ownerUserId, isNull);
+        expect(unchanged.status, SyncQueueStatus.pending.value);
+      }
+      expect(
+        harness.engine.snapshot.state,
+        SyncEngineState.waitingForOwnership,
+      );
+
+      await harness.cloud.signOut();
+      await harness.cloud.signIn(
+        email: 'mixed-a@example.com',
+        password: 'password',
+      );
+      await harness.engine.run();
+      await harness.engine.run();
+
+      rows = await harness.repositories.syncQueue.listAll();
+      expect(
+        rows.singleWhere((item) => item.id == accountAQueue.id).status,
+        SyncQueueStatus.completed.value,
+      );
+      expect(
+        rows.singleWhere((item) => item.id == accountBQueue.id).ownerUserId,
+        accountB.userId,
+      );
+      expect(
+        rows.singleWhere((item) => item.id == accountBQueue.id).status,
+        SyncQueueStatus.completed.value,
+      );
+      for (final guest in [guestOne, guestTwo]) {
+        final unchanged = rows.singleWhere((item) => item.id == guest.id);
+        expect(unchanged.ownerUserId, isNull);
+        expect(unchanged.status, SyncQueueStatus.pending.value);
+      }
+      expect(accountA.userId, isNot(accountB.userId));
+    },
+  );
+
+  test(
     'guest history stays local after a later login until explicit adoption',
     () async {
       final harness = await SyncHarness.create();
@@ -455,6 +619,88 @@ void main() {
     expect(second.attemptCount, 2);
   });
 
+  test(
+    'offline message remains queued then syncs once when Cloud returns',
+    () async {
+      final clock = TestSyncClock(DateTime.utc(2026, 1, 1));
+      final harness = await SyncHarness.create(clock: clock);
+      addTearDown(harness.dispose);
+      final owner = await harness.cloud.register(
+        email: 'offline-sync@example.com',
+        password: 'password',
+      );
+      final peer = harness.cloud.createTestIdentity(
+        email: 'offline-sync-peer@example.com',
+        displayName: 'Peer',
+      );
+      final conversation = await harness.repositories.conversations
+          .ensureConversation(
+            id: 'offline-conversation',
+            participantId: 'offline-peer-device',
+            displayName: 'Peer',
+            participantStatus: DeviceStatus.offline,
+          );
+      await harness.engine.linkConversationToCloud(
+        localConversationId: conversation.id,
+        peerUserId: peer.userId,
+      );
+
+      harness.cloud.offline = true;
+      final message = await harness.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: owner.userId,
+        senderDeviceId: 'offline-owner-device',
+        text: 'offline queued message',
+      );
+      await harness.engine.initialize();
+      await harness.engine.run();
+
+      final queued = (await harness.repositories.syncQueue.listAll())
+          .singleWhere((item) => item.entityId == message.id);
+      expect(queued.ownerUserId, owner.userId);
+      expect(queued.status, SyncQueueStatus.pending.value);
+      expect(
+        (await harness.repositories.syncQueue.listAll()).any(
+          (item) =>
+              item.status == SyncQueueStatus.pending.value &&
+              item.nextAttemptAt != null,
+        ),
+        isTrue,
+      );
+      expect(harness.cloud.messages, isEmpty);
+      expect(
+        (await harness.repositories.messages.getMessage(
+          message.id,
+        ))?.cloudSyncStatus,
+        CloudSyncStatus.pending.value,
+      );
+
+      harness.cloud.offline = false;
+      final retryAt = (await harness.repositories.syncQueue.listAll())
+          .map((item) => item.nextAttemptAt)
+          .whereType<DateTime>()
+          .first;
+      clock.current = retryAt;
+      await harness.engine.run();
+      var synced = await harness.repositories.messages.getMessage(message.id);
+      expect(synced?.cloudSyncStatus, CloudSyncStatus.synced.value);
+      expect(synced?.status, DeliveryStatus.pending);
+      expect(harness.cloud.messages.keys.where((id) => id == message.id), [
+        message.id,
+      ]);
+      final completed = (await harness.repositories.syncQueue.listAll())
+          .singleWhere((item) => item.entityId == message.id);
+      expect(completed.status, SyncQueueStatus.completed.value);
+
+      await harness.engine.run();
+      synced = await harness.repositories.messages.getMessage(message.id);
+      expect(synced?.cloudSyncStatus, CloudSyncStatus.synced.value);
+      expect(harness.cloud.messages.keys.where((id) => id == message.id), [
+        message.id,
+      ]);
+    },
+  );
+
   test('retry after a successful cloud upsert remains idempotent', () async {
     final harness = await SyncHarness.create();
     addTearDown(harness.dispose);
@@ -518,6 +764,218 @@ void main() {
       expect(harness.cloud.files[path], [1, 2, 3]);
     },
   );
+
+  test('missing queued message becomes an explicit terminal failure', () async {
+    final harness = await SyncHarness.create();
+    addTearDown(harness.dispose);
+    await harness.cloud.register(
+      email: 'missing-message@example.com',
+      password: 'password',
+    );
+    final row = await harness.repositories.syncQueue.enqueue(
+      entityType: SyncEntityType.message.value,
+      entityId: 'deleted-local-message',
+      operation: SyncOperation.messageUpsert.value,
+    );
+
+    await harness.engine.initialize();
+    await harness.engine.run();
+
+    final failed = (await harness.repositories.syncQueue.listAll()).singleWhere(
+      (item) => item.id == row.id,
+    );
+    expect(failed.status, SyncQueueStatus.failed.value);
+    expect(failed.lastError, 'message_missing');
+  });
+
+  test(
+    'malformed conversation and unsupported location fail explicitly',
+    () async {
+      final harness = await SyncHarness.create();
+      addTearDown(harness.dispose);
+      await harness.cloud.register(
+        email: 'malformed-message@example.com',
+        password: 'password',
+      );
+      final conversation = await harness.repositories.conversations
+          .ensureConversation(
+            id: 'malformed-conversation',
+            participantId: 'malformed-peer',
+            displayName: 'Peer',
+            participantStatus: DeviceStatus.offline,
+          );
+      final message = await harness.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: 'local',
+        senderDeviceId: 'device-local',
+        text: 'bad local reference',
+      );
+      await harness.database.customStatement(
+        'UPDATE messages SET conversation_id = ? WHERE id = ?',
+        ['', message.id],
+      );
+      final location = await harness.repositories.messages
+          .createOutgoingLocation(
+            conversationId: conversation.id,
+            senderId: 'local',
+            senderDeviceId: 'device-local',
+            location: LocationData(
+              latitude: 13.7,
+              longitude: 100.5,
+              capturedAt: DateTime.utc(2026),
+            ),
+          );
+
+      await harness.engine.initialize();
+      await harness.engine.run();
+
+      final queue = await harness.repositories.syncQueue.listAll();
+      final malformed = queue.singleWhere(
+        (item) => item.entityId == message.id,
+      );
+      final unsupported = queue.singleWhere(
+        (item) => item.entityId == location.id,
+      );
+      expect(malformed.status, SyncQueueStatus.failed.value);
+      expect(malformed.lastError, 'conversation_id_missing');
+      expect(unsupported.status, SyncQueueStatus.failed.value);
+      expect(unsupported.lastError, 'unsupported_location_cloud_sync');
+      expect(
+        (await harness.repositories.messages.getMessage(
+          location.id,
+        ))?.cloudSyncStatus,
+        CloudSyncStatus.failed.value,
+      );
+    },
+  );
+
+  test(
+    'recoverable Cloud binding wait resumes after supported link flow',
+    () async {
+      final harness = await SyncHarness.create();
+      addTearDown(harness.dispose);
+      final owner = await harness.cloud.register(
+        email: 'recoverable-binding@example.com',
+        password: 'password',
+      );
+      final conversation = await harness.repositories.conversations
+          .ensureConversation(
+            id: 'recoverable-conversation',
+            participantId: 'recoverable-peer',
+            displayName: 'Peer',
+            participantStatus: DeviceStatus.offline,
+          );
+      final message = await harness.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: owner.userId,
+        senderDeviceId: 'device-owner',
+        text: 'wait for explicit link',
+      );
+
+      await harness.engine.initialize();
+      await harness.engine.run();
+      var messageRow = (await harness.repositories.syncQueue.listAll())
+          .singleWhere((item) => item.entityId == message.id);
+      expect(messageRow.status, SyncQueueStatus.pending.value);
+      expect(messageRow.lastError, isNull);
+
+      final peer = harness.cloud.createTestIdentity(
+        email: 'recoverable-peer@example.com',
+      );
+      await harness.engine.linkConversationToCloud(
+        localConversationId: conversation.id,
+        peerUserId: peer.userId,
+      );
+      messageRow = (await harness.repositories.syncQueue.listAll()).singleWhere(
+        (item) => item.entityId == message.id,
+      );
+      expect(messageRow.status, SyncQueueStatus.completed.value);
+      expect(harness.cloud.messages[message.id]?.senderId, owner.userId);
+    },
+  );
+
+  for (final mediaType in [MessageType.image, MessageType.video]) {
+    test(
+      '${mediaType.name} Cloud message, object, and metadata complete once',
+      () async {
+        final harness = await SyncHarness.create();
+        addTearDown(harness.dispose);
+        final owner = await harness.cloud.register(
+          email: '${mediaType.name}-cloud@example.com',
+          password: 'password',
+        );
+        final conversation = await harness.repositories.conversations
+            .ensureConversation(
+              id: '${mediaType.name}-conversation',
+              participantId: '${mediaType.name}-peer',
+              displayName: 'Peer',
+              participantStatus: DeviceStatus.offline,
+            );
+        final peer = harness.cloud.createTestIdentity(
+          email: '${mediaType.name}-peer@example.com',
+        );
+        await harness.engine.linkConversationToCloud(
+          localConversationId: conversation.id,
+          peerUserId: peer.userId,
+        );
+        final messageId = '${mediaType.name}-message';
+        final attachmentId = '${mediaType.name}-attachment';
+        final fileName = mediaType == MessageType.image
+            ? 'photo.jpg'
+            : 'clip.mp4';
+        final file = File('${harness.tempDirectory.path}/$fileName');
+        await file.writeAsBytes([0, 1, 2, 3]);
+        await harness.repositories.attachments.createPending(
+          id: attachmentId,
+          conversationId: conversation.id,
+          messageId: messageId,
+          transferId: '${mediaType.name}-transfer',
+          mediaType: mediaType == MessageType.image
+              ? MediaType.image
+              : MediaType.video,
+          fileName: fileName,
+          mimeType: mediaType == MessageType.image ? 'image/jpeg' : 'video/mp4',
+          localPath: file.path,
+          byteSize: 4,
+        );
+        final message = await harness.repositories.messages.createOutgoingMedia(
+          conversationId: conversation.id,
+          senderId: owner.userId,
+          senderDeviceId: 'device-owner',
+          type: mediaType,
+          fileName: fileName,
+          localPath: file.path,
+          attachmentId: attachmentId,
+          messageId: messageId,
+        );
+
+        await harness.engine.initialize();
+        await harness.engine.run();
+
+        final cloudMessage = harness.cloud.messages[message.id];
+        final cloudAttachment = harness.cloud.attachments[attachmentId];
+        expect(cloudMessage?.messageType, mediaType.name);
+        expect(cloudMessage?.senderId, owner.userId);
+        expect(cloudAttachment?.messageId, message.id);
+        expect(harness.cloud.files[cloudAttachment!.storagePath], [0, 1, 2, 3]);
+        final queue = await harness.repositories.syncQueue.listAll();
+        expect(
+          queue.where((row) => row.entityId == message.id).single.status,
+          SyncQueueStatus.completed.value,
+        );
+        expect(
+          queue
+              .where((row) => row.entityId == attachmentId)
+              .every((row) => row.status == SyncQueueStatus.completed.value),
+          isTrue,
+        );
+        await harness.engine.run();
+        expect(harness.cloud.messages, hasLength(1));
+        expect(harness.cloud.attachments, hasLength(1));
+        expect(harness.cloud.files, hasLength(1));
+      },
+    );
+  }
 }
 
 class SyncHarness {

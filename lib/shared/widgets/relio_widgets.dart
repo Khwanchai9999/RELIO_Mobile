@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
+import '../../core/sync/sync_types.dart';
 import '../../data/models/prototype_models.dart';
 
 class RelioAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -559,6 +561,7 @@ class RelioMessageBubble extends StatelessWidget {
       MessageType.text => null,
       MessageType.system => Icons.info_outline,
     };
+    final cloudStatus = CloudSyncStatus.parse(message.cloudSyncStatus);
     return Align(
       alignment: message.outgoing
           ? Alignment.centerRight
@@ -578,15 +581,7 @@ class RelioMessageBubble extends StatelessWidget {
             if (message.type == MessageType.image)
               _ImageMessagePreview(filePath: message.localFilePath),
             if (message.type == MessageType.video)
-              Container(
-                width: 230,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.play_circle_outline, size: 48),
-              ),
+              _VideoMessagePreview(filePath: message.localFilePath),
             if (message.type == MessageType.location)
               Container(
                 width: 230,
@@ -641,6 +636,9 @@ class RelioMessageBubble extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (message.outgoing &&
+                    cloudStatus != CloudSyncStatus.notQueued)
+                  _CloudSyncStatusLabel(status: cloudStatus),
                 if (message.outgoing && message.readAt != null)
                   Text(
                     'อ่านแล้ว',
@@ -654,6 +652,105 @@ class RelioMessageBubble extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _VideoMessagePreview extends StatelessWidget {
+  const _VideoMessagePreview({required this.filePath});
+
+  final String? filePath;
+
+  static const _channel = MethodChannel('relio/media');
+
+  Future<void> _open(BuildContext context) async {
+    final path = filePath;
+    if (path == null || path.isEmpty || !await File(path).exists()) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่พบไฟล์วิดีโอในเครื่อง')),
+        );
+      }
+      return;
+    }
+    try {
+      await _channel.invokeMethod<void>('playLocalVideo', {'path': path});
+    } on PlatformException {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่สามารถเปิดวิดีโอนี้ได้')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: 'เล่นวิดีโอ',
+    child: InkWell(
+      onTap: () => _open(context),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 230,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Icon(Icons.play_circle_outline, size: 48),
+      ),
+    ),
+  );
+}
+
+class _CloudSyncStatusLabel extends StatelessWidget {
+  const _CloudSyncStatusLabel({required this.status});
+
+  final CloudSyncStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, icon, color) = switch (status) {
+      CloudSyncStatus.notQueued => (
+        '',
+        Icons.cloud_queue_outlined,
+        RelioColors.muted,
+      ),
+      CloudSyncStatus.pending => (
+        'รอซิงก์',
+        Icons.cloud_upload_outlined,
+        RelioColors.warning,
+      ),
+      CloudSyncStatus.syncing => (
+        'กำลังซิงก์',
+        Icons.sync_rounded,
+        RelioColors.primary,
+      ),
+      CloudSyncStatus.synced => (
+        'ซิงก์แล้ว',
+        Icons.cloud_done_outlined,
+        RelioColors.success,
+      ),
+      CloudSyncStatus.failed => (
+        'ซิงก์ไม่สำเร็จ',
+        Icons.cloud_off_outlined,
+        RelioColors.sos,
+      ),
+    };
+    if (status == CloudSyncStatus.notQueued) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 2),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }

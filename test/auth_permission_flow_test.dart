@@ -10,6 +10,12 @@ import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/permissions/permission_service.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 
+Finder findGeneratedName() => find.byWidgetPredicate(
+  (widget) =>
+      widget is Text &&
+      RegExp(r'^ผู้ใช้ RELIO \d{4}$').hasMatch(widget.data ?? ''),
+);
+
 class _FakePermissionService extends PermissionService {
   _FakePermissionService({
     required bool initiallyGranted,
@@ -111,7 +117,7 @@ void main() {
 
     await signIn(tester);
 
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
     expect(find.text('อนุญาตทั้งหมด'), findsNothing);
     expect(permissions.readCalls, greaterThan(readsBeforeLogin));
     expect(permissions.requestCalls, 0);
@@ -126,7 +132,7 @@ void main() {
     await signIn(tester);
 
     expect(find.text('อนุญาตทั้งหมด'), findsOneWidget);
-    expect(find.text('ผู้ใช้ RELIO'), findsNothing);
+    expect(findGeneratedName(), findsNothing);
     expect(permissions.requestCalls, 0);
   });
 
@@ -139,7 +145,7 @@ void main() {
     await signIn(tester, password: 'incorrect-password');
 
     expect(find.text('เข้าสู่ระบบ'), findsWidgets);
-    expect(find.text('ผู้ใช้ RELIO'), findsNothing);
+    expect(findGeneratedName(), findsNothing);
     expect(permissions.readCalls, readsBeforeLogin);
     expect(permissions.requestCalls, 0);
   });
@@ -196,7 +202,7 @@ void main() {
 
     expect(permissions.requestCalls, 1);
     expect(permissions.allGranted, isTrue);
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
   });
 
   testWidgets('denied permission stays on screen and skip remains explicit', (
@@ -217,13 +223,13 @@ void main() {
       find.textContaining('ยังไม่ได้รับอนุญาตสิทธิ์ Nearby ที่จำเป็น'),
       findsOneWidget,
     );
-    expect(find.text('ผู้ใช้ RELIO'), findsNothing);
+    expect(findGeneratedName(), findsNothing);
 
     final skipButton = find.text('ข้ามขั้นตอนนี้');
     await tester.ensureVisible(skipButton);
     await tester.tap(skipButton);
     await tester.pumpAndSettle();
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
   });
 
   testWidgets('logout keeps granted permissions and next login goes Home', (
@@ -259,7 +265,7 @@ void main() {
 
     await openLogin(tester);
     await signIn(tester);
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
     expect(find.text('อนุญาตทั้งหมด'), findsNothing);
     expect(permissions.allGranted, isTrue);
     expect(permissions.requestCalls, 0);

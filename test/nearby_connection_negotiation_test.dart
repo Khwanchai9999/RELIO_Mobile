@@ -91,7 +91,7 @@ void main() {
   );
 
   test(
-    'manual initiator accepts its initiated callback exactly once',
+    'manual initiator shows the auth code and waits for local approval',
     () async {
       final fingerprint = List.filled(64, 'c').join();
       rig.transport.holdConnectionRequests = true;
@@ -107,6 +107,7 @@ void main() {
         id: 'initiated-peer',
         name: 'Peer',
         identityFingerprintHint: fingerprint,
+        authenticationToken: '543210',
         isIncomingRequest: false,
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -114,18 +115,36 @@ void main() {
         id: 'initiated-peer',
         name: 'Peer',
         identityFingerprintHint: fingerprint,
+        authenticationToken: '543210',
         isIncomingRequest: false,
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       expect(rig.transport.connectionRequestCount, 1);
-      expect(rig.transport.acceptConnectionCount, 1);
+      expect(rig.transport.acceptConnectionCount, 0);
       expect(
-        rig.service.pendingConnectionRequests.containsKey('initiated-peer'),
+        rig
+            .service
+            .pendingConnectionRequests['initiated-peer']
+            ?.authenticationToken,
+        '543210',
+      );
+      expect(
+        rig
+            .service
+            .pendingConnectionRequests['initiated-peer']
+            ?.isIncomingRequest,
         isFalse,
       );
+      await rig.service.acceptConnectionRequest('initiated-peer');
+      expect(rig.transport.acceptConnectionCount, 1);
+      expect(
+        rig.service.pendingConnectionRequests,
+        isNot(contains('initiated-peer')),
+      );
       final logs = await rig.logText();
-      expect(logs, contains('initiator_accepting_connection_initiated'));
+      expect(logs, contains('initiator_verification_prompt_queued'));
+      expect(logs, contains('"authenticationCodeAvailable":true'));
       expect(logs, contains('"connectingAtCallback":true'));
     },
   );

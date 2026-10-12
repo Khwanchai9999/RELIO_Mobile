@@ -7,6 +7,12 @@ import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 
+Finder findGeneratedName() => find.byWidgetPredicate(
+  (widget) =>
+      widget is Text &&
+      RegExp(r'^ผู้ใช้ RELIO \d{4}$').hasMatch(widget.data ?? ''),
+);
+
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
@@ -62,7 +68,7 @@ void main() {
 
     await pumpApp(tester);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byIcon(Icons.radar_outlined));
@@ -109,7 +115,7 @@ void main() {
     await pumpApp(tester);
 
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
-    expect(find.text('ผู้ใช้ RELIO'), findsOneWidget);
+    expect(findGeneratedName(), findsOneWidget);
 
     await tester.tap(find.text('ใกล้เคียง'));
     await tester.pumpAndSettle();
@@ -139,6 +145,39 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('SOS ACTIVE'), findsOneWidget);
     expect(find.text('ปิดโหมด SOS'), findsOneWidget);
+  });
+
+  testWidgets('persisted local SOS can be managed after app relaunch', (
+    tester,
+  ) async {
+    final dependencies = RelioDependencies(
+      database: AppDatabase.memory(),
+      transport: MockNearbyTransport(autoAcknowledge: false),
+    );
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await dependencies.dispose();
+    });
+    await dependencies.initialize();
+    await tester.pumpWidget(RelioApp(dependencies: dependencies));
+    await tapText(tester, 'ใช้งานแบบออฟไลน์');
+
+    await dependencies.repositories.sos.createAndActivate(
+      ownerDeviceId: await dependencies.identity.getDeviceId(),
+      ownerUserId: '',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.warning_amber_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('อุปกรณ์นี้กำลังส่งสัญญาณ SOS'), findsOneWidget);
+    final manageSos = find.text('จัดการ SOS');
+    await tester.ensureVisible(manageSos);
+    await tester.tap(manageSos);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('SOS ACTIVE'), findsOneWidget);
   });
 
   testWidgets('chat composer inserts a pending local message', (tester) async {

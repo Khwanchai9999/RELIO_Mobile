@@ -381,6 +381,17 @@ pending the manual checklist in `docs/MANUAL_DEVICE_TESTS.md`.
 
 ## Relationship to the React prototype
 
+### Build 38 local assignment gap-closure candidate
+
+The Samsung video receiver failure was traced to copying a native FILE payload
+before its transfer completed. `AndroidNearbyTransport` now waits for native
+SUCCESS before normalizing a received file; media validation and account scope
+remain enforced. QA export mirrors one sanitized diagnostics ZIP into
+app-specific external storage for USB inspection. This does not enable debug
+mode or change PROD diagnostics. See [docs/MEDIA_TRANSFER.md](docs/MEDIA_TRANSFER.md).
+Physical acceptance of this candidate must be recorded separately from the
+automated regression result; previously valid evidence remains preserved.
+
 `RELIO_SOS` remains the visual/reference prototype. When parity work is needed,
 compare flows and semantics between the two projects, but keep each project's
 toolchain and source tree independent.

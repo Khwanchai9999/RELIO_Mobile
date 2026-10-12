@@ -10,12 +10,18 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/environment.dart';
 
 class DiagnosticsLogService {
-  DiagnosticsLogService({this.directory});
+  DiagnosticsLogService({
+    this.directory,
+    this.qaExportDirectory,
+    this.qaLogcatSink,
+  });
 
   static const _channel = MethodChannel('relio/diagnostics');
   static const _maxFileBytes = 1024 * 1024;
   static const _fileCount = 5;
   Directory? directory;
+  final Directory? qaExportDirectory;
+  final void Function(String line)? qaLogcatSink;
   Future<void> _writeQueue = Future<void>.value();
   int _eventCount = 0;
   DateTime? _oldest;
@@ -96,6 +102,30 @@ class DiagnosticsLogService {
     _eventCount++;
     _oldest ??= now;
     _newest = now;
+    const qaLogCategories = {
+      'connection',
+      'identity',
+      'nearby',
+      'sos',
+      'native_nearby',
+      'lifecycle',
+      'trust',
+    };
+    final shouldWriteQaLogcat = qaLogCategories.contains(category);
+    if (shouldWriteQaLogcat && qaLogcatSink != null) {
+      try {
+        qaLogcatSink?.call(line.trimRight());
+      } on Object {
+        // Test instrumentation must not affect Nearby or identity decisions.
+      }
+    }
+    if (shouldWriteQaLogcat &&
+        qaLogcatSink == null &&
+        RelioBuildInfo.isTest &&
+        Platform.isAndroid) {
+      // ส่งเฉพาะ JSON ที่ผ่านการกรองแล้วไป Android Log เพื่อให้ QA release เก็บผ่าน logcat ได้
+      unawaited(_writeQaLogcat(line.trimRight()));
+    }
     _writeQueue = _writeQueue.then((_) async {
       try {
         await _append(line);
@@ -133,6 +163,14 @@ class DiagnosticsLogService {
       active = File('${root.path}${Platform.pathSeparator}diagnostics.jsonl');
     }
     await active.writeAsString(line, mode: FileMode.append, flush: false);
+  }
+
+  Future<void> _writeQaLogcat(String line) async {
+    try {
+      await _channel.invokeMethod<void>('logNearbyEvent', {'line': line});
+    } on Object {
+      // Observability must not affect Nearby or identity decisions.
+    }
   }
 
   Future<int> get storageBytes async {
@@ -232,9 +270,27 @@ class DiagnosticsLogService {
       '${temp.path}${Platform.pathSeparator}diagnostics',
     );
     await exportDirectory.create(recursive: true);
-    return File(
+    final exported = await File(
       '${exportDirectory.path}${Platform.pathSeparator}$filename',
     ).writeAsBytes(bytes, flush: true);
+    if (RelioBuildInfo.isTest &&
+        (Platform.isAndroid || qaExportDirectory != null)) {
+      try {
+        final external =
+            qaExportDirectory ?? await getExternalStorageDirectory();
+        if (external != null && bytes.length <= 6 * 1024 * 1024) {
+          // QA เก็บเฉพาะ ZIP ที่กรองแล้วหนึ่งไฟล์ เพื่อดึงผ่าน USB โดยไม่เปิด debug mode
+          final mirror = Directory('${external.path}/qa-diagnostics');
+          await mirror.create(recursive: true);
+          await File(
+            '${mirror.path}/latest.zip',
+          ).writeAsBytes(bytes, flush: true);
+        }
+      } on Object {
+        // External storage ใช้ไม่ได้ก็ยังส่งออกผ่านช่องทางเดิมได้
+      }
+    }
+    return exported;
   }
 
   Future<void> share(File file) async {
@@ -277,7 +333,7 @@ class DiagnosticsLogService {
   }
 
   static bool _sensitiveKey(String key) => RegExp(
-    r'(token|password|secret|authorization|private.?key|message.?body|chat.?body|content|credential|service.?role|conversation.?id|user.?id|device.?id|image.?bytes|media.?bytes|file.?bytes|local.?path|file.?path)',
+    r'(token|password|secret|authorization|private.?key|message.?body|chat.?body|content|credential|service.?role|conversation.?id|user.?id|device.?id|image.?bytes|media.?bytes|file.?bytes|local.?path|file.?path|latitude|longitude|coordinate)',
     caseSensitive: false,
   ).hasMatch(key);
 

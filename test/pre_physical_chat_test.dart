@@ -28,6 +28,7 @@ void main() {
           () => pair.serviceB.deviceIdForEndpoint('endpoint-a') == null,
         );
         pair.transportB.discoverPeer();
+        await approveReconnect(pair);
         await identified(pair);
         expect(pair.serviceA.pendingConnectionRequests, isEmpty);
         expect(pair.serviceB.pendingConnectionRequests, isEmpty);
@@ -129,6 +130,7 @@ void main() {
       expect(bubbles.single.id, sent.id);
       expect(bubbles.single.status, DeliveryStatus.pending);
       pair.transportB.discoverPeer();
+      await approveReconnect(pair);
       await waitFor(
         () async =>
             (await pair.repositoriesA.messages.getMessage(sent.id))?.status ==
@@ -298,6 +300,22 @@ void main() {
         expect(sink.shown, hasLength(1));
       },
     );
+  }
+}
+
+Future<void> approveReconnect(HandshakePair pair) async {
+  await waitFor(
+    () =>
+        pair.serviceA.pendingConnectionRequests.isNotEmpty ||
+        pair.serviceB.pendingConnectionRequests.isNotEmpty,
+  );
+  for (final endpoint
+      in pair.serviceA.pendingConnectionRequests.keys.toList()) {
+    await pair.serviceA.acceptConnectionRequest(endpoint);
+  }
+  for (final endpoint
+      in pair.serviceB.pendingConnectionRequests.keys.toList()) {
+    await pair.serviceB.acceptConnectionRequest(endpoint);
   }
 }
 

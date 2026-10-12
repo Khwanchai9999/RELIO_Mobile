@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
@@ -14,6 +15,7 @@ abstract interface class ConversationRepository {
   Stream<List<RelioConversation>> watchConversations();
   Future<List<RelioConversation>> listConversations();
   Future<RelioConversation?> getConversation(String id);
+  Future<RelioConversation> resolveRouteTarget(String routeId);
   Future<RelioConversation> ensureConversation({
     required String id,
     required String participantId,
@@ -33,6 +35,7 @@ abstract interface class MessageRepository {
   Stream<List<RelioMessage>> watchMessages(String conversationId);
   Future<List<RelioMessage>> listMessages(String conversationId);
   Future<RelioMessage?> getMessage(String messageId);
+  Future<QueuedMessageLookup> lookupQueuedMessage(String messageId);
   Future<bool> deleteWeek3DemoMessage(String messageId);
   Future<RelioMessage> createOutgoingText({
     required String conversationId,
@@ -100,6 +103,20 @@ abstract interface class MessageRepository {
   });
   Future<void> updateCloudSyncStatus(String messageId, String status);
   Future<void> markFailed(String messageId, String error);
+}
+
+enum QueuedMessageLookupStatus {
+  missingMessage,
+  missingConversation,
+  conversationNotVisible,
+  available,
+}
+
+class QueuedMessageLookup {
+  const QueuedMessageLookup(this.status, {this.message});
+
+  final QueuedMessageLookupStatus status;
+  final RelioMessage? message;
 }
 
 class CloudConversationBinding {
@@ -174,6 +191,7 @@ abstract interface class AttachmentRepository {
 abstract interface class SOSRepository {
   Stream<RelioSosEvent?> watchActive({String? ownerDeviceId});
   Future<RelioSosEvent?> readActive({String? ownerDeviceId});
+  Future<RelioSosEvent?> readLatest({String? ownerDeviceId});
   Future<RelioSosEvent> createAndActivate({
     required String ownerDeviceId,
     required String ownerUserId,
@@ -338,6 +356,25 @@ class DriftConversationRepository implements ConversationRepository {
       ..where((item) => item.id.equals(id) & _ownerFilter(ownerUserId));
     final row = await query.getSingleOrNull();
     return row == null ? null : _map(row);
+  }
+
+  @override
+  Future<RelioConversation> resolveRouteTarget(String routeId) async {
+    final byConversationId = await getConversation(routeId);
+    if (byConversationId != null) return byConversationId;
+
+    for (final conversation in await listConversations()) {
+      if (conversation.participantId == routeId) return conversation;
+    }
+
+    // Deep links from Nearby/SOS use stable peer IDs; create or resolve the
+    // current account's local conversation before the Chat screen opens.
+    return ensureConversation(
+      id: routeId,
+      participantId: routeId,
+      displayName: 'อุปกรณ์ RELIO',
+      participantStatus: DeviceStatus.normal,
+    );
   }
 
   @override
@@ -648,6 +685,35 @@ class DriftMessageRepository implements MessageRepository {
       return null;
     }
     return _map(row);
+  }
+
+  @override
+  Future<QueuedMessageLookup> lookupQueuedMessage(String messageId) async {
+    final row = await (db.select(
+      db.messages,
+    )..where((item) => item.id.equals(messageId))).getSingleOrNull();
+    if (row == null) {
+      return const QueuedMessageLookup(
+        QueuedMessageLookupStatus.missingMessage,
+      );
+    }
+    final conversation = await (db.select(
+      db.conversations,
+    )..where((item) => item.id.equals(row.conversationId))).getSingleOrNull();
+    if (conversation == null) {
+      return const QueuedMessageLookup(
+        QueuedMessageLookupStatus.missingConversation,
+      );
+    }
+    if (await conversations.getConversation(row.conversationId) == null) {
+      return const QueuedMessageLookup(
+        QueuedMessageLookupStatus.conversationNotVisible,
+      );
+    }
+    return QueuedMessageLookup(
+      QueuedMessageLookupStatus.available,
+      message: _map(row),
+    );
   }
 
   @override
@@ -1538,6 +1604,21 @@ class DriftSosRepository implements SOSRepository {
   }
 
   @override
+  Future<RelioSosEvent?> readLatest({String? ownerDeviceId}) async {
+    final row =
+        await (db.select(db.sosEvents)
+              ..where(
+                (item) => ownerDeviceId == null
+                    ? const Constant(true)
+                    : item.ownerDeviceId.equals(ownerDeviceId),
+              )
+              ..orderBy([(item) => OrderingTerm.desc(item.updatedAt)])
+              ..limit(1))
+            .getSingleOrNull();
+    return row == null ? null : _map(row);
+  }
+
+  @override
   Future<RelioSosEvent> createIncoming({
     required String id,
     required String ownerDeviceId,
@@ -1551,24 +1632,38 @@ class DriftSosRepository implements SOSRepository {
     required bool isActive,
   }) async {
     final now = DateTime.now();
-    await db
-        .into(db.sosEvents)
-        .insertOnConflictUpdate(
-          SosEventsCompanion.insert(
-            id: id,
-            ownerDeviceId: ownerDeviceId,
-            ownerUserId: ownerUserId,
-            message: Value(message),
-            latitude: Value(latitude),
-            longitude: Value(longitude),
-            locationAccuracy: Value(locationAccuracy),
-            locationCapturedAt: Value(locationCapturedAt),
-            createdAt: createdAt,
-            updatedAt: now,
-            isActive: isActive,
-            deliveryStatus: DeliveryStatus.delivered.name,
-          ),
-        );
+    await db.transaction(() async {
+      // ให้อุปกรณ์หนึ่งมี SOS ที่ active ได้รายการเดียวก่อนบันทึก revision ใหม่
+      await (db.update(db.sosEvents)..where(
+            (row) =>
+                row.ownerDeviceId.equals(ownerDeviceId) &
+                row.isActive.equals(true),
+          ))
+          .write(
+            SosEventsCompanion(
+              isActive: const Value(false),
+              updatedAt: Value(now),
+            ),
+          );
+      await db
+          .into(db.sosEvents)
+          .insertOnConflictUpdate(
+            SosEventsCompanion.insert(
+              id: id,
+              ownerDeviceId: ownerDeviceId,
+              ownerUserId: ownerUserId,
+              message: Value(message),
+              latitude: Value(latitude),
+              longitude: Value(longitude),
+              locationAccuracy: Value(locationAccuracy),
+              locationCapturedAt: Value(locationCapturedAt),
+              createdAt: createdAt,
+              updatedAt: now,
+              isActive: isActive,
+              deliveryStatus: DeliveryStatus.delivered.name,
+            ),
+          );
+    });
     final row = await (db.select(
       db.sosEvents,
     )..where((item) => item.id.equals(id))).getSingle();
@@ -2191,6 +2286,7 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
 class RelioDeviceIdentityRepository {
   RelioDeviceIdentityRepository(this.db);
   final AppDatabase db;
+  Future<String>? _displayNameFuture;
 
   Future<String> getDeviceId() async {
     final saved = await (db.select(
@@ -2202,22 +2298,71 @@ class RelioDeviceIdentityRepository {
     return id;
   }
 
-  Future<String> getDisplayName() async {
+  Future<String> getDisplayName() =>
+      _displayNameFuture ??= _loadOrCreateDisplayName();
+
+  Future<String> _loadOrCreateDisplayName() async {
     final saved = await (db.select(
       db.appSettings,
     )..where((row) => row.key.equals('display_name'))).getSingleOrNull();
-    if (saved != null && saved.value.isNotEmpty) return saved.value;
-    await _write('display_name', 'ผู้ใช้ RELIO');
-    return 'ผู้ใช้ RELIO';
+    if (saved != null && saved.value.isNotEmpty) {
+      if (saved.value == 'ผู้ใช้ RELIO') {
+        return _createDefaultDisplayName();
+      }
+      final isGenerated = _isGeneratedDefault(saved.value);
+      final customSetting =
+          await (db.select(db.appSettings)
+                ..where((row) => row.key.equals('display_name_is_custom')))
+              .getSingleOrNull();
+      if (customSetting == null) {
+        // Keep legacy custom names while marking generated defaults as defaults.
+        await _write('display_name_is_custom', (!isGenerated).toString());
+      }
+      if (isGenerated) await _write('display_name_default', saved.value);
+      return saved.value;
+    }
+    return _createDefaultDisplayName();
   }
 
   Future<void> setDisplayName(String displayName) async {
     final normalized = displayName.trim();
-    if (normalized.isEmpty || normalized.length > 60) {
+    if (normalized.isEmpty || normalized.runes.length > 40) {
       throw ArgumentError.value(displayName, 'displayName');
     }
+    await getDisplayName();
+    final currentDefault =
+        await (db.select(db.appSettings)
+              ..where((row) => row.key.equals('display_name_default')))
+            .getSingleOrNull();
     await _write('display_name', normalized);
+    await _write(
+      'display_name_is_custom',
+      (normalized != currentDefault?.value).toString(),
+    );
+    _displayNameFuture = Future<String>.value(normalized);
   }
+
+  Future<bool> isUsingDefaultDisplayName() async {
+    final name = await getDisplayName();
+    final setting =
+        await (db.select(db.appSettings)
+              ..where((row) => row.key.equals('display_name_is_custom')))
+            .getSingleOrNull();
+    return setting?.value != 'true' && _isGeneratedDefault(name);
+  }
+
+  Future<String> _createDefaultDisplayName() async {
+    final suffix = Random.secure().nextInt(9000) + 1000;
+    final name = 'ผู้ใช้ RELIO $suffix';
+    // Persist separately so an explicit reset can identify the default name.
+    await _write('display_name_default', name);
+    await _write('display_name', name);
+    await _write('display_name_is_custom', 'false');
+    return name;
+  }
+
+  bool _isGeneratedDefault(String value) =>
+      RegExp(r'^ผู้ใช้ RELIO \d{4}$').hasMatch(value);
 
   Future<void> _write(String key, String value) async {
     await db
@@ -2245,6 +2390,25 @@ class RelioSettingsRepository {
   }
 
   Future<void> setBool(String key, bool value) async {
+    await db
+        .into(db.appSettings)
+        .insertOnConflictUpdate(
+          AppSettingsCompanion.insert(
+            key: key,
+            value: value.toString(),
+            updatedAt: DateTime.now(),
+          ),
+        );
+  }
+
+  Future<int> getInt(String key, {required int defaultValue}) async {
+    final saved = await (db.select(
+      db.appSettings,
+    )..where((row) => row.key.equals(key))).getSingleOrNull();
+    return int.tryParse(saved?.value ?? '') ?? defaultValue;
+  }
+
+  Future<void> setInt(String key, int value) async {
     await db
         .into(db.appSettings)
         .insertOnConflictUpdate(

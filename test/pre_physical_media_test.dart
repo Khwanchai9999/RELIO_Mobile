@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
 import 'package:relio_mobile/core/media/media_storage_service.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
+import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 import 'support/nearby_pair.dart';
@@ -18,6 +19,98 @@ final imageBytes = base64Decode(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final fileFirst in [false, true]) {
+    test(
+      'video persists, ACKs and deduplicates with fileFirst=$fileFirst without crossing account scope',
+      () async {
+        final pair = await connectedPair();
+        addTearDown(pair.close);
+        pair.transportA.fileBeforeMetadata = fileFirst;
+        final bytes = [
+          0,
+          0,
+          0,
+          24,
+          102,
+          116,
+          121,
+          112,
+          105,
+          115,
+          111,
+          109,
+          0,
+          0,
+          0,
+          1,
+        ];
+        final source = File('${pair.logsA.directory!.path}/qa.mp4');
+        await source.writeAsBytes(bytes);
+        final storage = MediaStorageService(
+          rootDirectory: Directory('${pair.logsA.directory!.path}/media'),
+        );
+        final managed = await storage.copySelectedFile(source.path);
+        final attachment = await pair.repositoriesA.attachments.createPending(
+          id: 'video-attachment',
+          conversationId: 'device-b',
+          messageId: 'video-message',
+          transferId: 'video-transfer',
+          mediaType: MediaType.video,
+          fileName: 'qa.mp4',
+          mimeType: 'video/mp4',
+          localPath: managed,
+          byteSize: bytes.length,
+        );
+        final message = await pair.repositoriesA.messages.createOutgoingMedia(
+          conversationId: 'device-b',
+          senderId: 'user-a',
+          senderDeviceId: 'device-a',
+          type: MessageType.video,
+          fileName: 'qa.mp4',
+          localPath: managed,
+          attachmentId: attachment.id,
+          messageId: attachment.messageId,
+        );
+        for (var attempt = 1; attempt <= 2; attempt++) {
+          await pair.serviceA.sendMediaMessage(message, attachment);
+          await waitFor(
+            () =>
+                pair.transportB.packets
+                    .where(
+                      (packet) =>
+                          packet.type == RelioPacketType.mediaAck &&
+                          packet.payload['status'] == 'completed',
+                    )
+                    .length ==
+                attempt,
+          );
+        }
+        await waitFor(
+          () async =>
+              (await pair.repositoriesA.messages.getMessage(
+                message.id,
+              ))?.status ==
+              DeliveryStatus.delivered,
+        );
+        final received = (await pair.repositoriesB.attachments.getById(
+          attachment.id,
+        ))!;
+        expect(await File(received.localPath).readAsBytes(), bytes);
+        expect(
+          await pair.repositoriesB.messages.listMessages('device-a'),
+          hasLength(1),
+        );
+        expect(await pair.repositoriesB.attachments.listAll(), hasLength(1));
+        final otherAccount = RelioRepositories(
+          pair.databaseB,
+          ownerUserIdProvider: () => 'different-account',
+        );
+        expect(await otherAccount.messages.getMessage(message.id), isNull);
+        expect(await otherAccount.conversations.listConversations(), isEmpty);
+      },
+    );
+  }
 
   test(
     'repeated image transfer has one attachment, unread and notification',
@@ -119,6 +212,11 @@ void main() {
         await pair.repositoriesB.messages.getMessage(media.message.id),
         isNull,
       );
+      final failure = (await readEvents(
+        pair.logsB,
+      )).lastWhere((event) => event['event'] == 'media_receive_failed');
+      expect(failure['checkpoint'], 'file_validation_and_storage');
+      expect(failure['reason'], contains('SHA-256'));
     },
   );
 
@@ -161,6 +259,7 @@ void main() {
         DeliveryStatus.failed,
       );
       pair.transportB.discoverPeer();
+      await approveReconnect(pair);
       await waitFor(
         () =>
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -182,6 +281,22 @@ void main() {
       expect(await pair.repositoriesB.attachments.listAll(), hasLength(1));
     },
   );
+}
+
+Future<void> approveReconnect(HandshakePair pair) async {
+  await waitFor(
+    () =>
+        pair.serviceA.pendingConnectionRequests.isNotEmpty ||
+        pair.serviceB.pendingConnectionRequests.isNotEmpty,
+  );
+  for (final endpoint
+      in pair.serviceA.pendingConnectionRequests.keys.toList()) {
+    await pair.serviceA.acceptConnectionRequest(endpoint);
+  }
+  for (final endpoint
+      in pair.serviceB.pendingConnectionRequests.keys.toList()) {
+    await pair.serviceB.acceptConnectionRequest(endpoint);
+  }
 }
 
 Future<HandshakePair> connectedPair({

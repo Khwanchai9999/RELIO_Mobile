@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../diagnostics/diagnostics_log_service.dart';
 import '../cloud/cloud_data_source.dart';
 import '../cloud/cloud_models.dart';
 import '../cloud/cloud_storage_policy.dart';
@@ -8,7 +9,7 @@ import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
 import '../notifications/notification_preview.dart';
 import '../repositories/local_repositories.dart';
-import '../../data/models/prototype_models.dart' show DeviceStatus;
+import '../../data/models/prototype_models.dart' show DeviceStatus, MessageType;
 import 'sync_types.dart';
 
 abstract interface class SyncClock {
@@ -99,6 +100,7 @@ class SyncEngine {
     required this.identity,
     required this.mediaStorage,
     this.localNotifications,
+    this.diagnostics,
     this.isConversationActive,
     SyncClock? clock,
     SyncRetryPolicy? retryPolicy,
@@ -111,6 +113,7 @@ class SyncEngine {
   final RelioDeviceIdentityRepository identity;
   final MediaStorageService mediaStorage;
   final LocalNotificationSink? localNotifications;
+  final DiagnosticsLogService? diagnostics;
   final bool Function(String conversationId)? isConversationActive;
   final SyncClock clock;
   final SyncRetryPolicy retryPolicy;
@@ -280,9 +283,37 @@ class SyncEngine {
       for (final candidate in candidates) {
         if (candidate.ownerUserId != currentIdentity.userId) {
           hadOwnershipBlock = true;
+          await _recordQueueDecision(
+            candidate,
+            currentIdentity.userId,
+            selected: false,
+            reason: 'owner_mismatch',
+          );
+          continue;
+        }
+        final terminalReason = await _permanentDependencyFailure(candidate);
+        if (terminalReason != null) {
+          hadFailure = true;
+          await repositories.syncQueue.markFailed(candidate.id, terminalReason);
+          await _markLocalFailure(candidate);
+          await _recordQueueDecision(
+            candidate,
+            currentIdentity.userId,
+            selected: false,
+            reason: 'terminal:$terminalReason',
+          );
           continue;
         }
         if (!await _dependenciesReady(candidate, currentIdentity.userId)) {
+          await _recordQueueDecision(
+            candidate,
+            currentIdentity.userId,
+            selected: false,
+            reason: await _dependencySkipReason(
+              candidate,
+              currentIdentity.userId,
+            ),
+          );
           continue;
         }
         final item = await repositories.syncQueue.claim(
@@ -291,6 +322,12 @@ class SyncEngine {
         );
         if (item == null) continue;
         claimedAny = true;
+        await _recordQueueDecision(
+          item,
+          currentIdentity.userId,
+          selected: true,
+          reason: 'claimed',
+        );
         await _markLocalSyncing(item);
         await _emit(state: SyncEngineState.running, currentItem: item);
         try {
@@ -301,6 +338,12 @@ class SyncEngine {
           }
           await repositories.syncQueue.markCompleted(item.id);
           await _markLocalSuccess(item);
+          await _recordQueueDecision(
+            item,
+            currentIdentity.userId,
+            selected: true,
+            reason: 'completed',
+          );
           await _emit(
             state: SyncEngineState.running,
             currentItem: null,
@@ -314,6 +357,17 @@ class SyncEngine {
           }
           hadFailure = true;
           await _handleFailure(item, error);
+          final transitionedRows = (await repositories.syncQueue.listAll())
+              .where((queued) => queued.id == item.id)
+              .toList(growable: false);
+          if (transitionedRows.isNotEmpty) {
+            await _recordQueueDecision(
+              transitionedRows.first,
+              currentIdentity.userId,
+              selected: true,
+              reason: 'transition:${transitionedRows.first.status}',
+            );
+          }
         }
       }
       if (!claimedAny) break;
@@ -338,50 +392,48 @@ class SyncEngine {
           queued.operation == operation &&
           queued.status == SyncQueueStatus.completed.value,
     );
-    bool queued(String entityId, String operation) => all.any(
-      (queued) => queued.entityId == entityId && queued.operation == operation,
-    );
-
     switch (SyncOperation.parse(item.operation)) {
       case SyncOperation.messageUpsert:
         final message = await repositories.messages.getMessage(item.entityId);
         if (message == null) return true;
-        if (message.type.name != 'text' || message.conversationId == null) {
-          return false;
-        }
         final link = await repositories.cloudLinks.get(
           localConversationId: message.conversationId!,
           ownerUserId: currentUserId,
         );
         if (link == null) return false;
-        return !queued(
-              message.conversationId ?? '',
-              SyncOperation.conversationUpsert.value,
-            ) ||
-            completed(
-              message.conversationId!,
-              SyncOperation.conversationUpsert.value,
-            );
+        // Old Guest or other-account conversation rows must not hold up a
+        // separately owned message once this account already has its Cloud link.
+        final hasOwnedIncompleteConversationWrite = all.any(
+          (queued) =>
+              queued.entityId == message.conversationId &&
+              queued.operation == SyncOperation.conversationUpsert.value &&
+              queued.ownerUserId == currentUserId &&
+              queued.status != SyncQueueStatus.completed.value,
+        );
+        return !hasOwnedIncompleteConversationWrite;
       case SyncOperation.attachmentMetadataUpsert:
         final attachment = await repositories.attachments.getById(
           item.entityId,
         );
         if (attachment == null) return true;
+        final parentMessage = await repositories.messages.getMessage(
+          attachment.messageId,
+        );
         final parentQueue = all.where(
           (queued) =>
               queued.entityId == attachment.messageId &&
               queued.operation == SyncOperation.messageUpsert.value,
         );
-        if (parentQueue.isEmpty ||
-            parentQueue.any((queued) => queued.ownerUserId != currentUserId)) {
+        if (parentQueue.any((queued) => queued.ownerUserId != currentUserId)) {
           return false;
         }
-        return !queued(
-              attachment.messageId,
-              SyncOperation.messageUpsert.value,
-            ) ||
+        return parentMessage?.cloudSyncStatus == CloudSyncStatus.synced.value ||
             completed(attachment.messageId, SyncOperation.messageUpsert.value);
       case SyncOperation.attachmentUpload:
+        final attachment = await repositories.attachments.getById(
+          item.entityId,
+        );
+        if (attachment == null) return true;
         final attachmentQueue = all.where(
           (queued) =>
               queued.entityId == item.entityId &&
@@ -415,6 +467,227 @@ class SyncEngine {
             ) !=
             null;
     }
+  }
+
+  Future<String?> _permanentDependencyFailure(RelioQueueItem item) async {
+    switch (SyncOperation.parse(item.operation)) {
+      case SyncOperation.messageUpsert:
+        final lookup = await repositories.messages.lookupQueuedMessage(
+          item.entityId,
+        );
+        switch (lookup.status) {
+          case QueuedMessageLookupStatus.missingMessage:
+            return 'message_missing';
+          case QueuedMessageLookupStatus.missingConversation:
+            return 'conversation_id_missing';
+          case QueuedMessageLookupStatus.conversationNotVisible:
+            return 'conversation_scope_mismatch';
+          case QueuedMessageLookupStatus.available:
+            break;
+        }
+        final message = lookup.message!;
+        if (message.conversationId == null ||
+            message.conversationId!.trim().isEmpty) {
+          return 'conversation_id_missing';
+        }
+        switch (message.type) {
+          case MessageType.text:
+            return null;
+          case MessageType.image || MessageType.video:
+            final attachments = await repositories.attachments.listAll();
+            final attachment = attachments
+                .where((row) => row.messageId == message.id)
+                .firstOrNull;
+            if (attachment == null) {
+              return 'attachment_missing';
+            }
+            final queue = await repositories.syncQueue.listAll();
+            for (final operation in [
+              SyncOperation.attachmentMetadataUpsert,
+              SyncOperation.attachmentUpload,
+            ]) {
+              if (!queue.any(
+                (row) =>
+                    row.entityId == attachment.id &&
+                    row.operation == operation.value &&
+                    row.ownerUserId == item.ownerUserId,
+              )) {
+                return 'attachment_sync_queue_missing';
+              }
+            }
+            return null;
+          case MessageType.location:
+            // Cloud message rows have no coordinate fields and the pull merge
+            // is text-only; syncing this would falsely report a lossy success.
+            return 'unsupported_location_cloud_sync';
+          case MessageType.system:
+            return 'unsupported_message_type_system';
+        }
+      case SyncOperation.attachmentMetadataUpsert:
+        final attachment = await repositories.attachments.getById(
+          item.entityId,
+        );
+        if (attachment == null) return 'attachment_missing';
+        final parent = await repositories.messages.getMessage(
+          attachment.messageId,
+        );
+        if (parent == null) return 'parent_message_missing';
+        final rows = await repositories.syncQueue.listAll();
+        final parentQueue = rows.where(
+          (row) =>
+              row.entityId == attachment.messageId &&
+              row.operation == SyncOperation.messageUpsert.value,
+        );
+        if (parentQueue.any((row) => row.ownerUserId != item.ownerUserId)) {
+          return 'parent_message_owner_mismatch';
+        }
+        if (parentQueue.any(
+          (row) => row.status == SyncQueueStatus.failed.value,
+        )) {
+          return 'parent_message_sync_failed';
+        }
+        if (parentQueue.isEmpty &&
+            parent.cloudSyncStatus != CloudSyncStatus.synced.value) {
+          return 'parent_message_sync_missing';
+        }
+        return null;
+      case SyncOperation.attachmentUpload:
+        final attachment = await repositories.attachments.getById(
+          item.entityId,
+        );
+        if (attachment == null) return 'attachment_missing';
+        final rows = await repositories.syncQueue.listAll();
+        final metadataRows = rows.where(
+          (row) =>
+              row.entityId == item.entityId &&
+              row.operation == SyncOperation.attachmentMetadataUpsert.value,
+        );
+        if (metadataRows.any((row) => row.ownerUserId != item.ownerUserId)) {
+          return 'attachment_metadata_owner_mismatch';
+        }
+        if (metadataRows.any(
+          (row) => row.status == SyncQueueStatus.failed.value,
+        )) {
+          return 'attachment_metadata_failed';
+        }
+        if (metadataRows.isEmpty) return 'attachment_metadata_missing';
+        return null;
+      case SyncOperation.profileUpsert ||
+          SyncOperation.conversationUpsert ||
+          SyncOperation.sosUpsert ||
+          SyncOperation.readReceiptUpsert ||
+          null:
+        return null;
+    }
+  }
+
+  Future<String> _dependencySkipReason(
+    RelioQueueItem item,
+    String currentUserId,
+  ) async {
+    if (SyncOperation.parse(item.operation) == SyncOperation.messageUpsert) {
+      final message = await repositories.messages.getMessage(item.entityId);
+      if (message == null) return 'message_missing';
+      if (message.type == MessageType.location) {
+        return 'unsupported_location_cloud_sync';
+      }
+      if (message.type == MessageType.system) {
+        return 'unsupported_message_type_system';
+      }
+      if (message.conversationId == null ||
+          message.conversationId!.trim().isEmpty) {
+        return 'conversation_id_missing';
+      }
+      final binding = await repositories.cloudLinks.get(
+        localConversationId: message.conversationId!,
+        ownerUserId: currentUserId,
+      );
+      if (binding == null) return 'conversation_binding_missing';
+      final queue = await repositories.syncQueue.listAll();
+      if (queue.any(
+        (row) =>
+            row.entityId == message.conversationId &&
+            row.operation == SyncOperation.conversationUpsert.value &&
+            row.ownerUserId == currentUserId &&
+            row.status != SyncQueueStatus.completed.value,
+      )) {
+        return 'current_owner_conversation_write_incomplete';
+      }
+    }
+    return 'dependency_not_ready';
+  }
+
+  Future<void> _recordQueueDecision(
+    RelioQueueItem item,
+    String currentUserId, {
+    required bool selected,
+    required String reason,
+  }) async {
+    final log = diagnostics;
+    if (log == null) return;
+    String? conversationId;
+    CloudConversationBinding? binding;
+    var dependencyPresent = false;
+    if (SyncOperation.parse(item.operation) == SyncOperation.messageUpsert) {
+      final message = await repositories.messages.getMessage(item.entityId);
+      conversationId = message?.conversationId;
+      if (conversationId != null) {
+        binding = await repositories.cloudLinks.get(
+          localConversationId: conversationId,
+          ownerUserId: currentUserId,
+        );
+        final queue = await repositories.syncQueue.listAll();
+        dependencyPresent = queue.any(
+          (row) =>
+              row.entityId == conversationId &&
+              row.operation == SyncOperation.conversationUpsert.value,
+        );
+      }
+    } else if (SyncOperation.parse(item.operation) ==
+        SyncOperation.conversationUpsert) {
+      conversationId = item.entityId;
+      binding = await repositories.cloudLinks.get(
+        localConversationId: item.entityId,
+        ownerUserId: currentUserId,
+      );
+    }
+    final ownerClass = item.ownerUserId == null || item.ownerUserId!.isEmpty
+        ? 'unowned'
+        : item.ownerUserId == currentUserId
+        ? 'current'
+        : 'foreign';
+    final now = clock.now();
+    log.record(
+      'cloud_sync',
+      selected ? 'sync_queue_selected' : 'sync_queue_skipped',
+      operation: item.operation,
+      stateTo: reason == 'claimed'
+          ? 'processing'
+          : reason == 'completed'
+          ? 'completed'
+          : reason.startsWith('terminal:')
+          ? 'failed'
+          : reason.startsWith('transition:')
+          ? reason.substring('transition:'.length)
+          : selected
+          ? item.status
+          : 'skipped',
+      reason: reason,
+      fields: {
+        'itemKey': item.id.length <= 8
+            ? item.id
+            : item.id.substring(item.id.length - 8),
+        'ownerClass': ownerClass,
+        'conversationBindingPresent': binding != null,
+        'dependencyPresent': dependencyPresent,
+        'queueStatus': item.status,
+        'ageSeconds': now.difference(item.createdAt).inSeconds,
+        if (conversationId != null)
+          'conversationKey': conversationId.length <= 8
+              ? conversationId
+              : conversationId.substring(conversationId.length - 8),
+      },
+    );
   }
 
   Future<void> _importAndPull(String userId) async {
@@ -643,7 +916,10 @@ class SyncEngine {
                 localConversationId: message.conversationId!,
                 ownerUserId: userId,
               );
-        if (link == null || message.type.name != 'text') {
+        if (link == null ||
+            (message.type != MessageType.text &&
+                message.type != MessageType.image &&
+                message.type != MessageType.video)) {
           throw const CloudException(
             'ข้อความยังไม่มีช่องทาง Cloud ที่อนุมัติ',
             code: 'unlinkedConversation',

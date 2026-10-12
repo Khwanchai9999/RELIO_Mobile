@@ -201,6 +201,14 @@ remote policy enforcement.
 
 ## Change boundaries
 
+Build 38 local gap-closure candidate waits for native FILE SUCCESS before
+normalizing/copying a received file. Metadata/file ordering, SHA-256 validation,
+deduplication, and account isolation remain enforced. QA-only export mirrors
+one sanitized ZIP (maximum 6 MiB) at app-specific external
+`files/qa-diagnostics/latest.zip` for USB inspection; DEV/PROD must not create
+this mirror or become debuggable. Keep physical acceptance evidence separate
+from automated coverage and preserve earlier applicable physical passes.
+
 - Do not add a background worker, cloud-first UI, or live credentials; live
   Supabase uploads require an explicitly authorized QA test. The
   foreground/lifecycle SyncEngine is implemented and ownership-gated. Public QA update behavior and the full Firebase App

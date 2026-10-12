@@ -23,6 +23,7 @@ import 'nearby/nearby_retry_backoff.dart';
 import 'nearby/nearby_transport.dart';
 import 'permissions/permission_service.dart';
 import 'repositories/local_repositories.dart';
+import 'repositories/profile_avatar_repository.dart';
 import 'relay/relay_engine.dart';
 import 'relay/relay_repository.dart';
 import 'sync/sync_engine.dart';
@@ -34,6 +35,7 @@ class RelioDependencies {
     bool? useMockTransport,
     LocationService? locationService,
     MediaStorageService? mediaStorage,
+    ProfileAvatarRepository? profileAvatarRepository,
     LocalNotificationSink? localNotificationSink,
     CloudDataSource? cloudDataSource,
     AppUpdateService? appUpdateService,
@@ -41,6 +43,7 @@ class RelioDependencies {
     PermissionService? permissionService,
     bool? androidPlatformOverride,
     Duration connectionAttemptTimeout = const Duration(seconds: 35),
+    Duration incomingApprovalTimeout = const Duration(seconds: 90),
     Duration hardNegotiationTimeout = const Duration(seconds: 90),
   }) : database = database ?? AppDatabase(),
        _isAndroid = androidPlatformOverride ?? Platform.isAndroid,
@@ -83,6 +86,8 @@ class RelioDependencies {
       ),
     );
     identity = RelioDeviceIdentityRepository(this.database);
+    this.profileAvatarRepository =
+        profileAvatarRepository ?? ProfileAvatarRepository(this.database);
     this.permissionService =
         permissionService ??
         PermissionService(
@@ -116,6 +121,7 @@ class RelioDependencies {
       relayEngine: relayEngine,
       diagnostics: diagnostics,
       connectionAttemptTimeout: connectionAttemptTimeout,
+      incomingApprovalTimeout: incomingApprovalTimeout,
       hardNegotiationTimeout: hardNegotiationTimeout,
     );
     syncEngine = SyncEngine(
@@ -124,6 +130,7 @@ class RelioDependencies {
       identity: identity,
       mediaStorage: mediaStorageService,
       localNotifications: localNotificationService,
+      diagnostics: diagnostics,
       isConversationActive: (conversationId) =>
           nearbyService.isConversationVisible(conversationId),
     );
@@ -138,6 +145,7 @@ class RelioDependencies {
   late final DiagnosticsLogService diagnostics;
   late final RelioRepositories repositories;
   late final RelioDeviceIdentityRepository identity;
+  late final ProfileAvatarRepository profileAvatarRepository;
   late final PermissionService permissionService;
   late final LocationService locationService;
   late final MediaStorageService mediaStorageService;

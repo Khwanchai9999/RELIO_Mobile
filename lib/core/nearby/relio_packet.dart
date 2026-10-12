@@ -107,6 +107,8 @@ class RelioPacket {
     required String senderUserId,
     required String displayName,
     DeviceStatus status = DeviceStatus.normal,
+    bool? rescueActive,
+    DateTime? updatedAt,
     List<String> capabilities = const [
       'textMessage',
       'deviceStatus',
@@ -123,6 +125,8 @@ class RelioPacket {
     payload: {
       'displayName': displayName,
       'status': status.name,
+      'rescueActive': rescueActive ?? status == DeviceStatus.rescue,
+      'updatedAt': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
       'capabilities': capabilities,
     },
   );
@@ -172,6 +176,7 @@ class RelioPacket {
     required String senderUserId,
     required String displayName,
     required DeviceStatus status,
+    bool? rescueActive,
     DateTime? updatedAt,
   }) => RelioPacket(
     protocolVersion: 1,
@@ -184,6 +189,7 @@ class RelioPacket {
       'deviceId': senderDeviceId,
       'displayName': displayName,
       'status': status.name,
+      'rescueActive': rescueActive ?? status == DeviceStatus.rescue,
       'updatedAt': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
     },
   );
@@ -200,6 +206,7 @@ class RelioPacket {
     DateTime? locationCapturedAt,
     required DateTime createdAt,
     required bool isActive,
+    int? stateRevision,
   }) => RelioPacket(
     protocolVersion: 1,
     packetId: const Uuid().v4(),
@@ -224,6 +231,7 @@ class RelioPacket {
                   .toIso8601String(),
             }),
       'createdAt': createdAt.toUtc().toIso8601String(),
+      ...?(stateRevision == null ? null : {'stateRevision': stateRevision}),
       'isActive': isActive,
     },
   );
@@ -488,6 +496,8 @@ class RelioPacket {
         // v0.2 hello packets did not carry status. Treat that older shape as
         // normal while emitting the richer v0.3 handshake going forward.
         if (payload.containsKey('status')) _statusField();
+        if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
+        if (payload.containsKey('updatedAt')) _payloadString('updatedAt');
       case RelioPacketType.textMessage:
         _payloadString('messageId');
         _payloadString('conversationId');
@@ -498,6 +508,7 @@ class RelioPacket {
         _payloadString('displayName');
         _statusField();
         _payloadString('updatedAt');
+        if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
       case RelioPacketType.ack:
         _payloadString('packetId');
         if (payload.containsKey('messageId')) _payloadString('messageId');
@@ -507,8 +518,15 @@ class RelioPacket {
         _payloadString('ownerUserId');
         _payloadString('displayName');
         _payloadString('createdAt');
+        if (payload.containsKey('updatedAt')) _payloadString('updatedAt');
         if (payload.containsKey('payloadId')) _payloadString('payloadId');
         _payloadBool('isActive');
+        if (payload.containsKey('stateRevision')) {
+          final revision = payload['stateRevision'];
+          if (revision is! int || revision < 1) {
+            throw const RelioPacketException('Invalid SOS state revision.');
+          }
+        }
         _optionalNumber('latitude');
         _optionalNumber('longitude');
         _optionalNumber('accuracyMeters');

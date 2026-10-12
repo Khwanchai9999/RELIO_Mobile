@@ -9,6 +9,7 @@ import android.util.Base64
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -29,6 +30,7 @@ class MainActivity : FlutterActivity() {
     private val notificationChannel = "relio/notifications"
     private val identityChannel = "relio/device_identity"
     private val diagnosticsChannel = "relio/diagnostics"
+    private val mediaChannel = "relio/media"
     private val identityKeyStore = RelioIdentityKeyStore()
     private val identityExecutor = Executors.newSingleThreadExecutor()
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
@@ -52,10 +54,46 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler(::handleUpdateCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, identityChannel)
             .setMethodCallHandler(::handleIdentityCall)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mediaChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "playLocalVideo") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val requestedPath = call.argument<String>("path")
+                        ?: throw IllegalArgumentException("missing video path")
+                    val mediaRoot = File(filesDir, "relio_media").canonicalPath + File.separator
+                    val video = File(requestedPath).canonicalFile
+                    require(video.isFile && video.path.startsWith(mediaRoot)) {
+                        "video is missing or outside RELIO storage"
+                    }
+                    startActivity(
+                        Intent(this, RelioVideoPlayerActivity::class.java)
+                            .putExtra(RelioVideoPlayerActivity.EXTRA_PATH, video.path),
+                    )
+                    result.success(null)
+                } catch (_: Throwable) {
+                    result.error(
+                        "video_unavailable",
+                        "วิดีโอไม่มีอยู่หรือไม่สามารถเปิดได้",
+                        null,
+                    )
+                }
+            }
         if (packageName != PROD_APPLICATION_ID) {
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, diagnosticsChannel)
                 .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "logNearbyEvent" -> {
+                        val line = call.argument<String>("line")
+                        if (line == null || line.length > 4096 || !line.startsWith("{")) {
+                            result.error("invalid_diagnostic_event", "Invalid diagnostic event", null)
+                        } else {
+                            Log.i("RELIO_QA_DIAG", line)
+                            result.success(null)
+                        }
+                    }
                     "getDiagnosticsDeviceInfo" -> {
                         // อ่านเลข build จาก APK ที่ติดตั้งจริง ป้องกันข้อมูล Dart define ไม่ตรงกับเครื่อง
                         val info = packageManager.getPackageInfo(packageName, 0)

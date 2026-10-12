@@ -185,13 +185,18 @@ void main() {
       identity: RelioDeviceIdentityRepository(database),
       nearbyDevices: repositories.nearbyDevices,
       connectionAttemptTimeout: const Duration(milliseconds: 20),
+      incomingApprovalTimeout: const Duration(milliseconds: 100),
     );
     await service.initialize();
     transport.simulateIncomingConnection(id: 'expiring-peer', name: 'Peer');
     await Future<void>.delayed(Duration.zero);
     expect(service.pendingConnectionRequests, contains('expiring-peer'));
 
-    await Future<void>.delayed(const Duration(milliseconds: 140));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(service.pendingConnectionRequests, contains('expiring-peer'));
+    expect(transport.rejectedConnections, isNot(contains('expiring-peer')));
+
+    await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(service.pendingConnectionRequests, isEmpty);
     expect(transport.rejectedConnections, contains('expiring-peer'));
     expect(service.peerErrors['expiring-peer'], 'incoming_request_timeout');

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nearby_connections/nearby_connections.dart';
@@ -115,4 +117,168 @@ void main() {
     });
     await transport.dispose();
   });
+
+  for (final successFirst in [false, true]) {
+    test(
+      'incoming URI file copies only after SUCCESS, successFirst=$successFirst',
+      () async {
+        final root = await Directory.systemTemp.createTemp(
+          'relio-native-file-',
+        );
+        addTearDown(() => root.delete(recursive: true));
+        const paths = MethodChannel('plugins.flutter.io/path_provider');
+        messenger.setMockMethodCallHandler(paths, (_) async => root.path);
+        addTearDown(() => messenger.setMockMethodCallHandler(paths, null));
+        var copies = 0;
+        final completeBytes = List<int>.generate(14679, (i) => i % 256);
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'copyFileAndDeleteOriginal') {
+            copies++;
+            await File(
+              call.arguments['destinationFilepath'] as String,
+            ).writeAsBytes(completeBytes);
+          }
+          return true;
+        });
+        final transport = await receivingTransport();
+        addTearDown(transport.dispose);
+        final files = <NearbyFilePayloadEvent>[];
+        final subscription = transport.incomingFilePayloads.listen(files.add);
+        addTearDown(subscription.cancel);
+        final file = {
+          'method': 'onPayloadReceived',
+          'endpointId': 'peer',
+          'payloadId': 91,
+          'type': PayloadType.FILE.index,
+          'uri': 'content://qa/video',
+        };
+        final success = {
+          'method': 'onPayloadTransferUpdate',
+          'endpointId': 'peer',
+          'payloadId': 91,
+          'status': PayloadStatus.SUCCESS.index,
+          'bytesTransferred': 14679,
+          'totalBytes': 14679,
+        };
+        if (successFirst) {
+          await nativeEvent(success);
+          expect(copies, 0);
+          await nativeEvent(file);
+        } else {
+          await nativeEvent(file);
+          await nativeEvent({
+            ...success,
+            'status': PayloadStatus.IN_PROGRESS.index,
+            'bytesTransferred': 3960,
+          });
+          expect(
+            copies,
+            0,
+            reason:
+                'The Samsung failure copied 3960 of 14679 bytes before completion',
+          );
+          expect(files, isEmpty);
+          await nativeEvent(success);
+        }
+        await waitForNativeFile(() => files.length == 1);
+        expect(await File(files.single.filePath).readAsBytes(), completeBytes);
+        await nativeEvent(file);
+        await nativeEvent(success);
+        expect(copies, 1);
+        expect(files, hasLength(1));
+      },
+    );
+  }
+
+  test(
+    'incoming direct path is not exposed before file transfer SUCCESS',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (_) async => true);
+      final transport = await receivingTransport();
+      addTearDown(transport.dispose);
+      final files = <NearbyFilePayloadEvent>[];
+      final subscription = transport.incomingFilePayloads.listen(files.add);
+      addTearDown(subscription.cancel);
+      await nativeEvent({
+        'method': 'onPayloadReceived',
+        'endpointId': 'peer',
+        'payloadId': 92,
+        'type': PayloadType.FILE.index,
+        'filePath': '/qa/partial.mp4',
+      });
+      expect(files, isEmpty);
+      await nativeEvent({
+        'method': 'onPayloadTransferUpdate',
+        'endpointId': 'peer',
+        'payloadId': 92,
+        'status': PayloadStatus.SUCCESS.index,
+      });
+      expect(files.single.filePath, '/qa/partial.mp4');
+    },
+  );
+
+  test(
+    'failed native file never copies or emits even after a duplicate callback',
+    () async {
+      var copies = 0;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'copyFileAndDeleteOriginal') copies++;
+        return true;
+      });
+      final transport = await receivingTransport();
+      addTearDown(transport.dispose);
+      final files = <NearbyFilePayloadEvent>[];
+      final subscription = transport.incomingFilePayloads.listen(files.add);
+      addTearDown(subscription.cancel);
+      final file = {
+        'method': 'onPayloadReceived',
+        'endpointId': 'peer',
+        'payloadId': 93,
+        'type': PayloadType.FILE.index,
+        'uri': 'content://qa/failed',
+      };
+      await nativeEvent(file);
+      await nativeEvent({
+        'method': 'onPayloadTransferUpdate',
+        'endpointId': 'peer',
+        'payloadId': 93,
+        'status': PayloadStatus.FAILURE.index,
+      });
+      await nativeEvent(file);
+      expect(copies, 0);
+      expect(files, isEmpty);
+    },
+  );
+}
+
+Future<void> nativeEvent(Map<String, Object> event) async {
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  await messenger.handlePlatformMessage(
+    'nearby_connections/events',
+    const StandardMethodCodec().encodeSuccessEnvelope(event),
+    (_) {},
+  );
+  await Future<void>.delayed(Duration.zero);
+}
+
+Future<AndroidNearbyTransport> receivingTransport() async {
+  final transport = AndroidNearbyTransport();
+  await transport.startAdvertising(displayName: 'RELIO QA');
+  await nativeEvent({
+    'method': 'ad.onConnectionInitiated',
+    'endpointId': 'peer',
+    'endpointName': 'RELIO QA peer',
+    'authenticationToken': 'QA',
+    'isIncomingConnection': true,
+  });
+  await transport.acceptConnection('peer');
+  return transport;
+}
+
+Future<void> waitForNativeFile(bool Function() ready) async {
+  for (var count = 0; count < 100 && !ready(); count++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  expect(ready(), isTrue);
 }

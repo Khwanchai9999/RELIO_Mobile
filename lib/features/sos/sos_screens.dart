@@ -18,6 +18,32 @@ class SOSScreen extends StatefulWidget {
 class _SOSScreenState extends State<SOSScreen> {
   final _message = TextEditingController();
 
+  Widget _activeSosAction(BuildContext context) {
+    final dependencies = RelioDependencyScope.of(context);
+    final activeSos = dependencies.identity.getDeviceId().then(
+      (deviceId) =>
+          dependencies.repositories.sos.readActive(ownerDeviceId: deviceId),
+    );
+    return FutureBuilder<RelioSosEvent?>(
+      future: activeSos,
+      builder: (context, snapshot) {
+        if (snapshot.data == null) return const SizedBox.shrink();
+        return Card(
+          color: RelioColors.sos.withValues(alpha: 0.08),
+          child: ListTile(
+            leading: const Icon(Icons.warning_rounded, color: RelioColors.sos),
+            title: const Text('อุปกรณ์นี้กำลังส่งสัญญาณ SOS'),
+            subtitle: const Text('ปิดสถานะ SOS ได้จากหน้าจัดการเหตุฉุกเฉิน'),
+            trailing: TextButton(
+              onPressed: () => context.go('/sos/active'),
+              child: const Text('จัดการ SOS'),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _message.dispose();
@@ -101,6 +127,7 @@ class _SOSScreenState extends State<SOSScreen> {
                     ),
                   ),
                 ),
+                _activeSosAction(context),
                 const SizedBox(height: 16),
                 FutureBuilder<RelioSosEvent?>(
                   future: RelioDependencyScope.of(

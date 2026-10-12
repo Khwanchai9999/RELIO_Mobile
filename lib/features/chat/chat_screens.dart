@@ -105,6 +105,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _persistedPeerName;
   String? _persistedPeerDeviceId;
   RelioDependencies? _dependencies;
+  String? _resolvedChatId;
+  bool _routeResolutionStarted = false;
+  bool _routeResolved = false;
+
+  String get _activeChatId => _resolvedChatId ?? widget.chatId;
 
   @override
   void initState() {
@@ -118,31 +123,40 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _dependencies = RelioDependencyScope.of(context);
+    if (_routeResolutionStarted) return;
+    _routeResolutionStarted = true;
     _messagesStream = _dependencies!.repositories.messages.watchMessages(
       widget.chatId,
     );
-    _dependencies!.repositories.conversations
-        .getConversation(widget.chatId)
-        .then((conversation) {
-          if (mounted && conversation != null) {
-            setState(() {
-              _persistedPeerName = conversation.displayName;
-              _persistedPeerDeviceId = conversation.participantId;
-            });
-          }
-        });
-    _dependencies!.nearbyService.setActiveConversation(widget.chatId);
-    unawaited(_markConversationRead());
+    unawaited(_resolveChatRoute());
+  }
+
+  Future<void> _resolveChatRoute() async {
+    final dependencies = _dependencies!;
+    final conversation = await dependencies.repositories.conversations
+        .resolveRouteTarget(widget.chatId);
+    if (!mounted) return;
+    setState(() {
+      _resolvedChatId = conversation.id;
+      _routeResolved = true;
+      _persistedPeerName = conversation.displayName;
+      _persistedPeerDeviceId = conversation.participantId;
+      _messagesStream = dependencies.repositories.messages.watchMessages(
+        conversation.id,
+      );
+    });
+    dependencies.nearbyService.setActiveConversation(conversation.id);
+    await _markConversationRead();
   }
 
   Future<void> _markConversationRead() async {
     final dependencies = _dependencies;
     if (dependencies == null) return;
     final conversation = await dependencies.repositories.conversations
-        .getConversation(widget.chatId);
-    final peerDeviceId = conversation?.participantId ?? widget.chatId;
+        .getConversation(_activeChatId);
+    final peerDeviceId = conversation?.participantId ?? _activeChatId;
     final messageIds = await dependencies.repositories.messages
-        .markConversationRead(widget.chatId);
+        .markConversationRead(_activeChatId);
     for (final messageId in messageIds) {
       await dependencies.nearbyService.sendReadReceipt(
         messageId: messageId,
@@ -150,7 +164,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
     }
     await dependencies.syncEngine.queueReadReceipts(
-      localConversationId: widget.chatId,
+      localConversationId: _activeChatId,
       messageIds: messageIds,
     );
   }
@@ -164,6 +178,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _send() async {
+    if (!_routeResolved) return;
     final text = _composer.text.trim();
     if (text.isEmpty) return;
     final dependencies = RelioDependencyScope.of(context);
@@ -172,7 +187,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       // บันทึกผ่าน Repository ก่อนส่ง Nearby เพื่อให้ข้อความอยู่ในเครื่องเสมอ
       final message = await dependencies.repositories.messages
           .createOutgoingText(
-            conversationId: widget.chatId,
+            conversationId: _activeChatId,
             senderId: dependencies.authService.identity?.userId ?? deviceId,
             senderDeviceId: deviceId,
             text: text,
@@ -231,7 +246,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _linkCloudConversation() async {
     final dependencies = _dependencies;
-    if (dependencies == null || dependencies.authService.identity == null) {
+    if (!_routeResolved ||
+        dependencies == null ||
+        dependencies.authService.identity == null) {
       return;
     }
     final controller = TextEditingController();
@@ -265,7 +282,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (peerUserId == null || peerUserId.isEmpty || !mounted) return;
     try {
       await dependencies.syncEngine.linkConversationToCloud(
-        localConversationId: widget.chatId,
+        localConversationId: _activeChatId,
         peerUserId: peerUserId,
       );
       if (mounted) {
@@ -283,6 +300,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _pickMedia(MessageType type, {ImageSource? source}) async {
+    if (!_routeResolved) return;
     final dependencies = RelioDependencyScope.of(context);
     final picker = ImagePicker();
     final picked = type == MessageType.image
@@ -302,7 +320,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final transferId = const Uuid().v4();
       await dependencies.repositories.attachments.createPending(
         id: attachmentId,
-        conversationId: widget.chatId,
+        conversationId: _activeChatId,
         messageId: messageId,
         transferId: transferId,
         mediaType: type == MessageType.video
@@ -315,7 +333,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       );
       final message = await dependencies.repositories.messages
           .createOutgoingMedia(
-            conversationId: widget.chatId,
+            conversationId: _activeChatId,
             senderId: dependencies.authService.identity?.userId ?? deviceId,
             senderDeviceId: deviceId,
             type: type,
@@ -339,6 +357,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _sendLocation() async {
+    if (!_routeResolved) return;
     final dependencies = RelioDependencyScope.of(context);
     final result = await dependencies.locationService.getCurrentOrLastKnown();
     if (!result.isSuccess) {
@@ -352,7 +371,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final deviceId = await dependencies.identity.getDeviceId();
       final message = await dependencies.repositories.messages
           .createOutgoingLocation(
-            conversationId: widget.chatId,
+            conversationId: _activeChatId,
             senderId: dependencies.authService.identity?.userId ?? deviceId,
             senderDeviceId: deviceId,
             location: result.location!,

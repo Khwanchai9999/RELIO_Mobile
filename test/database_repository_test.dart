@@ -61,6 +61,10 @@ void main() {
             participantStatus: DeviceStatus.offline,
           );
       expect(accountBConversation.id, isNot(accountAConversation.id));
+      final routedConversation = await repositories.conversations
+          .resolveRouteTarget('peer-device');
+      expect(routedConversation.id, accountBConversation.id);
+      expect(routedConversation.id, isNot(accountAConversation.id));
       await repositories.messages.createOutgoingText(
         conversationId: accountBConversation.id,
         senderId: 'account-b',
@@ -857,6 +861,44 @@ void main() {
       await identity.setDisplayName('Rescue Team');
 
       expect(await identity.getDisplayName(), 'Rescue Team');
+    },
+  );
+
+  test('default device name is numbered and stable across reads', () async {
+    final identity = RelioDeviceIdentityRepository(database);
+    final first = await identity.getDisplayName();
+
+    expect(first, matches(RegExp(r'^ผู้ใช้ RELIO \d{4}$')));
+    expect(await identity.getDisplayName(), first);
+    expect(await identity.isUsingDefaultDisplayName(), isTrue);
+
+    await identity.setDisplayName('  ชื่อทดสอบ RELIO  ');
+    expect(await identity.getDisplayName(), 'ชื่อทดสอบ RELIO');
+    expect(await identity.isUsingDefaultDisplayName(), isFalse);
+    await expectLater(identity.setDisplayName('x' * 41), throwsArgumentError);
+    await expectLater(identity.setDisplayName('   '), throwsArgumentError);
+    expect(await identity.getDisplayName(), 'ชื่อทดสอบ RELIO');
+
+    await identity.setDisplayName(first);
+    expect(await identity.isUsingDefaultDisplayName(), isTrue);
+  });
+
+  test(
+    'legacy custom device name is preserved during default migration',
+    () async {
+      await database
+          .into(database.appSettings)
+          .insert(
+            AppSettingsCompanion.insert(
+              key: 'display_name',
+              value: 'ทีมกู้ภัยเดิม',
+              updatedAt: DateTime(2025),
+            ),
+          );
+      final identity = RelioDeviceIdentityRepository(database);
+
+      expect(await identity.getDisplayName(), 'ทีมกู้ภัยเดิม');
+      expect(await identity.isUsingDefaultDisplayName(), isFalse);
     },
   );
 

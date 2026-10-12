@@ -45,6 +45,8 @@ class HandshakePair {
     required this.databaseB,
     required this.repositoriesA,
     required this.repositoriesB,
+    required this.identityA,
+    required this.identityB,
     required this.transportA,
     required this.transportB,
     required this.cryptoA,
@@ -59,6 +61,8 @@ class HandshakePair {
   final AppDatabase databaseB;
   final RelioRepositories repositoriesA;
   final RelioRepositories repositoriesB;
+  final RelioDeviceIdentityRepository identityA;
+  final RelioDeviceIdentityRepository identityB;
   final LoopbackTransport transportA;
   final LoopbackTransport transportB;
   final TestIdentityCrypto cryptoA;
@@ -74,12 +78,17 @@ class HandshakePair {
     Duration handshakeTimeout = const Duration(seconds: 30),
     bool dropPayloads = false,
     bool corruptSignatureB = false,
+    String displayNameA = 'สมชาย',
+    String? displayNameB,
   }) async {
     final databaseA = AppDatabase.memory();
     final databaseB = AppDatabase.memory();
     await _setDeviceId(databaseA, 'device-a');
     await _setDeviceId(databaseB, 'device-b');
-    await RelioDeviceIdentityRepository(databaseA).setDisplayName('สมชาย');
+    final identityA = RelioDeviceIdentityRepository(databaseA);
+    final identityB = RelioDeviceIdentityRepository(databaseB);
+    await identityA.setDisplayName(displayNameA);
+    if (displayNameB != null) await identityB.setDisplayName(displayNameB);
     final repositoriesA = RelioRepositories(databaseA);
     final repositoriesB = RelioRepositories(databaseB);
     final cryptoA = TestIdentityCrypto('device-a');
@@ -90,7 +99,7 @@ class HandshakePair {
     final transportA = LoopbackTransport(
       localEndpointId: 'endpoint-b',
       remoteEndpointId: 'endpoint-a',
-      displayName: 'สมชาย',
+      displayName: displayNameA,
       localFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
       remoteFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
@@ -98,7 +107,7 @@ class HandshakePair {
     final transportB = LoopbackTransport(
       localEndpointId: 'endpoint-a',
       remoteEndpointId: 'endpoint-b',
-      displayName: 'Phone B',
+      displayName: displayNameB ?? 'Phone B',
       localFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
       remoteFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
@@ -117,7 +126,7 @@ class HandshakePair {
       transport: transportA,
       messages: repositoriesA.messages,
       conversations: repositoriesA.conversations,
-      identity: RelioDeviceIdentityRepository(databaseA),
+      identity: identityA,
       nearbyDevices: repositoriesA.nearbyDevices,
       identityCrypto: cryptoA,
       diagnostics: logsA,
@@ -133,7 +142,7 @@ class HandshakePair {
       transport: transportB,
       messages: repositoriesB.messages,
       conversations: repositoriesB.conversations,
-      identity: RelioDeviceIdentityRepository(databaseB),
+      identity: identityB,
       nearbyDevices: repositoriesB.nearbyDevices,
       identityCrypto: cryptoB,
       diagnostics: logsB,
@@ -158,6 +167,8 @@ class HandshakePair {
       databaseB: databaseB,
       repositoriesA: repositoriesA,
       repositoriesB: repositoriesB,
+      identityA: identityA,
+      identityB: identityB,
       transportA: transportA,
       transportB: transportB,
       cryptoA: cryptoA,
@@ -360,6 +371,21 @@ class LoopbackTransport implements NearbyTransport {
           ? previous.foundAt ?? now
           : now,
       lastSeenAt: now,
+      isCurrent: true,
+    );
+    _knownPeers[localEndpointId] = refreshed;
+    _peers.add(refreshed);
+  }
+
+  void refreshPeerName(String name) {
+    final peer = _knownPeers[localEndpointId]!;
+    final refreshed = NearbyPeer(
+      id: peer.id,
+      name: name,
+      identityFingerprintHint: peer.identityFingerprintHint,
+      discoveryEpoch: _discoveryEpoch,
+      foundAt: peer.foundAt,
+      lastSeenAt: DateTime.now().toUtc(),
       isCurrent: true,
     );
     _knownPeers[localEndpointId] = refreshed;

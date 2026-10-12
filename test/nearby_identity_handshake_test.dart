@@ -11,8 +11,10 @@ void main() {
   test(
     'first contact enrolls both identities after consent and survives',
     () async {
-      final pair = await HandshakePair.create();
+      final pair = await HandshakePair.create(displayNameA: 'RELIO H QA');
       addTearDown(pair.close);
+      final defaultNameB = await pair.identityB.getDisplayName();
+      expect(defaultNameB, matches(RegExp(r'^ผู้ใช้ RELIO \d{4}$')));
 
       await pair.serviceA.connect('endpoint-b');
       await waitFor(
@@ -57,6 +59,82 @@ void main() {
         ))?.isTrusted,
         isTrue,
       );
+      expect(
+        (await pair.repositoriesA.nearbyDevices.getDevice(
+          'device-b',
+        ))?.displayName,
+        defaultNameB,
+      );
+      expect(
+        (await pair.repositoriesB.nearbyDevices.getDevice(
+          'device-a',
+        ))?.displayName,
+        'RELIO H QA',
+      );
+      expect(
+        pair.serviceA.discoveredPeers
+            .singleWhere((peer) => peer.endpointId == 'endpoint-b')
+            .name,
+        defaultNameB,
+      );
+      expect(
+        pair.serviceB.discoveredPeers
+            .singleWhere((peer) => peer.endpointId == 'endpoint-a')
+            .name,
+        'RELIO H QA',
+      );
+
+      // A native discovery refresh may expose the fingerprint alias again;
+      // the completed RELIO identity must keep its canonical Profile name.
+      pair.transportB.refreshPeerName('RELIO ca87603a');
+      await waitFor(
+        () =>
+            pair.serviceA.discoveredPeers
+                .singleWhere((peer) => peer.endpointId == 'endpoint-b')
+                .name ==
+            defaultNameB,
+      );
+      expect(
+        pair.serviceA.discoveredPeers
+            .singleWhere((peer) => peer.endpointId == 'endpoint-b')
+            .name,
+        defaultNameB,
+      );
+
+      expect(
+        (await pair.repositoriesB.conversations.listConversations())
+            .singleWhere(
+              (conversation) => conversation.participantId == 'device-a',
+            )
+            .displayName,
+        'RELIO H QA',
+      );
+
+      await pair.identityA.setDisplayName('RELIO H QA 2');
+      await pair.serviceA.propagateCurrentStatus();
+      await waitFor(() async {
+        final savedPeer = await pair.repositoriesB.nearbyDevices.getDevice(
+          'device-a',
+        );
+        final livePeer = pair.serviceB.discoveredPeers.singleWhere(
+          (peer) => peer.endpointId == 'endpoint-a',
+        );
+        return savedPeer?.displayName == 'RELIO H QA 2' &&
+            livePeer.name == 'RELIO H QA 2';
+      });
+      expect(
+        (await pair.repositoriesB.nearbyDevices.getDevice(
+          'device-a',
+        ))?.displayName,
+        'RELIO H QA 2',
+      );
+      expect(
+        (await pair.repositoriesB.nearbyDevices.getDevice(
+          'device-a',
+        ))?.displayName,
+        isNot(contains('@')),
+      );
+
       expect(
         pair.transportA.sentPackets.where(
           (packet) => packet == 'identityChallenge',
@@ -138,7 +216,7 @@ void main() {
   });
 
   test(
-    'repeated unhinted incoming requests produce one consent prompt',
+    'unhinted incoming requests require one visible consent prompt',
     () async {
       final pair = await HandshakePair.create();
       addTearDown(pair.close);
@@ -159,7 +237,7 @@ void main() {
       await waitFor(
         () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
       );
-      expect(pair.transportB.acceptCalls, hasLength(1));
+      expect(pair.transportB.acceptCalls, isEmpty);
       expect(pair.serviceB.pendingConnectionRequests, hasLength(1));
       expect(
         pair.serviceB.identityApprovalChangesPinnedKey('endpoint-a'),
@@ -168,7 +246,7 @@ void main() {
       final events = await readEvents(pair.logsB);
       expect(
         events.map((event) => event['event']),
-        contains('incoming_prompt_suppressed_active_connection'),
+        contains('incoming_prompt_suppressed_existing_prompt'),
       );
     },
   );
@@ -221,7 +299,7 @@ void main() {
     );
   });
 
-  test('trusted reconnect auto-accepts only a uniquely pinned key', () async {
+  test('trusted reconnect still requires visible approval on both peers', () async {
     final pair = await HandshakePair.create();
     addTearDown(pair.close);
 
@@ -253,8 +331,39 @@ void main() {
           NearbyConnectionState.disconnected,
     );
 
-    pair.transportA.omitIncomingFingerprintHint = true;
-    pair.transportB.discoverPeer();
+    pair.transportA.discoverPeer();
+    final acceptsBeforeReconnect =
+        pair.transportA.acceptedConnections.length +
+        pair.transportB.acceptedConnections.length;
+    await pair.serviceA.connect('endpoint-b');
+    await waitFor(
+      () =>
+          pair.serviceA.pendingConnectionRequests.isNotEmpty ||
+          pair.serviceB.pendingConnectionRequests.isNotEmpty,
+    );
+    final pendingA = pair.serviceA.pendingConnectionRequests.keys.toList();
+    final pendingB = pair.serviceB.pendingConnectionRequests.keys.toList();
+    expect(pendingA.isNotEmpty || pendingB.isNotEmpty, isTrue);
+    expect(
+      pair.transportA.acceptedConnections.length +
+          pair.transportB.acceptedConnections.length,
+      acceptsBeforeReconnect,
+    );
+    expect(
+      pair.serviceA.peerStates['endpoint-b'],
+      isNot(NearbyConnectionState.connected),
+    );
+    expect(
+      pair.serviceB.peerStates['endpoint-a'],
+      isNot(NearbyConnectionState.connected),
+    );
+    for (final endpoint in pendingA) {
+      await pair.serviceA.acceptConnectionRequest(endpoint);
+    }
+    for (final endpoint in pendingB) {
+      await pair.serviceB.acceptConnectionRequest(endpoint);
+    }
+
     await waitFor(
       () =>
           pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -264,32 +373,8 @@ void main() {
           pair.serviceB.peerStates['endpoint-a'] ==
               NearbyConnectionState.connected,
     );
-
-    expect(pair.transportA.acceptedConnections, contains('endpoint-b'));
-    if (pair.serviceA.pendingConnectionRequests.isNotEmpty) {
-      fail(
-        'A pending=${pair.serviceA.pendingConnectionRequests.keys} '
-        'identityChanged=${pair.serviceA.identityApprovalChangesPinnedKey('endpoint-b')} '
-        'peer=${pair.serviceA.pendingConnectionRequests['endpoint-b']?.peer.name}',
-      );
-    }
-    final reconnectEventsB = await readEvents(pair.logsB);
-    if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
-      fail(
-        'B pending=${pair.serviceB.pendingConnectionRequests.keys} '
-        'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
-        'request=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name} '
-        'events=${reconnectEventsB.where((event) => event['event'].toString().contains('prompt') || event['event'].toString().contains('approval')).map((event) => '${event['event']}:${event['peerAlias']}:${event['reason']}').toList()}',
-      );
-    }
-    expect(
-      pair.serviceA.peerStates['endpoint-b'],
-      NearbyConnectionState.connected,
-    );
-    expect(
-      pair.serviceB.peerStates['endpoint-a'],
-      NearbyConnectionState.connected,
-    );
+    expect(pair.serviceA.deviceIdForEndpoint('endpoint-b'), 'device-b');
+    expect(pair.serviceB.deviceIdForEndpoint('endpoint-a'), 'device-a');
     pair.serviceA.peerStates['unrelated-endpoint'] =
         NearbyConnectionState.connecting;
     expect(pair.serviceA.applicationState, NearbyApplicationState.connected);

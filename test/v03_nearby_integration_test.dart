@@ -42,6 +42,87 @@ void main() {
   Future<void> settle() =>
       Future<void>.delayed(const Duration(milliseconds: 20));
 
+  test('replays the latest inactive SOS tombstone after reconnect', () async {
+    final localDeviceId = await RelioDeviceIdentityRepository(
+      database,
+    ).getDeviceId();
+    final active = await repositories.sos.createAndActivate(
+      ownerDeviceId: localDeviceId,
+      ownerUserId: 'local-user',
+    );
+
+    transport.simulatePeer(id: 'endpoint-sos-replay', name: 'SOS Peer');
+    await settle();
+    await service.connect('endpoint-sos-replay');
+    await settle();
+    final activePacket = transport.sentPayloads
+        .map(RelioPacket.fromBytes)
+        .where((packet) => packet.type == RelioPacketType.sos)
+        .single;
+    expect(activePacket.payload['isActive'], isTrue);
+    expect(activePacket.payload['stateRevision'], 1);
+
+    transport.simulateConnectionLoss('endpoint-sos-replay');
+    await settle();
+    await repositories.sos.deactivate(active.id);
+    final cleared = await repositories.sos.getById(active.id);
+    expect(cleared?.isActive, isFalse);
+    await service.sendSos(cleared!);
+
+    transport.simulatePeer(id: 'endpoint-sos-replay', name: 'SOS Peer');
+    await settle();
+    await service.connect('endpoint-sos-replay');
+    await settle();
+    final replayedClear = transport.sentPayloads
+        .map(RelioPacket.fromBytes)
+        .where(
+          (packet) =>
+              packet.type == RelioPacketType.sos &&
+              packet.payload['isActive'] == false,
+        )
+        .last;
+    expect(replayedClear.payload['sosId'], active.id);
+    expect(replayedClear.payload['stateRevision'], 3);
+  });
+
+  test(
+    'sends SOS over a connected session after discovery visibility is lost',
+    () async {
+      transport.simulatePeer(id: 'endpoint-sos-visible-loss', name: 'SOS Peer');
+      await settle();
+      await service.connect('endpoint-sos-visible-loss');
+      await settle();
+      transport.simulateIncoming(
+        peerId: 'endpoint-sos-visible-loss',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'device-sos-visible-loss',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+        ).toBytes(),
+      );
+      await settle();
+      transport.sentPayloads.clear();
+      transport.sentPeerIds.clear();
+
+      transport.simulateEndpointLoss('endpoint-sos-visible-loss');
+      await settle();
+      final localDeviceId = await RelioDeviceIdentityRepository(
+        database,
+      ).getDeviceId();
+      final event = await repositories.sos.createAndActivate(
+        ownerDeviceId: localDeviceId,
+        ownerUserId: '',
+      );
+      await service.sendSos(event);
+
+      expect(transport.sentPeerIds, ['endpoint-sos-visible-loss']);
+      final packet = transport.sentPayloads.map(RelioPacket.fromBytes).single;
+      expect(packet.type, RelioPacketType.sos);
+      expect(packet.payload['isActive'], isTrue);
+      expect(service.lastError, isNull);
+    },
+  );
+
   test(
     'connection performs hello and maps endpoint to RELIO device identity',
     () async {
@@ -222,6 +303,61 @@ void main() {
     },
   );
 
+  test(
+    'a new active SOS replaces prior active event IDs from its peer',
+    () async {
+      transport.simulatePeer(id: 'endpoint-sos-replace', name: 'SOS Peer');
+      await settle();
+      await service.connect('endpoint-sos-replace');
+      await settle();
+      transport.simulateIncoming(
+        peerId: 'endpoint-sos-replace',
+        bytes: RelioPacket.hello(
+          senderDeviceId: 'device-sos-replace',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+        ).toBytes(),
+      );
+      await settle();
+
+      for (final sos in [
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos-replace',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-old',
+          createdAt: DateTime.now(),
+          isActive: true,
+          stateRevision: 1,
+        ),
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos-replace',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-current',
+          createdAt: DateTime.now(),
+          isActive: true,
+          stateRevision: 2,
+        ),
+      ]) {
+        transport.simulateIncoming(
+          peerId: 'endpoint-sos-replace',
+          bytes: sos.toBytes(),
+        );
+        await settle();
+      }
+
+      expect((await repositories.sos.getById('sos-old'))?.isActive, isFalse);
+      expect(
+        (await repositories.sos.readActive(
+          ownerDeviceId: 'device-sos-replace',
+        ))?.id,
+        'sos-current',
+      );
+      expect(service.peerStatuses['device-sos-replace'], DeviceStatus.sos);
+    },
+  );
+
   test('incoming SOS and clear are persisted and update peer status', () async {
     transport.simulatePeer(id: 'endpoint-sos', name: 'SOS Peer');
     await settle();
@@ -244,6 +380,7 @@ void main() {
       message: 'need help',
       createdAt: DateTime.now(),
       isActive: true,
+      stateRevision: 1,
     );
     transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
     transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
@@ -260,6 +397,59 @@ void main() {
       DeviceStatus.sos,
     );
 
+    for (final statusPacket in [
+      RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.rescue,
+        rescueActive: true,
+      ),
+      RelioPacket.hello(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.rescue,
+        rescueActive: true,
+      ),
+    ]) {
+      transport.simulateIncoming(
+        peerId: 'endpoint-sos',
+        bytes: statusPacket.toBytes(),
+      );
+      await settle();
+      expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+      expect(
+        (await repositories.nearbyDevices.listDevices()).single.status,
+        DeviceStatus.sos,
+      );
+    }
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.normal,
+        rescueActive: false,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.sos,
+        rescueActive: true,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
       bytes: RelioPacket.sos(
@@ -268,8 +458,9 @@ void main() {
         displayName: 'SOS Peer',
         sosId: 'sos-1',
         message: 'need help',
-        createdAt: DateTime.now(),
+        createdAt: packet.createdAt,
         isActive: false,
+        stateRevision: 2,
       ).toBytes(),
     );
     await settle();
@@ -283,6 +474,177 @@ void main() {
       notifications.shown.where((item) => item.id == 'sos-1'),
       hasLength(1),
     );
+    expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
+    expect(
+      (await repositories.nearbyDevices.listDevices()).single.status,
+      DeviceStatus.rescue,
+    );
+
+    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
+    expect(
+      await repositories.sos.readActive(ownerDeviceId: 'device-sos'),
+      isNull,
+    );
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.sos(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        sosId: 'sos-1',
+        createdAt: packet.createdAt,
+        isActive: true,
+        stateRevision: 3,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.sos,
+        rescueActive: true,
+        updatedAt: DateTime.now().add(const Duration(seconds: 2)),
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.sos,
+        rescueActive: false,
+        updatedAt: DateTime.now().add(const Duration(seconds: 1)),
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.sos(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        sosId: 'sos-1',
+        createdAt: packet.createdAt,
+        isActive: false,
+        stateRevision: 4,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
+    expect(
+      (await repositories.nearbyDevices.listDevices()).single.status,
+      DeviceStatus.rescue,
+    );
+
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.normal,
+        rescueActive: false,
+        updatedAt: DateTime.now().add(const Duration(seconds: 3)),
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
+
+    // Duplicate clear is idempotent; an old active SOS cannot resurrect it.
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.sos(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        sosId: 'sos-1',
+        createdAt: packet.createdAt,
+        isActive: false,
+        stateRevision: 4,
+      ).toBytes(),
+    );
+    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
+    expect(
+      await repositories.sos.readActive(ownerDeviceId: 'device-sos'),
+      isNull,
+    );
+
+    transport.simulateConnectionLoss('endpoint-sos');
+    await settle();
+    await service.connect('endpoint-sos');
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.hello(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.normal,
+        rescueActive: false,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
+
+    transport.simulateConnectionLoss('endpoint-sos');
+    await settle();
+    await service.connect('endpoint-sos');
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.hello(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.rescue,
+        rescueActive: true,
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
+    expect(
+      await repositories.sos.readActive(ownerDeviceId: 'device-sos'),
+      isNull,
+    );
+
+    // A persisted stale SOS presentation is reconciled from the cleared event
+    // and the authoritative Rescue bit in the reconnect hello.
+    await repositories.nearbyDevices.upsert(
+      deviceId: 'device-sos',
+      displayName: 'SOS Peer',
+      status: DeviceStatus.sos,
+    );
+    transport.simulateConnectionLoss('endpoint-sos');
+    await settle();
+    await service.connect('endpoint-sos');
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: RelioPacket.hello(
+        senderDeviceId: 'device-sos',
+        senderUserId: 'sos-user',
+        displayName: 'SOS Peer',
+        status: DeviceStatus.sos,
+        rescueActive: false,
+      ).toBytes(),
+    );
+    await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
     expect(
       (await repositories.nearbyDevices.listDevices()).single.status,
@@ -316,6 +678,7 @@ void main() {
 
       // Discovery loss must not leave the old endpoint eligible for SOS routing.
       transport.simulateEndpointLoss('old-nearby-endpoint');
+      transport.simulateConnectionLoss('old-nearby-endpoint');
       await settle();
 
       final localDeviceId = await RelioDeviceIdentityRepository(
@@ -334,6 +697,7 @@ void main() {
           .single;
       expect(sentPacket.type, RelioPacketType.sos);
       expect(sentPacket.payload['sosId'], event.id);
+      expect(sentPacket.payload['stateRevision'], 1);
       expect(service.lastError, isNull);
 
       transport.simulateIncoming(
@@ -404,6 +768,33 @@ void main() {
       (await repositories.nearbyDevices.listDevices()).single.status,
       DeviceStatus.normal,
     );
+
+    final newestStatusAt = DateTime.now().add(const Duration(seconds: 2));
+    transport.simulateIncoming(
+      peerId: 'endpoint-rescue',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-rescue',
+        senderUserId: 'rescue-user',
+        displayName: 'Rescue Peer',
+        status: DeviceStatus.normal,
+        rescueActive: false,
+        updatedAt: newestStatusAt,
+      ).toBytes(),
+    );
+    await settle();
+    transport.simulateIncoming(
+      peerId: 'endpoint-rescue',
+      bytes: RelioPacket.deviceStatus(
+        senderDeviceId: 'device-rescue',
+        senderUserId: 'rescue-user',
+        displayName: 'Rescue Peer',
+        status: DeviceStatus.rescue,
+        rescueActive: true,
+        updatedAt: newestStatusAt.subtract(const Duration(seconds: 1)),
+      ).toBytes(),
+    );
+    await settle();
+    expect(service.peerStatuses['device-rescue'], DeviceStatus.normal);
   });
 
   test('send failure keeps the message locally and marks it failed', () async {

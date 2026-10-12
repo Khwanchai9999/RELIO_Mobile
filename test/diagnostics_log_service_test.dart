@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:relio_mobile/app/environment.dart';
 import 'package:relio_mobile/core/diagnostics/diagnostics_log_service.dart';
 
 void main() {
@@ -23,6 +24,60 @@ void main() {
       ..setMockMethodCallHandler(pathChannel, null)
       ..setMockMethodCallHandler(shareChannel, null);
     if (await root.exists()) await root.delete(recursive: true);
+  });
+
+  test('QA logcat sink receives sanitized Nearby events only', () async {
+    final entries = <String>[];
+    final logs = DiagnosticsLogService(
+      directory: Directory('${root.path}/logs'),
+      qaLogcatSink: entries.add,
+    );
+    logs.record(
+      'connection',
+      'native_connection_initiated_received',
+      peerIdentifier: 'temporary-endpoint',
+      fields: {
+        'role': 'responder',
+        'authenticationToken': 'QA_VERIFICATION_MATERIAL',
+        'authenticationCodeAvailable': true,
+      },
+    );
+    logs.record('app', 'ordinary_event');
+
+    expect(entries, hasLength(1));
+    expect(entries.single, contains('native_connection_initiated_received'));
+    expect(entries.single, contains('peerAlias'));
+    expect(entries.single, isNot(contains('temporary-endpoint')));
+    expect(entries.single, isNot(contains('QA_VERIFICATION_MATERIAL')));
+    expect(entries.single, isNot(contains('authenticationToken')));
+    expect(entries.single, contains('"role":"responder"'));
+  });
+
+  test('QA SOS diagnostics expose lifecycle without private payload data', () {
+    final entries = <String>[];
+    final logs = DiagnosticsLogService(qaLogcatSink: entries.add);
+
+    logs.record(
+      'sos',
+      'outbound_send_failure',
+      reason: 'transport_send_failed',
+      fields: {
+        'stateRevision': 4,
+        'isActive': true,
+        'transport': 'Nearby',
+        'message_body': 'private distress text',
+        'latitude': 14.0,
+        'longitude': 100.0,
+      },
+    );
+
+    expect(entries, hasLength(1));
+    expect(entries.single, contains('outbound_send_failure'));
+    expect(entries.single, contains('"stateRevision":4'));
+    expect(entries.single, contains('"isActive":true'));
+    expect(entries.single, isNot(contains('private distress text')));
+    expect(entries.single, isNot(contains('latitude')));
+    expect(entries.single, isNot(contains('longitude')));
   });
 
   test('export archive redacts secret-like fields and private content', () async {
@@ -79,6 +134,48 @@ void main() {
     );
     expect(DiagnosticsLogService().enabled, expected);
   });
+
+  test(
+    'QA USB snapshot is sanitized, bounded to one archive and flavor gated',
+    () async {
+      final external = Directory('${root.path}/external');
+      final logs = DiagnosticsLogService(
+        directory: Directory('${root.path}/logs'),
+        qaExportDirectory: external,
+      );
+      await logs.initialize();
+      logs.record(
+        'media',
+        'media_receive_failed',
+        fields: {
+          'checkpoint': 'file_validation_and_storage',
+          'password': 'QA_SECRET_MUST_NOT_EXPORT',
+        },
+      );
+      for (var index = 0; index < 2; index++) {
+        await logs.exportZip(
+          appInfo: const {},
+          deviceState: const {},
+          summary: 'QA snapshot',
+        );
+      }
+      final mirror = Directory('${external.path}/qa-diagnostics');
+      expect(await mirror.exists(), RelioBuildInfo.isTest);
+      if (RelioBuildInfo.isTest) {
+        final entries = await mirror.list().toList();
+        expect(entries, hasLength(1));
+        expect(entries.single.uri.pathSegments.last, 'latest.zip');
+        final bytes = await (entries.single as File).readAsBytes();
+        expect(bytes.length, lessThanOrEqualTo(6 * 1024 * 1024));
+        final archive = ZipDecoder().decodeBytes(bytes);
+        final text = archive.files
+            .map((entry) => utf8.decode(entry.content as List<int>))
+            .join('\n');
+        expect(text, contains('file_validation_and_storage'));
+        expect(text, isNot(contains('QA_SECRET_MUST_NOT_EXPORT')));
+      }
+    },
+  );
 
   test(
     'export sanitizes summary and nested metadata and excludes media',

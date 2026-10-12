@@ -36,6 +36,22 @@ are normalized by `AndroidNearbyTransport` into a local path before the rest of
 the application sees them. Metadata and file callbacks may arrive in either
 order; the service holds the incomplete half until both are available.
 
+Android FILE callbacks mark the start of a native transfer. The transport holds
+the payload until native `SUCCESS` before exposing a direct path or copying and
+deleting its content URI. This also accepts a completion callback before the
+file callback and suppresses duplicate file callbacks. Size, signature, optional
+SHA-256, identity, and conversation scope validation remain mandatory before
+the receiver emits completion ACK.
+
+The 2026-10-09 Samsung/API 29 reproduction showed 3,960 bytes copied from a
+14,679-byte video before completion, followed by metadata-size rejection.
+Regression tests cover native completion ordering plus video metadata/file
+ordering, persistence, ACK, duplicate suppression, and account visibility.
+
+QA diagnostics export additionally overwrites one sanitized `latest.zip` under
+the app-specific external `files/qa-diagnostics` directory (at most 6 MiB).
+It is available through ADB without `run-as`; DEV/PROD do not create this mirror.
+
 The stable states are `pending`, `preparing`, `transferring`, `received`,
 `completed`, `failed`, and `cancelled`. A process restart must not turn a stale
 `transferring` row into `completed`; it remains recoverable/failed until a

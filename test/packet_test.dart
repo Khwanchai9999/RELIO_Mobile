@@ -167,6 +167,7 @@ void main() {
       longitude: 100.5,
       createdAt: DateTime.utc(2026, 9, 25),
       isActive: true,
+      stateRevision: 4,
     );
 
     final decoded = RelioPacket.fromBytes(packet.toBytes());
@@ -174,6 +175,7 @@ void main() {
     expect(decoded.payload['sosId'], 'sos-1');
     expect(decoded.payload['isActive'], isTrue);
     expect(decoded.payload['latitude'], 13.7);
+    expect(decoded.payload['stateRevision'], 4);
   });
 
   test(
