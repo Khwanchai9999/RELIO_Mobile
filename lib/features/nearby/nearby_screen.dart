@@ -17,6 +17,7 @@ import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import 'nearby_map_canvas.dart';
 import 'nearby_peer_detail_sheet.dart';
+import 'nearby_route_preview_card.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 enum NearbyFilter { all, sos, rescue, normal }
@@ -147,7 +148,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
             );
             return;
           }
-          setState(() => _navigationTargetId = device.id);
+          setState(() {
+            _navigationTargetId = device.id;
+            _listMode = false;
+          });
         },
       ),
     );
@@ -157,10 +161,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
       .where(
         (saved) =>
             !RelioMockData.isDemoId(saved.deviceId) &&
-            NearbyMapCalculations.isValidPoint(
-              saved.peerLatitude,
-              saved.peerLongitude,
-            ) &&
             _matches(_nearby.peerStatuses[saved.deviceId] ?? saved.status),
       )
       .map((saved) {
@@ -411,6 +411,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
             navigationTargetId: _navigationTargetId,
             onPeerSelected: _showPeerDetails,
           ),
+          if (_navigationTargetId != null) _routePreviewCard(),
           SafeArea(
             child: Align(
               alignment: Alignment.topCenter,
@@ -494,6 +495,18 @@ class _NearbyScreenState extends State<NearbyScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _routePreviewCard() {
+    final target = _mapPeers
+        .where((peer) => peer.id == _navigationTargetId)
+        .firstOrNull;
+    if (target == null) return const SizedBox.shrink();
+    return NearbyRoutePreviewCard(
+      peer: target,
+      myLocation: _myLocation,
+      onClose: () => setState(() => _navigationTargetId = null),
     );
   }
 
@@ -723,9 +736,18 @@ class _NearbyScreenState extends State<NearbyScreen> {
                   if (saved != null)
                     PopupMenuButton<String>(
                       tooltip: 'ตั้งค่าอุปกรณ์ที่บันทึกไว้',
-                      onSelected: (action) =>
-                          unawaited(_updateSavedPeer(saved, action)),
+                      onSelected: (action) {
+                        if (action == 'details') {
+                          _showPeerDetails(saved.deviceId);
+                        } else {
+                          unawaited(_updateSavedPeer(saved, action));
+                        }
+                      },
                       itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'details',
+                          child: Text('ดูรายละเอียดและเส้นทาง'),
+                        ),
                         PopupMenuItem(
                           value: saved.isTrusted ? 'untrust' : 'trust',
                           child: Text(

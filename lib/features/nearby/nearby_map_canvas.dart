@@ -39,6 +39,9 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
   bool _styleLoaded = false;
   bool _unavailable = false;
   bool _markersBusy = false;
+  bool _refreshPending = false;
+  bool _locationCameraFocused = false;
+  String? _cameraTargetId;
   int _mapAttempt = 0;
 
   @override
@@ -104,7 +107,11 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
 
   Future<void> _refreshMarkers() async {
     final controller = _controller;
-    if (controller == null || !_styleLoaded || _markersBusy) return;
+    if (controller == null || !_styleLoaded) return;
+    if (_markersBusy) {
+      _refreshPending = true;
+      return;
+    }
     final labelColor = _hex(Theme.of(context).colorScheme.onSurface);
     _markersBusy = true;
     try {
@@ -138,12 +145,15 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
             textOffset: const Offset(0, 1.5),
           ),
         );
-        await controller.animateCamera(
-          CameraUpdate.newLatLngZoom(
-            LatLng(myLocation.latitude, myLocation.longitude),
-            14,
-          ),
-        );
+        if (widget.navigationTargetId == null && !_locationCameraFocused) {
+          await controller.animateCamera(
+            CameraUpdate.newLatLngZoom(
+              LatLng(myLocation.latitude, myLocation.longitude),
+              14,
+            ),
+          );
+          _locationCameraFocused = true;
+        }
       }
 
       RelioDevice? navigationTarget;
@@ -156,13 +166,20 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
         }
         final color = _statusColor(peer.status);
         final point = LatLng(peer.locationLatitude!, peer.locationLongitude!);
+        final selected = peer.id == widget.navigationTargetId;
         await controller.addCircle(
           CircleOptions(
             geometry: point,
-            circleRadius: peer.status == DeviceStatus.sos ? 10 : 8,
+            circleRadius: selected
+                ? 12
+                : peer.status == DeviceStatus.sos
+                ? 10
+                : 8,
             circleColor: color,
-            circleStrokeWidth: 3,
-            circleStrokeColor: '#FFFFFF',
+            circleStrokeWidth: selected ? 5 : 3,
+            circleStrokeColor: selected
+                ? _hex(RelioColors.primaryDark)
+                : '#FFFFFF',
           ),
           {'deviceId': peer.id},
         );
@@ -172,7 +189,8 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
         await controller.addSymbol(
           SymbolOptions(
             geometry: point,
-            textField: '${_compactName(peer.name)}$battery',
+            textField:
+                '${selected ? '📍 ' : ''}${_compactName(peer.name)}$battery',
             textSize: 11,
             textColor: color,
             textHaloColor: '#FFFFFF',
@@ -200,7 +218,7 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
           ),
         );
       }
-      if (navigationTarget != null) {
+      if (navigationTarget != null && _cameraTargetId != navigationTarget.id) {
         await controller.animateCamera(
           CameraUpdate.newLatLngZoom(
             LatLng(
@@ -210,11 +228,16 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
             14,
           ),
         );
+        _cameraTargetId = navigationTarget.id;
       }
     } on Object {
       if (mounted) setState(() => _unavailable = true);
     } finally {
       _markersBusy = false;
+      if (_refreshPending && mounted) {
+        _refreshPending = false;
+        unawaited(_refreshMarkers());
+      }
     }
   }
 

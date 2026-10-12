@@ -193,7 +193,7 @@ class _PeerDetailActions extends StatelessWidget {
           style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
         ),
         FilledButton.icon(
-          onPressed: hasLocation ? onNavigate : null,
+          onPressed: onNavigate,
           icon: const Icon(Icons.navigation_rounded),
           label: const Text('ดูเส้นทาง'),
           style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),

@@ -165,6 +165,42 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('route action stays tappable without a peer location', (
+    tester,
+  ) async {
+    var routeTaps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showNearbyPeerDetailSheet(
+                context: context,
+                device: _peerWithoutLocation,
+                myLocation: null,
+                onChat: () {},
+                onNavigate: () => routeTaps++,
+              ),
+              child: const Text('Open peer'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open peer'));
+    await tester.pumpAndSettle();
+    expect(find.text('ยังไม่มีตำแหน่ง peer'), findsOneWidget);
+    final routeButton = find.ancestor(
+      of: find.text('ดูเส้นทาง'),
+      matching: find.byType(FilledButton),
+    );
+    expect(tester.widget<FilledButton>(routeButton).onPressed, isNotNull);
+    await tester.tap(routeButton);
+    await tester.pumpAndSettle();
+    expect(routeTaps, 1);
+  });
 }
 
 final _myLocation = LocationData(
@@ -186,4 +222,13 @@ final _longContentPeer = RelioDevice(
   locationLatitude: 13.7564,
   locationLongitude: 100.5019,
   locationCapturedAt: DateTime.utc(2026, 10, 1),
+);
+
+final _peerWithoutLocation = RelioDevice(
+  id: 'peer-no-location',
+  name: 'RELIO peer without location',
+  status: DeviceStatus.normal,
+  signalQuality: 0,
+  isConnected: true,
+  isDemo: false,
 );
