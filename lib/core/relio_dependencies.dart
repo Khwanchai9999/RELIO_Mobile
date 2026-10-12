@@ -25,6 +25,7 @@ import 'nearby/nearby_retry_backoff.dart';
 import 'nearby/nearby_transport.dart';
 import 'permissions/permission_service.dart';
 import 'repositories/local_repositories.dart';
+import 'feature_flags/feature_flags.dart';
 import 'repositories/profile_avatar_repository.dart';
 import 'relay/relay_engine.dart';
 import 'relay/relay_repository.dart';
@@ -34,6 +35,7 @@ class RelioDependencies {
   RelioDependencies({
     AppDatabase? database,
     NearbyTransport? transport,
+    FeatureFlagController? featureFlags,
     bool? useMockTransport,
     LocationService? locationService,
     BatteryInfoService? batteryInfoService,
@@ -95,6 +97,8 @@ class RelioDependencies {
         (state) => state,
       ),
     );
+    this.featureFlags =
+        featureFlags ?? createFeatureFlagController(repositories.settings);
     identity = RelioDeviceIdentityRepository(this.database);
     this.profileAvatarRepository =
         profileAvatarRepository ?? ProfileAvatarRepository(this.database);
@@ -162,6 +166,7 @@ class RelioDependencies {
   late final DiagnosticsLogService diagnostics;
   late final BatteryInfoService? batteryInfoService;
   late final RelioRepositories repositories;
+  late final FeatureFlagController featureFlags;
   late final RelioDeviceIdentityRepository identity;
   late final ProfileAvatarRepository profileAvatarRepository;
   late final PermissionService permissionService;
@@ -219,6 +224,7 @@ class RelioDependencies {
 
   Future<void> _initializeAuth() async {
     try {
+      await featureFlags.initialize();
       await _restoreInternetSimulator();
       await cloudDataSource.initialize();
       await authService.restoreSession();
@@ -483,6 +489,7 @@ class RelioDependencies {
   ].join('/');
 
   Future<void> _initialize() async {
+    await featureFlags.initialize();
     await _restoreInternetSimulator();
     unawaited(diagnostics.initialize());
     if (_isAndroid && !useMockTransport) {
@@ -544,6 +551,7 @@ class RelioDependencies {
     await syncEngine.dispose();
     appUpdateService.dispose();
     await cloudDataSource.dispose();
+    featureFlags.dispose();
     await database.close();
   }
 }

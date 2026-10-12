@@ -2425,6 +2425,20 @@ class RelioSettingsRepository {
     return saved.value == 'true';
   }
 
+  Future<bool?> getNullableBool(String key) async {
+    final saved = await (db.select(
+      db.appSettings,
+    )..where((row) => row.key.equals(key))).getSingleOrNull();
+    if (saved == null || (saved.value != 'true' && saved.value != 'false')) {
+      return null;
+    }
+    return saved.value == 'true';
+  }
+
+  Future<void> remove(String key) async {
+    await (db.delete(db.appSettings)..where((row) => row.key.equals(key))).go();
+  }
+
   Future<void> setBool(String key, bool value) async {
     await db
         .into(db.appSettings)

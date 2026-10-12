@@ -340,6 +340,12 @@ UI code does not call Drift or the Nearby plugin directly. Plugin-specific
 types stay inside `AndroidNearbyTransport`. `NearbyService` coordinates packet
 validation, persistence, and acknowledgements without containing SQL.
 
+Nearby Map, peer battery presentation, and route preview use centralized
+compile-time defaults and QA-only SQLite overrides through
+`FeatureFlagController`. PROD uses build defaults only. Hiding battery details
+does not stop Nearby battery metadata, and disabling the map avoids creating
+the MapLibre canvas; route preview is effective only while the map flag is on.
+
 ## Offline-first and Nearby boundary
 
 The database is authoritative for core local application state. An outgoing

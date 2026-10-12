@@ -16,6 +16,7 @@ class NearbyMapCanvas extends StatefulWidget {
     required this.myLocation,
     required this.navigationTargetId,
     required this.onPeerSelected,
+    this.showBattery = true,
     super.key,
   });
 
@@ -23,6 +24,7 @@ class NearbyMapCanvas extends StatefulWidget {
   final LocationData? myLocation;
   final String? navigationTargetId;
   final ValueChanged<String> onPeerSelected;
+  final bool showBattery;
 
   @override
   State<NearbyMapCanvas> createState() => _NearbyMapCanvasState();
@@ -50,6 +52,7 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
     if (_styleLoaded &&
         (!_samePeers(oldWidget.peers, widget.peers) ||
             oldWidget.myLocation != widget.myLocation ||
+            oldWidget.showBattery != widget.showBattery ||
             oldWidget.navigationTargetId != widget.navigationTargetId)) {
       unawaited(_refreshMarkers());
     }
@@ -183,7 +186,7 @@ class _NearbyMapCanvasState extends State<NearbyMapCanvas> {
           ),
           {'deviceId': peer.id},
         );
-        final battery = peer.batteryLevel == null
+        final battery = !widget.showBattery || peer.batteryLevel == null
             ? ''
             : '\n${peer.isCharging == true ? '⚡' : '🔋'} ${peer.batteryLevel}%';
         await controller.addSymbol(

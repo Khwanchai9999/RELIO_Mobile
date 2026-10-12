@@ -201,6 +201,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(routeTaps, 1);
   });
+
+  testWidgets('feature flags hide battery and route while keeping chat', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showNearbyPeerDetailSheet(
+                context: context,
+                device: _longContentPeer,
+                myLocation: _myLocation,
+                onChat: () {},
+                onNavigate: () {},
+                showBattery: false,
+                showRoutePreview: false,
+              ),
+              child: const Text('Open peer'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Open peer'));
+    await tester.pumpAndSettle();
+    expect(find.text('แชท'), findsOneWidget);
+    expect(find.text('ดูเส้นทาง'), findsNothing);
+    expect(find.textContaining('แบตเตอรี่'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 final _myLocation = LocationData(

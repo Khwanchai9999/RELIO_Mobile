@@ -272,12 +272,14 @@ class RelioDeviceCard extends StatelessWidget {
     required this.device,
     this.peerIdentifier,
     this.onTap,
+    this.showBattery = true,
     super.key,
   });
 
   final RelioDevice device;
   final String? peerIdentifier;
   final VoidCallback? onTap;
+  final bool showBattery;
 
   @override
   Widget build(BuildContext context) {
@@ -332,7 +334,9 @@ class RelioDeviceCard extends StatelessWidget {
                           : '${peerIdentifier ?? stableDeviceId} • $stateLabel',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    if (!device.isDemo && device.batteryLevel != null) ...[
+                    if (showBattery &&
+                        !device.isDemo &&
+                        device.batteryLevel != null) ...[
                       const SizedBox(height: 3),
                       Text(
                         '${device.isCharging == true ? '⚡ ' : '🔋 '}${device.batteryLevel}%',

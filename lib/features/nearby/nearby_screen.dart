@@ -13,6 +13,7 @@ import '../../core/nearby/nearby_readiness.dart';
 import '../../core/nearby/nearby_transport.dart';
 import '../../core/nearby/bluetooth_classic_transport.dart';
 import '../../core/relio_dependencies.dart';
+import '../../core/feature_flags/feature_flags.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import 'nearby_map_canvas.dart';
@@ -42,13 +43,23 @@ class _NearbyScreenState extends State<NearbyScreen> {
   List<RelioNearbyDevice> _savedDevices = const [];
   List<BondedBluetoothDevice> _bondedDevices = const [];
 
+  bool get _mapEnabled =>
+      _dependencies.featureFlags.isEnabled(RelioFeatureFlag.nearbyMapUi);
+
+  bool get _batteryEnabled =>
+      _dependencies.featureFlags.isEnabled(RelioFeatureFlag.peerBatteryUi);
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_loaded) return;
     _loaded = true;
     _dependencies = RelioDependencyScope.of(context);
+    _listMode = !_dependencies.featureFlags.isEnabled(
+      RelioFeatureFlag.nearbyMapUi,
+    );
     _nearby = _dependencies.nearbyService;
+    _dependencies.featureFlags.addListener(_onFeatureFlagsChanged);
     _nearby.addListener(_onNearbyChanged);
     _nearby.startBatteryMetadataUpdates();
     _dependencies.connectivityStatus.addListener(_onNearbyChanged);
@@ -59,6 +70,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
   @override
   void dispose() {
     _nearby.removeListener(_onNearbyChanged);
+    _dependencies.featureFlags.removeListener(_onFeatureFlagsChanged);
     _nearby.stopBatteryMetadataUpdates();
     _dependencies.connectivityStatus.removeListener(_onNearbyChanged);
     super.dispose();
@@ -68,6 +80,19 @@ class _NearbyScreenState extends State<NearbyScreen> {
     if (!mounted) return;
     setState(() {});
     unawaited(_loadSavedDevices());
+  }
+
+  void _onFeatureFlagsChanged() {
+    if (!mounted) return;
+    if (!_dependencies.featureFlags.isEnabled(RelioFeatureFlag.nearbyMapUi)) {
+      _listMode = true;
+      _navigationTargetId = null;
+    } else if (!_dependencies.featureFlags.isEnabled(
+      RelioFeatureFlag.routePreview,
+    )) {
+      _navigationTargetId = null;
+    }
+    setState(() {});
   }
 
   Future<void> _loadSavedDevices() async {
@@ -126,6 +151,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
         context: context,
         device: device,
         myLocation: _myLocation,
+        showBattery: _dependencies.featureFlags.isEnabled(
+          RelioFeatureFlag.peerBatteryUi,
+        ),
+        showRoutePreview: _dependencies.featureFlags.isEnabled(
+          RelioFeatureFlag.routePreview,
+        ),
         onChat: () {
           final endpointId = _nearby.deviceToEndpointId[device.id];
           if (endpointId == null ||
@@ -400,18 +431,26 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final urgentCount = _savedDevices
         .where((device) => device.status == DeviceStatus.sos)
         .length;
+    final mapEnabled = _dependencies.featureFlags.isEnabled(
+      RelioFeatureFlag.nearbyMapUi,
+    );
+    final batteryEnabled = _dependencies.featureFlags.isEnabled(
+      RelioFeatureFlag.peerBatteryUi,
+    );
 
     return Scaffold(
       body: Stack(
         fit: StackFit.expand,
         children: [
-          NearbyMapCanvas(
-            peers: _mapPeers,
-            myLocation: _myLocation,
-            navigationTargetId: _navigationTargetId,
-            onPeerSelected: _showPeerDetails,
-          ),
-          if (_navigationTargetId != null) _routePreviewCard(),
+          if (mapEnabled)
+            NearbyMapCanvas(
+              peers: _mapPeers,
+              myLocation: _myLocation,
+              navigationTargetId: _navigationTargetId,
+              onPeerSelected: _showPeerDetails,
+              showBattery: batteryEnabled,
+            ),
+          if (mapEnabled && _navigationTargetId != null) _routePreviewCard(),
           SafeArea(
             child: Align(
               alignment: Alignment.topCenter,
@@ -477,22 +516,23 @@ class _NearbyScreenState extends State<NearbyScreen> {
               ),
             ),
           ),
-          Positioned(
-            right: 16,
-            bottom: 160,
-            child: FloatingActionButton.small(
-              heroTag: 'nearby-share-location',
-              onPressed: _sharingLocation ? null : _shareCurrentLocation,
-              tooltip: 'แชร์ตำแหน่งล่าสุดกับ peer ที่เชื่อมต่อ',
-              child: _sharingLocation
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.my_location_rounded),
+          if (mapEnabled)
+            Positioned(
+              right: 16,
+              bottom: 160,
+              child: FloatingActionButton.small(
+                heroTag: 'nearby-share-location',
+                onPressed: _sharingLocation ? null : _shareCurrentLocation,
+                tooltip: 'แชร์ตำแหน่งล่าสุดกับ peer ที่เชื่อมต่อ',
+                child: _sharingLocation
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location_rounded),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -605,11 +645,12 @@ class _NearbyScreenState extends State<NearbyScreen> {
                     selected: _listMode,
                     onSelected: (_) => setState(() => _listMode = true),
                   ),
-                  ChoiceChip(
-                    label: const Text('แผนที่'),
-                    selected: !_listMode,
-                    onSelected: (_) => setState(() => _listMode = false),
-                  ),
+                  if (_mapEnabled)
+                    ChoiceChip(
+                      label: const Text('แผนที่'),
+                      selected: !_listMode,
+                      onSelected: (_) => setState(() => _listMode = false),
+                    ),
                   OutlinedButton.icon(
                     onPressed: _nearby.isDiscovering ? null : _startSearching,
                     icon: const Icon(Icons.radar_rounded, size: 18),
@@ -709,6 +750,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                       children: [
                         RelioDeviceCard(
                           device: device,
+                          showBattery: _batteryEnabled,
                           peerIdentifier: peer == null
                               ? null
                               : bluetoothClassicAddressSuffix(peer.endpointId),
@@ -782,6 +824,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
             padding: const EdgeInsets.only(bottom: 8),
             child: RelioDeviceCard(
               device: device,
+              showBattery: _batteryEnabled,
               onTap: () => context.push('/chat/${device.id}'),
             ),
           ),

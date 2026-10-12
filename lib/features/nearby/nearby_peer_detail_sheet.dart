@@ -10,6 +10,8 @@ Future<void> showNearbyPeerDetailSheet({
   required LocationData? myLocation,
   required VoidCallback onChat,
   required VoidCallback onNavigate,
+  bool showBattery = true,
+  bool showRoutePreview = true,
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
@@ -38,6 +40,8 @@ Future<void> showNearbyPeerDetailSheet({
           Navigator.of(sheetContext).pop();
           onNavigate();
         },
+        showBattery: showBattery,
+        showRoutePreview: showRoutePreview,
       ),
     ),
   ),
@@ -50,6 +54,8 @@ class _PeerDetailSheet extends StatelessWidget {
     required this.scrollController,
     required this.onChat,
     required this.onNavigate,
+    required this.showBattery,
+    required this.showRoutePreview,
   });
 
   final RelioDevice device;
@@ -57,6 +63,8 @@ class _PeerDetailSheet extends StatelessWidget {
   final ScrollController scrollController;
   final VoidCallback onChat;
   final VoidCallback onNavigate;
+  final bool showBattery;
+  final bool showRoutePreview;
 
   @override
   Widget build(BuildContext context) {
@@ -133,15 +141,16 @@ class _PeerDetailSheet extends StatelessWidget {
                   : 'ไม่ได้เชื่อมต่อ Nearby',
             ),
           ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.battery_std_rounded),
-            title: Text(
-              device.batteryLevel == null
-                  ? 'แบตเตอรี่ไม่ทราบ'
-                  : 'แบตเตอรี่ ${device.batteryLevel}%${device.isCharging == true ? ' • กำลังชาร์จ' : ''}',
+          if (showBattery)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.battery_std_rounded),
+              title: Text(
+                device.batteryLevel == null
+                    ? 'แบตเตอรี่ไม่ทราบ'
+                    : 'แบตเตอรี่ ${device.batteryLevel}%${device.isCharging == true ? ' • กำลังชาร์จ' : ''}',
+              ),
             ),
-          ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.location_on_outlined),
@@ -162,6 +171,7 @@ class _PeerDetailSheet extends StatelessWidget {
             hasLocation: hasLocation,
             onChat: onChat,
             onNavigate: onNavigate,
+            showRoutePreview: showRoutePreview,
           ),
         ],
       ),
@@ -175,12 +185,14 @@ class _PeerDetailActions extends StatelessWidget {
     required this.hasLocation,
     required this.onChat,
     required this.onNavigate,
+    required this.showRoutePreview,
   });
 
   final RelioDevice device;
   final bool hasLocation;
   final VoidCallback onChat;
   final VoidCallback onNavigate;
+  final bool showRoutePreview;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -192,13 +204,16 @@ class _PeerDetailActions extends StatelessWidget {
           label: const Text('แชท'),
           style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
         ),
-        FilledButton.icon(
-          onPressed: onNavigate,
-          icon: const Icon(Icons.navigation_rounded),
-          label: const Text('ดูเส้นทาง'),
-          style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
-        ),
+        if (showRoutePreview)
+          FilledButton.icon(
+            onPressed: onNavigate,
+            icon: const Icon(Icons.navigation_rounded),
+            label: const Text('ดูเส้นทาง'),
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+          ),
       ];
+
+      if (!showRoutePreview) return actions.first;
 
       if (constraints.maxWidth < 440 ||
           MediaQuery.textScalerOf(context).scale(1) > 1.15) {

@@ -10,6 +10,7 @@ import '../../app/theme/relio_spacing.dart';
 import '../../core/app_update/app_update_service.dart';
 import '../../core/app_update/public_update_errors.dart';
 import '../../core/relio_dependencies.dart';
+import '../../core/feature_flags/feature_flags.dart';
 import 'connectivity_diagnostics_card.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
@@ -346,6 +347,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 );
               },
             ),
+            const SizedBox(height: 8),
+            _ExperimentalFeaturesCard(
+              controller: RelioDependencyScope.of(context).featureFlags,
+            ),
           ],
           const SizedBox(height: 8),
           RelioSettingTile(
@@ -416,6 +421,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ThemeMode.dark => 'โหมดมืด',
     ThemeMode.system => 'ตามระบบ',
   };
+}
+
+class _ExperimentalFeaturesCard extends StatelessWidget {
+  const _ExperimentalFeaturesCard({required this.controller});
+
+  final FeatureFlagController controller;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) => Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const ListTile(
+              leading: Icon(Icons.tune_rounded),
+              title: Text('Experimental Features'),
+              subtitle: Text('ใช้สำหรับ QA เท่านั้น'),
+            ),
+            for (final flag in RelioFeatureFlag.values)
+              SwitchListTile(
+                title: Text(flag.label),
+                subtitle:
+                    flag == RelioFeatureFlag.routePreview &&
+                        !controller.isEnabled(RelioFeatureFlag.nearbyMapUi)
+                    ? const Text('ต้องเปิด Nearby Map UI ก่อน')
+                    : null,
+                value: controller.configuredValue(flag),
+                onChanged: (value) =>
+                    unawaited(controller.setOverride(flag, value)),
+              ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => unawaited(controller.resetOverrides()),
+                icon: const Icon(Icons.restart_alt_rounded),
+                label: const Text('Reset Experimental Flags'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class ThemeSettingsScreen extends StatelessWidget {

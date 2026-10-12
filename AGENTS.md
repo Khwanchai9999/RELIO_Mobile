@@ -210,6 +210,14 @@ remote policy enforcement.
 
 ## Change boundaries
 
+Nearby Map UI, Peer Battery UI, and Route Preview use the centralized local
+`FeatureFlagController`. Build defaults are compile-time values; only TEST
+builds read/write QA overrides in `app_settings`. Route Preview requires the
+effective Map flag. These switches control presentation only: battery
+metadata transport/persistence continues when battery UI is hidden, and
+MapLibre is not created when map UI is disabled. Reset removes only feature
+override keys; the QA Offline Simulator remains separate.
+
 Build 38 local gap-closure candidate waits for native FILE SUCCESS before
 normalizing/copying a received file. Metadata/file ordering, SHA-256 validation,
 deduplication, and account isolation remain enforced. QA-only export mirrors
