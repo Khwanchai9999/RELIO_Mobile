@@ -16,6 +16,7 @@ import '../../core/relio_dependencies.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import 'nearby_map_canvas.dart';
+import 'nearby_peer_detail_sheet.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
 enum NearbyFilter { all, sos, rescue, normal }
@@ -120,40 +121,34 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final device = _mapPeers.where((peer) => peer.id == deviceId).firstOrNull;
     if (device == null) return;
     unawaited(
-      showModalBottomSheet<void>(
+      showNearbyPeerDetailSheet(
         context: context,
-        useSafeArea: true,
-        showDragHandle: true,
-        builder: (sheetContext) => _PeerDetailSheet(
-          device: device,
-          myLocation: _myLocation,
-          onChat: () {
-            Navigator.of(sheetContext).pop();
-            final endpointId = _nearby.deviceToEndpointId[device.id];
-            if (endpointId == null ||
-                _nearby.peerStates[endpointId] !=
-                    NearbyConnectionState.connected) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('peer ยังไม่ได้เชื่อมต่อ Nearby')),
-              );
-              return;
-            }
-            context.push('/chat/${device.id}');
-          },
-          onNavigate: () {
-            Navigator.of(sheetContext).pop();
-            if (!NearbyMapCalculations.isValidPoint(
-              device.locationLatitude,
-              device.locationLongitude,
-            )) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('peer ยังไม่ได้แชร์ตำแหน่ง')),
-              );
-              return;
-            }
-            setState(() => _navigationTargetId = device.id);
-          },
-        ),
+        device: device,
+        myLocation: _myLocation,
+        onChat: () {
+          final endpointId = _nearby.deviceToEndpointId[device.id];
+          if (endpointId == null ||
+              _nearby.peerStates[endpointId] !=
+                  NearbyConnectionState.connected) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('peer ยังไม่ได้เชื่อมต่อ Nearby')),
+            );
+            return;
+          }
+          context.push('/chat/${device.id}');
+        },
+        onNavigate: () {
+          if (!NearbyMapCalculations.isValidPoint(
+            device.locationLatitude,
+            device.locationLongitude,
+          )) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('peer ยังไม่ได้แชร์ตำแหน่ง')),
+            );
+            return;
+          }
+          setState(() => _navigationTargetId = device.id);
+        },
       ),
     );
   }
@@ -875,114 +870,3 @@ String _radioLabel(bool? enabled) => switch (enabled) {
   false => 'ปิด',
   null => 'ไม่ทราบ',
 };
-
-class _PeerDetailSheet extends StatelessWidget {
-  const _PeerDetailSheet({
-    required this.device,
-    required this.myLocation,
-    required this.onChat,
-    required this.onNavigate,
-  });
-
-  final RelioDevice device;
-  final LocationData? myLocation;
-  final VoidCallback onChat;
-  final VoidCallback onNavigate;
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final distance = NearbyMapCalculations.distanceMeters(
-      fromLatitude: myLocation?.latitude,
-      fromLongitude: myLocation?.longitude,
-      toLatitude: device.locationLatitude,
-      toLongitude: device.locationLongitude,
-    );
-    final bearing = NearbyMapCalculations.bearingDegrees(
-      fromLatitude: myLocation?.latitude,
-      fromLongitude: myLocation?.longitude,
-      toLatitude: device.locationLatitude,
-      toLongitude: device.locationLongitude,
-    );
-    final hasLocation = NearbyMapCalculations.isValidPoint(
-      device.locationLatitude,
-      device.locationLongitude,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(device.name, style: Theme.of(context).textTheme.titleLarge),
-          if (device.peerDeviceModel?.isNotEmpty == true)
-            Text(
-              device.peerDeviceModel!,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          const SizedBox(height: 12),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.circle, color: device.status.color),
-            title: Text('สถานะ ${device.status.label}'),
-            subtitle: Text(
-              device.isConnected
-                  ? 'เชื่อมต่อ Nearby'
-                  : 'ไม่ได้เชื่อมต่อ Nearby',
-            ),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.battery_std_rounded),
-            title: Text(
-              device.batteryLevel == null
-                  ? 'แบตเตอรี่ไม่ทราบ'
-                  : 'แบตเตอรี่ ${device.batteryLevel}%${device.isCharging == true ? ' • กำลังชาร์จ' : ''}',
-            ),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.location_on_outlined),
-            title: Text(hasLocation ? 'ตำแหน่ง peer' : 'ยังไม่มีตำแหน่ง peer'),
-            subtitle: Text(
-              hasLocation
-                  ? '${NearbyMapCalculations.freshnessLabel(device.locationCapturedAt, now)} • ${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)}'
-                  : 'peer ต้องแชร์ตำแหน่งด้วยตนเองก่อน',
-            ),
-          ),
-          if (NearbyMapCalculations.freshness(
-                    device.locationCapturedAt ??
-                        DateTime.fromMillisecondsSinceEpoch(0),
-                    now,
-                  ) !=
-                  LocationFreshness.fresh &&
-              hasLocation)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text('ตำแหน่งเก่าอาจไม่ตรงกับตำแหน่งปัจจุบัน'),
-            ),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: device.isConnected ? onChat : null,
-                  icon: const Icon(Icons.chat_bubble_outline_rounded),
-                  label: const Text('แชท'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: hasLocation ? onNavigate : null,
-                  icon: const Icon(Icons.navigation_rounded),
-                  label: const Text('ดูเส้นทาง'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
