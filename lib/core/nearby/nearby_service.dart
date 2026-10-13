@@ -2856,6 +2856,21 @@ class NearbyService extends ChangeNotifier {
       if (!event.isIncomingRequest &&
           (_userInitiatedEndpoints.contains(endpointId) ||
               initiatorAttemptIsConnecting)) {
+        final isTrustedAutomaticInitiator =
+            fingerprint != null &&
+            _automaticConnectionAttempts.contains(fingerprint) &&
+            !_userInitiatedEndpoints.contains(endpointId);
+        if (isTrustedAutomaticInitiator) {
+          diagnostics?.record(
+            'trust',
+            'trusted_reconnect_verification_prompt_suppressed',
+            connectionTraceId: traceId,
+            operation: 'onConnectionInitiated',
+            peerIdentifier: endpointId,
+            fields: {'identityProofRequired': true},
+          );
+          return;
+        }
         diagnostics?.record(
           'connection',
           'initiator_verification_prompt_queued',
@@ -3538,13 +3553,14 @@ class NearbyService extends ChangeNotifier {
     }
     diagnostics?.record(
       'trust',
-      'trusted_reconnect_requires_approval',
+      'trusted_reconnect_auto_accepting_transport',
       connectionTraceId: _connectionTraces[endpointId],
-      operation: 'queueIncomingRequest',
+      operation: 'acceptConnection',
       peerIdentifier: endpointId,
-      fields: {'pinnedKeyAvailable': true, 'autoAccept': false},
+      fields: {'identityProofRequired': true},
     );
-    _queueIncomingRequest(event);
+    _approvedConnectionEndpoints.add(endpointId);
+    await acceptConnectionRequest(endpointId);
   }
 
   Future<void> _sendIdentityChallenge(String endpointId) async {

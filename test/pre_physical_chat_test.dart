@@ -28,7 +28,7 @@ void main() {
           () => pair.serviceB.deviceIdForEndpoint('endpoint-a') == null,
         );
         pair.transportB.discoverPeer();
-        await approveReconnect(pair);
+        await waitForReconnect(pair);
         await identified(pair);
         expect(pair.serviceA.pendingConnectionRequests, isEmpty);
         expect(pair.serviceB.pendingConnectionRequests, isEmpty);
@@ -64,7 +64,7 @@ void main() {
 
   for (final blocked in [false, true]) {
     test(
-      '${blocked ? 'block' : 'untrust'} disables rediscovery auto reconnect and retains history',
+      '${blocked ? 'block' : 'remove trust'} disables rediscovery auto reconnect and retains history',
       () async {
         final pair = await HandshakePair.create();
         addTearDown(pair.close);
@@ -76,7 +76,7 @@ void main() {
         if (blocked) {
           await pair.repositoriesB.nearbyDevices.setBlocked('device-a', true);
         } else {
-          await pair.repositoriesB.nearbyDevices.setTrusted('device-a', false);
+          await pair.repositoriesB.nearbyDevices.removeTrustedPeer('device-a');
         }
         final before = (await readEvents(pair.logsB)).length;
         pair.transportB.discoverPeer();
@@ -130,7 +130,7 @@ void main() {
       expect(bubbles.single.id, sent.id);
       expect(bubbles.single.status, DeliveryStatus.pending);
       pair.transportB.discoverPeer();
-      await approveReconnect(pair);
+      await waitForReconnect(pair);
       await waitFor(
         () async =>
             (await pair.repositoriesA.messages.getMessage(sent.id))?.status ==
@@ -303,20 +303,8 @@ void main() {
   }
 }
 
-Future<void> approveReconnect(HandshakePair pair) async {
-  await waitFor(
-    () =>
-        pair.serviceA.pendingConnectionRequests.isNotEmpty ||
-        pair.serviceB.pendingConnectionRequests.isNotEmpty,
-  );
-  for (final endpoint
-      in pair.serviceA.pendingConnectionRequests.keys.toList()) {
-    await pair.serviceA.acceptConnectionRequest(endpoint);
-  }
-  for (final endpoint
-      in pair.serviceB.pendingConnectionRequests.keys.toList()) {
-    await pair.serviceB.acceptConnectionRequest(endpoint);
-  }
+Future<void> waitForReconnect(HandshakePair pair) async {
+  await identified(pair);
 }
 
 Future<void> approve(HandshakePair pair) async {

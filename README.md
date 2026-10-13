@@ -95,8 +95,9 @@ physically verified: Build 33 still requires the two-phone checklist.
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables
 - Incoming Nearby connection requests with explicit accept/reject and saved
-  trust/block controls; cryptographically pinned peers can reconnect after
-  first-contact approval
+  trust/block controls; explicitly approved peers auto-reconnect offline after
+  their pinned cryptographic identity proof succeeds, with a peer-level action
+  to remove that trust while preserving local chat history
 - Android local message/SOS notification channels and tap-through navigation;
   FCM token registration is consent-gated and QA-only, while its server
   integration awaits disposable QA Supabase setup

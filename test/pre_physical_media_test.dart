@@ -294,7 +294,7 @@ void main() {
         DeliveryStatus.failed,
       );
       pair.transportB.discoverPeer();
-      await approveReconnect(pair);
+      await waitForReconnect(pair);
       await waitFor(
         () =>
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -318,20 +318,12 @@ void main() {
   );
 }
 
-Future<void> approveReconnect(HandshakePair pair) async {
+Future<void> waitForReconnect(HandshakePair pair) async {
   await waitFor(
     () =>
-        pair.serviceA.pendingConnectionRequests.isNotEmpty ||
-        pair.serviceB.pendingConnectionRequests.isNotEmpty,
+        pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+        pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
   );
-  for (final endpoint
-      in pair.serviceA.pendingConnectionRequests.keys.toList()) {
-    await pair.serviceA.acceptConnectionRequest(endpoint);
-  }
-  for (final endpoint
-      in pair.serviceB.pendingConnectionRequests.keys.toList()) {
-    await pair.serviceB.acceptConnectionRequest(endpoint);
-  }
 }
 
 Future<HandshakePair> connectedPair({

@@ -952,6 +952,58 @@ void main() {
     );
   });
 
+  test(
+    'removing trust clears one identity pin and preserves local chat data',
+    () async {
+      for (final deviceId in ['trust-peer-a', 'trust-peer-b']) {
+        await repositories.nearbyDevices.upsert(
+          deviceId: deviceId,
+          displayName: 'Same demo name',
+          status: DeviceStatus.normal,
+        );
+        await repositories.nearbyDevices.setTrustedIdentity(
+          deviceId: deviceId,
+          publicIdentityKey: 'public-key-$deviceId',
+          fingerprint: deviceId.endsWith('a')
+              ? List.filled(64, 'a').join()
+              : List.filled(64, 'b').join(),
+        );
+      }
+      final conversation = await repositories.conversations.ensureConversation(
+        id: 'trust-peer-a',
+        participantId: 'trust-peer-a',
+        displayName: 'Same demo name',
+        participantStatus: DeviceStatus.normal,
+      );
+      final message = await repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: 'local-user',
+        senderDeviceId: 'local-device',
+        text: 'Keep this conversation',
+      );
+
+      await repositories.nearbyDevices.removeTrustedPeer('trust-peer-a');
+
+      final removed = (await repositories.nearbyDevices.getDevice(
+        'trust-peer-a',
+      ))!;
+      expect(removed.isTrusted, isFalse);
+      expect(removed.autoReconnectEnabled, isFalse);
+      expect(removed.publicIdentityKey, isNull);
+      expect(removed.publicIdentityFingerprint, isNull);
+      final untouched = (await repositories.nearbyDevices.getDevice(
+        'trust-peer-b',
+      ))!;
+      expect(untouched.isTrusted, isTrue);
+      expect(untouched.autoReconnectEnabled, isTrue);
+      expect(untouched.publicIdentityFingerprint, List.filled(64, 'b').join());
+      expect(
+        (await repositories.messages.listMessages(conversation.id)).single.id,
+        message.id,
+      );
+    },
+  );
+
   test('dependency bootstrap completes in the Flutter test runtime', () async {
     final dependencies = RelioDependencies(database: createTestDatabase());
     addTearDown(dependencies.dispose);
@@ -1108,6 +1160,9 @@ void main() {
       final savedPeer = await reopenedRepositories.nearbyDevices.getDevice(
         'trusted-peer',
       );
+      expect(savedPeer?.isTrusted, isTrue);
+      expect(savedPeer?.autoReconnectEnabled, isTrue);
+      expect(savedPeer?.publicIdentityKey, 'pinned-public-key');
       expect(savedPeer?.batteryLevel, 64);
       expect(savedPeer?.isCharging, isTrue);
       expect(savedPeer?.peerLatitude, 10.25);

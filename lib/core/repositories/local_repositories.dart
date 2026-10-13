@@ -271,6 +271,7 @@ abstract interface class NearbyDeviceRepository {
   });
   Future<void> updateStatus(String deviceId, DeviceStatus status);
   Future<void> setTrusted(String deviceId, bool trusted);
+  Future<void> removeTrustedPeer(String deviceId);
   Future<void> setTrustedIdentity({
     required String deviceId,
     required String publicIdentityKey,
@@ -2236,6 +2237,20 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
       NearbyDevicesCompanion(
         isTrusted: Value(trusted),
         autoReconnectEnabled: Value(mayReconnect),
+      ),
+    );
+  }
+
+  @override
+  Future<void> removeTrustedPeer(String deviceId) async {
+    await (db.update(
+      db.nearbyDevices,
+    )..where((row) => row.deviceId.equals(deviceId))).write(
+      const NearbyDevicesCompanion(
+        isTrusted: Value(false),
+        autoReconnectEnabled: Value(false),
+        publicIdentityKey: Value(null),
+        publicIdentityFingerprint: Value(null),
       ),
     );
   }

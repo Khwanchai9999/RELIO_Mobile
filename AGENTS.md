@@ -90,6 +90,10 @@ into it.
 - Accept `hello` as the identity-establishing packet for a Nearby endpoint;
   reject other data/control packets until its stable `deviceId` matches the
   completed handshake.
+- A previously approved Nearby peer may reconnect without another human prompt
+  only when its pinned cryptographic identity proof succeeds; removing trust
+  clears that peer's pin and auto-reconnect permission while preserving its
+  conversation and other local data.
 - Keep real discovered peers separate from seeded demo identities in every
   screen, and do not show simulated distance, signal, Internet, or delivery
   values as runtime facts.

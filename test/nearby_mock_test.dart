@@ -237,6 +237,38 @@ void main() {
   );
 
   test(
+    'trusted reconnect selects by fingerprint after endpoint changes',
+    () async {
+      const deviceId = 'stable-relio-device';
+      final fingerprint = List.filled(64, 'c').join();
+      await repositories.nearbyDevices.upsert(
+        deviceId: deviceId,
+        displayName: 'Same display name',
+        status: DeviceStatus.normal,
+      );
+      await repositories.nearbyDevices.setTrustedIdentity(
+        deviceId: deviceId,
+        publicIdentityKey: 'pinned-public-key',
+        fingerprint: fingerprint,
+      );
+
+      transport.simulateIncomingConnection(
+        id: 'new-temporary-endpoint',
+        name: 'Same display name',
+        identityFingerprintHint: fingerprint,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(transport.acceptedConnections, contains('new-temporary-endpoint'));
+      expect(service.pendingConnectionRequests, isEmpty);
+      expect(
+        (await repositories.nearbyDevices.getDevice(deviceId))?.isTrusted,
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'manual connect racing trusted auto-reconnect makes one native request',
     () async {
       final local = await service.identityCrypto.getPublicIdentity();

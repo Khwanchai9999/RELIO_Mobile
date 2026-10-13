@@ -299,117 +299,100 @@ void main() {
     );
   });
 
-  test('trusted reconnect still requires visible approval on both peers', () async {
-    final pair = await HandshakePair.create();
-    addTearDown(pair.close);
+  test(
+    'trusted reconnect proves identity without another approval prompt',
+    () async {
+      final pair = await HandshakePair.create();
+      addTearDown(pair.close);
 
-    await pair.serviceA.connect('endpoint-b');
-    await waitFor(
-      () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-    );
-    await pair.serviceB.acceptConnectionRequest('endpoint-a');
-    await waitFor(
-      () =>
-          pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
-          pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
-    );
-    final savedA = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
-    expect(savedA?.isTrusted, isTrue);
-    expect(savedA?.autoReconnectEnabled, isTrue);
-    if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
-      fail(
-        'initial B pending=${pair.serviceB.pendingConnectionRequests.keys} '
-        'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
-        'name=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name}',
+      await pair.serviceA.connect('endpoint-b');
+      await waitFor(
+        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
       );
-    }
+      await pair.serviceB.acceptConnectionRequest('endpoint-a');
+      await waitFor(
+        () =>
+            pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+            pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
+      );
+      final savedA = await pair.repositoriesB.nearbyDevices.getDevice(
+        'device-a',
+      );
+      expect(savedA?.isTrusted, isTrue);
+      expect(savedA?.autoReconnectEnabled, isTrue);
+      if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
+        fail(
+          'initial B pending=${pair.serviceB.pendingConnectionRequests.keys} '
+          'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
+          'name=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name}',
+        );
+      }
 
-    await pair.serviceA.disconnect('endpoint-b', reason: 'test_reconnect');
-    await waitFor(
-      () =>
-          pair.serviceA.peerStates['endpoint-b'] ==
-          NearbyConnectionState.disconnected,
-    );
+      await pair.serviceA.disconnect('endpoint-b', reason: 'test_reconnect');
+      await waitFor(
+        () =>
+            pair.serviceA.peerStates['endpoint-b'] ==
+            NearbyConnectionState.disconnected,
+      );
 
-    pair.transportA.discoverPeer();
-    final acceptsBeforeReconnect =
-        pair.transportA.acceptedConnections.length +
-        pair.transportB.acceptedConnections.length;
-    await pair.serviceA.connect('endpoint-b');
-    await waitFor(
-      () =>
-          pair.serviceA.pendingConnectionRequests.isNotEmpty ||
-          pair.serviceB.pendingConnectionRequests.isNotEmpty,
-    );
-    final pendingA = pair.serviceA.pendingConnectionRequests.keys.toList();
-    final pendingB = pair.serviceB.pendingConnectionRequests.keys.toList();
-    expect(pendingA.isNotEmpty || pendingB.isNotEmpty, isTrue);
-    expect(
-      pair.transportA.acceptedConnections.length +
-          pair.transportB.acceptedConnections.length,
-      acceptsBeforeReconnect,
-    );
-    expect(
-      pair.serviceA.peerStates['endpoint-b'],
-      isNot(NearbyConnectionState.connected),
-    );
-    expect(
-      pair.serviceB.peerStates['endpoint-a'],
-      isNot(NearbyConnectionState.connected),
-    );
-    for (final endpoint in pendingA) {
-      await pair.serviceA.acceptConnectionRequest(endpoint);
-    }
-    for (final endpoint in pendingB) {
-      await pair.serviceB.acceptConnectionRequest(endpoint);
-    }
+      pair.transportA.discoverPeer();
+      pair.transportB.discoverPeer();
+      await pair.serviceA.connect('endpoint-b');
+      await waitFor(
+        () =>
+            pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+            pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
+            pair.serviceA.peerStates['endpoint-b'] ==
+                NearbyConnectionState.connected &&
+            pair.serviceB.peerStates['endpoint-a'] ==
+                NearbyConnectionState.connected,
+      );
+      expect(pair.serviceA.pendingConnectionRequests, isEmpty);
+      expect(pair.serviceB.pendingConnectionRequests, isEmpty);
+      expect(pair.transportA.sentPackets, contains('identityProof'));
+      expect(pair.transportB.sentPackets, contains('identityProof'));
+      expect(
+        (await pair.repositoriesA.nearbyDevices.getDevice(
+          'device-b',
+        ))?.isTrusted,
+        isTrue,
+      );
+      pair.serviceA.peerStates['unrelated-endpoint'] =
+          NearbyConnectionState.connecting;
+      expect(pair.serviceA.applicationState, NearbyApplicationState.connected);
+      pair.serviceA.peerStates.remove('unrelated-endpoint');
 
-    await waitFor(
-      () =>
-          pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
-          pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
-          pair.serviceA.peerStates['endpoint-b'] ==
-              NearbyConnectionState.connected &&
-          pair.serviceB.peerStates['endpoint-a'] ==
-              NearbyConnectionState.connected,
-    );
-    expect(pair.serviceA.deviceIdForEndpoint('endpoint-b'), 'device-b');
-    expect(pair.serviceB.deviceIdForEndpoint('endpoint-a'), 'device-a');
-    pair.serviceA.peerStates['unrelated-endpoint'] =
-        NearbyConnectionState.connecting;
-    expect(pair.serviceA.applicationState, NearbyApplicationState.connected);
-    pair.serviceA.peerStates.remove('unrelated-endpoint');
-
-    pair.serviceA.isAdvertising = true;
-    pair.serviceA.isDiscovering = true;
-    pair.serviceA.updateLifecycleContext(
-      lifecycleState: 'resumed',
-      route: '/chat/device-b',
-    );
-    final disconnectCountBeforeSessionStop =
-        pair.transportA.disconnectCalls.length;
-    await pair.serviceA.stopSession(
-      reason: 'test_discovery_restart',
-      caller: 'nearby_identity_handshake_test',
-    );
-    expect(
-      pair.serviceA.peerStates['endpoint-b'],
-      NearbyConnectionState.connected,
-    );
-    expect(
-      pair.transportA.disconnectCalls,
-      hasLength(disconnectCountBeforeSessionStop),
-    );
-    expect(pair.transportA.stopDiscoveryCalls, 1);
-    expect(pair.transportA.stopAdvertisingCalls, 1);
-    final stopEvents = await readEvents(pair.logsA);
-    final stopEvent = stopEvents.firstWhere(
-      (event) => event['event'] == 'nearby_session_stop_requested',
-    );
-    expect(stopEvent['caller'], 'nearby_identity_handshake_test');
-    expect(stopEvent['reason'], 'test_discovery_restart');
-    expect(stopEvent['screenRoute'], '/chat/device-b');
-  });
+      pair.serviceA.isAdvertising = true;
+      pair.serviceA.isDiscovering = true;
+      pair.serviceA.updateLifecycleContext(
+        lifecycleState: 'resumed',
+        route: '/chat/device-b',
+      );
+      final disconnectCountBeforeSessionStop =
+          pair.transportA.disconnectCalls.length;
+      await pair.serviceA.stopSession(
+        reason: 'test_discovery_restart',
+        caller: 'nearby_identity_handshake_test',
+      );
+      expect(
+        pair.serviceA.peerStates['endpoint-b'],
+        NearbyConnectionState.connected,
+      );
+      expect(
+        pair.transportA.disconnectCalls,
+        hasLength(disconnectCountBeforeSessionStop),
+      );
+      expect(pair.transportA.stopDiscoveryCalls, 1);
+      expect(pair.transportA.stopAdvertisingCalls, 1);
+      final stopEvents = await readEvents(pair.logsA);
+      final stopEvent = stopEvents.firstWhere(
+        (event) => event['event'] == 'nearby_session_stop_requested',
+      );
+      expect(stopEvent['caller'], 'nearby_identity_handshake_test');
+      expect(stopEvent['reason'], 'test_discovery_restart');
+      expect(stopEvent['screenRoute'], '/chat/device-b');
+    },
+  );
 
   test(
     'simultaneous challenges do not overwrite either pending nonce',

@@ -292,6 +292,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
         await repository.setTrusted(device.deviceId, true);
       case 'untrust':
         await repository.setTrusted(device.deviceId, false);
+      case 'remove-trust':
+        await _confirmRemoveTrustedPeer(device);
+        return;
       case 'block':
         await repository.setBlocked(device.deviceId, true);
         final endpointId = _nearby.deviceToEndpointId[device.deviceId];
@@ -300,6 +303,42 @@ class _NearbyScreenState extends State<NearbyScreen> {
         await repository.setBlocked(device.deviceId, false);
     }
     await _loadSavedDevices();
+  }
+
+  Future<void> _confirmRemoveTrustedPeer(RelioNearbyDevice device) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ลบอุปกรณ์ที่เชื่อถือหรือไม่?'),
+        content: const Text(
+          'ครั้งต่อไปที่เชื่อมต่อกับอุปกรณ์นี้ จะต้องยืนยันรหัสใหม่',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('ลบอุปกรณ์ที่เชื่อถือ'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await _dependencies.repositories.nearbyDevices.removeTrustedPeer(
+      device.deviceId,
+    );
+    final endpointId = _nearby.deviceToEndpointId[device.deviceId];
+    if (endpointId != null) {
+      await _nearby.disconnect(endpointId, reason: 'trusted_peer_removed');
+    }
+    await _loadSavedDevices();
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('ลบอุปกรณ์ที่เชื่อถือแล้ว')));
   }
 
   List<NearbyPeer> get _livePeers {
@@ -772,6 +811,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
+                        if (saved?.isTrusted == true)
+                          const Padding(
+                            padding: EdgeInsets.only(left: 12, bottom: 4),
+                            child: Text('อุปกรณ์ที่เชื่อถือแล้ว'),
+                          ),
                       ],
                     ),
                   ),
@@ -791,10 +835,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
                           child: Text('ดูรายละเอียดและเส้นทาง'),
                         ),
                         PopupMenuItem(
-                          value: saved.isTrusted ? 'untrust' : 'trust',
+                          value: saved.isTrusted ? 'remove-trust' : 'trust',
                           child: Text(
                             saved.isTrusted
-                                ? 'เลิกเชื่อถืออุปกรณ์'
+                                ? 'ลบอุปกรณ์ที่เชื่อถือ'
                                 : 'เชื่อถืออุปกรณ์นี้',
                           ),
                         ),
