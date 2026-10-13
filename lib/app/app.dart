@@ -455,9 +455,7 @@ class RelioShell extends StatelessWidget {
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: selectedIndex,
-        labelBehavior: MediaQuery.sizeOf(context).width < 380
-            ? NavigationDestinationLabelBehavior.onlyShowSelected
-            : NavigationDestinationLabelBehavior.alwaysShow,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         onDestinationSelected: (index) => context.go(routes[index]),
         destinations: const [
           NavigationDestination(

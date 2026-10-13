@@ -109,6 +109,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('all Thai navigation labels stay visible on narrow screens', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await pumpApp(tester);
+    await tapText(tester, 'ใช้งานแบบออฟไลน์');
+
+    Future<void> expectAllLabels() async {
+      final navigationBar = tester.widget<NavigationBar>(
+        find.byType(NavigationBar),
+      );
+      expect(
+        navigationBar.labelBehavior,
+        NavigationDestinationLabelBehavior.alwaysShow,
+      );
+      for (final label in ['หน้าหลัก', 'ใกล้เคียง', 'แชท', 'SOS', 'โปรไฟล์']) {
+        expect(find.text(label), findsWidgets, reason: 'missing label: $label');
+      }
+      expect(tester.takeException(), isNull);
+    }
+
+    await expectAllLabels();
+    for (final icon in [
+      Icons.radar_outlined,
+      Icons.chat_bubble_outline,
+      Icons.warning_amber_outlined,
+      Icons.person_outline,
+      Icons.home_outlined,
+    ]) {
+      await tester.tap(find.byIcon(icon));
+      await tester.pumpAndSettle();
+      await expectAllLabels();
+    }
+  });
+
   testWidgets('offline entry navigates to Home and primary navigation works', (
     tester,
   ) async {
