@@ -23,6 +23,26 @@ import '../../shared/widgets/relio_widgets.dart';
 
 enum NearbyFilter { all, sos, rescue, normal }
 
+bool isFreshNearbyBattery(
+  RelioNearbyDevice device, {
+  required bool connected,
+  DateTime? now,
+}) {
+  final updatedAt = device.batteryUpdatedAt;
+  if (!connected || device.batteryLevel == null || updatedAt == null) {
+    return false;
+  }
+  final age = (now ?? DateTime.now()).difference(updatedAt);
+  return !age.isNegative && age <= const Duration(minutes: 2);
+}
+
+Iterable<NearbyPeer> visibleNearbyPeers(NearbyService nearby) =>
+    nearby.discoveredPeers.where(
+      (peer) =>
+          nearby.isEndpointCurrent(peer.endpointId) ||
+          nearby.peerStates[peer.endpointId] == NearbyConnectionState.connected,
+    );
+
 class NearbyScreen extends StatefulWidget {
   const NearbyScreen({super.key});
 
@@ -207,8 +227,20 @@ class _NearbyScreenState extends State<NearbyScreen> {
               ? PeerPresence.connected
               : PeerPresence.stale,
           lastSeenAt: saved.lastSeenAt,
-          batteryLevel: saved.batteryLevel,
-          isCharging: saved.isCharging,
+          batteryLevel:
+              isFreshNearbyBattery(
+                saved,
+                connected: _nearby.isDeviceConnected(saved.deviceId),
+              )
+              ? saved.batteryLevel
+              : null,
+          isCharging:
+              isFreshNearbyBattery(
+                saved,
+                connected: _nearby.isDeviceConnected(saved.deviceId),
+              )
+              ? saved.isCharging
+              : null,
           peerDeviceModel: saved.peerDeviceModel,
           locationLatitude: saved.peerLatitude,
           locationLongitude: saved.peerLongitude,
@@ -327,13 +359,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
     );
     if (confirmed != true || !mounted) return;
 
-    await _dependencies.repositories.nearbyDevices.removeTrustedPeer(
-      device.deviceId,
-    );
-    final endpointId = _nearby.deviceToEndpointId[device.deviceId];
-    if (endpointId != null) {
-      await _nearby.disconnect(endpointId, reason: 'trusted_peer_removed');
-    }
+    await _nearby.removeTrustedPeer(device.deviceId);
     await _loadSavedDevices();
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -343,7 +369,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   List<NearbyPeer> get _livePeers {
     final seen = <String>{};
-    final peers = _nearby.discoveredPeers.where((peer) {
+    final peers = visibleNearbyPeers(_nearby).where((peer) {
       final key = peer.endpointId.startsWith('classic:')
           ? peer.endpointId
           : peer.deviceId ?? peer.endpointId;
@@ -394,8 +420,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 ? PeerPresence.stale
                 : PeerPresence.disconnected,
             lastSeenAt: device.lastSeenAt,
-            batteryLevel: device.batteryLevel,
-            isCharging: device.isCharging,
+            batteryLevel: null,
+            isCharging: null,
             peerDeviceModel: device.peerDeviceModel,
             locationLatitude: device.peerLatitude,
             locationLongitude: device.peerLongitude,
@@ -416,6 +442,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
   RelioDevice _toLiveDevice(NearbyPeer peer) {
     final state = _nearby.peerStates[peer.endpointId];
     final status = _nearby.peerStatuses[peer.deviceId] ?? DeviceStatus.normal;
+    final saved = _savedDevice(peer.deviceId);
+    final freshBattery =
+        saved != null &&
+        isFreshNearbyBattery(
+          saved,
+          connected: state == NearbyConnectionState.connected,
+        );
     return RelioDevice(
       id: peer.deviceId ?? 'pending:${peer.endpointId}',
       name: peer.name,
@@ -437,13 +470,13 @@ class _NearbyScreenState extends State<NearbyScreen> {
               null => PeerPresence.discovered,
               NearbyConnectionState.failed => PeerPresence.failed,
             },
-      batteryLevel: _savedDevice(peer.deviceId)?.batteryLevel,
-      isCharging: _savedDevice(peer.deviceId)?.isCharging,
-      peerDeviceModel: _savedDevice(peer.deviceId)?.peerDeviceModel,
-      locationLatitude: _savedDevice(peer.deviceId)?.peerLatitude,
-      locationLongitude: _savedDevice(peer.deviceId)?.peerLongitude,
-      locationAccuracyMeters: _savedDevice(peer.deviceId)?.peerLocationAccuracy,
-      locationCapturedAt: _savedDevice(peer.deviceId)?.peerLocationCapturedAt,
+      batteryLevel: freshBattery ? saved.batteryLevel : null,
+      isCharging: freshBattery ? saved.isCharging : null,
+      peerDeviceModel: saved?.peerDeviceModel,
+      locationLatitude: saved?.peerLatitude,
+      locationLongitude: saved?.peerLongitude,
+      locationAccuracyMeters: saved?.peerLocationAccuracy,
+      locationCapturedAt: saved?.peerLocationCapturedAt,
     );
   }
 

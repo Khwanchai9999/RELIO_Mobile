@@ -64,12 +64,12 @@ class HandshakePair {
   final RelioRepositories repositoriesB;
   final RelioDeviceIdentityRepository identityA;
   final RelioDeviceIdentityRepository identityB;
-  final LoopbackTransport transportA;
-  final LoopbackTransport transportB;
+  LoopbackTransport transportA;
+  LoopbackTransport transportB;
   final TestIdentityCrypto cryptoA;
   final TestIdentityCrypto cryptoB;
-  final NearbyService serviceA;
-  final NearbyService serviceB;
+  NearbyService serviceA;
+  NearbyService serviceB;
   final DiagnosticsLogService logsA;
   final DiagnosticsLogService logsB;
 
@@ -83,6 +83,8 @@ class HandshakePair {
     String? displayNameB,
     BatteryInfoService? batteryInfoA,
     BatteryInfoService? batteryInfoB,
+    bool requireBothNativeAccepts = false,
+    String? Function()? currentUserIdProviderA,
   }) async {
     final databaseA = AppDatabase.memory();
     final databaseB = AppDatabase.memory();
@@ -106,6 +108,7 @@ class HandshakePair {
       localFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
       remoteFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
+      requireBothNativeAccepts: requireBothNativeAccepts,
     );
     final transportB = LoopbackTransport(
       localEndpointId: 'endpoint-a',
@@ -114,6 +117,7 @@ class HandshakePair {
       localFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
       remoteFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
       dropPayloads: dropPayloads,
+      requireBothNativeAccepts: requireBothNativeAccepts,
     );
     transportA.other = transportB;
     transportB.other = transportA;
@@ -132,6 +136,7 @@ class HandshakePair {
       identity: identityA,
       nearbyDevices: repositoriesA.nearbyDevices,
       identityCrypto: cryptoA,
+      currentUserIdProvider: currentUserIdProviderA,
       diagnostics: logsA,
       handshakeTimeout: handshakeTimeout,
       attachments: repositoriesA.attachments,
@@ -183,6 +188,70 @@ class HandshakePair {
       logsA: logsA,
       logsB: logsB,
     );
+  }
+
+  Future<void> restartServices() async {
+    final oldA = transportA;
+    final oldB = transportB;
+    final accountA = serviceA.currentUserIdProvider;
+    final timeout = serviceA.handshakeTimeout;
+    await serviceA.close();
+    await serviceB.close();
+    transportA = LoopbackTransport(
+      localEndpointId: oldA.localEndpointId,
+      remoteEndpointId: oldA.remoteEndpointId,
+      displayName: await identityA.getDisplayName(),
+      localFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
+      remoteFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
+      requireBothNativeAccepts: oldA.requireBothNativeAccepts,
+    );
+    transportB = LoopbackTransport(
+      localEndpointId: oldB.localEndpointId,
+      remoteEndpointId: oldB.remoteEndpointId,
+      displayName: await identityB.getDisplayName(),
+      localFingerprint: (await cryptoB.getPublicIdentity()).fingerprint,
+      remoteFingerprint: (await cryptoA.getPublicIdentity()).fingerprint,
+      requireBothNativeAccepts: oldB.requireBothNativeAccepts,
+    );
+    transportA.other = transportB;
+    transportB.other = transportA;
+    transportA.incomingDirectory = logsA.directory!;
+    transportB.incomingDirectory = logsB.directory!;
+    serviceA = NearbyService(
+      transport: transportA,
+      messages: repositoriesA.messages,
+      conversations: repositoriesA.conversations,
+      identity: identityA,
+      nearbyDevices: repositoriesA.nearbyDevices,
+      identityCrypto: cryptoA,
+      diagnostics: logsA,
+      handshakeTimeout: timeout,
+      attachments: repositoriesA.attachments,
+      mediaStorage: MediaStorageService(
+        rootDirectory: Directory('${logsA.directory!.path}/media'),
+      ),
+      settings: repositoriesA.settings,
+      currentUserIdProvider: accountA,
+    );
+    serviceB = NearbyService(
+      transport: transportB,
+      messages: repositoriesB.messages,
+      conversations: repositoriesB.conversations,
+      identity: identityB,
+      nearbyDevices: repositoriesB.nearbyDevices,
+      identityCrypto: cryptoB,
+      diagnostics: logsB,
+      handshakeTimeout: timeout,
+      attachments: repositoriesB.attachments,
+      mediaStorage: MediaStorageService(
+        rootDirectory: Directory('${logsB.directory!.path}/media'),
+      ),
+      settings: repositoriesB.settings,
+    );
+    await serviceA.initialize();
+    await serviceB.initialize();
+    transportA.discoverPeer();
+    transportB.discoverPeer();
   }
 
   Future<void> close() async {
@@ -248,14 +317,16 @@ class LoopbackTransport implements NearbyTransport {
     required this.localFingerprint,
     required this.remoteFingerprint,
     this.dropPayloads = false,
+    this.requireBothNativeAccepts = false,
   });
 
-  final String localEndpointId;
-  final String remoteEndpointId;
+  String localEndpointId;
+  String remoteEndpointId;
   final String displayName;
   final String localFingerprint;
   final String remoteFingerprint;
   final bool dropPayloads;
+  final bool requireBothNativeAccepts;
   final _peers = StreamController<NearbyPeer>.broadcast();
   final _payloads = StreamController<NearbyPayloadEvent>.broadcast();
   final _connections = StreamController<NearbyConnectionEvent>.broadcast();
@@ -320,6 +391,7 @@ class LoopbackTransport implements NearbyTransport {
   NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
   int stopAdvertisingCalls = 0;
   bool omitIncomingFingerprintHint = false;
+  bool failNextRequest = false;
   late final Map<String, NearbyPeer> _knownPeers = {
     localEndpointId: NearbyPeer(
       id: localEndpointId,
@@ -382,6 +454,19 @@ class LoopbackTransport implements NearbyTransport {
     _peers.add(refreshed);
   }
 
+  void changeEndpointIds({required String local, required String remote}) {
+    localEndpointId = local;
+    remoteEndpointId = remote;
+    _knownPeers
+      ..clear()
+      ..[local] = NearbyPeer(
+        id: local,
+        name: displayName,
+        identityFingerprintHint: remoteFingerprint,
+      );
+    acceptedConnections.clear();
+  }
+
   void refreshPeerName(String name) {
     final peer = _knownPeers[localEndpointId]!;
     final refreshed = NearbyPeer(
@@ -419,7 +504,34 @@ class LoopbackTransport implements NearbyTransport {
     );
   }
 
+  void failConnection() {
+    acceptedConnections.clear();
+    other!.acceptedConnections.clear();
+    for (final transport in [this, other!]) {
+      transport._connections.add(
+        NearbyConnectionEvent(
+          peer: transport._knownPeers[transport.localEndpointId]!,
+          state: NearbyConnectionState.failed,
+          rawStatusCode: 13,
+          rawStatusName: 'ERROR',
+          error: 'ERROR',
+        ),
+      );
+    }
+  }
+
+  void repeatDisconnectedCallback([String? endpointId]) {
+    final id = endpointId ?? localEndpointId;
+    _connections.add(
+      NearbyConnectionEvent(
+        peer: _knownPeers[id] ?? NearbyPeer(id: id, name: displayName),
+        state: NearbyConnectionState.disconnected,
+      ),
+    );
+  }
+
   void _connectedBoth() {
+    if (_connected) return;
     _connected = true;
     final peer = _knownPeers[localEndpointId]!;
     _connections.add(
@@ -485,12 +597,27 @@ class LoopbackTransport implements NearbyTransport {
     String? identityFingerprint,
     String? connectionTraceId,
   }) async {
+    if (failNextRequest) {
+      failNextRequest = false;
+      throw const NearbyTransportException('Simulated native request failure.');
+    }
+    acceptedConnections.clear();
+    other!.acceptedConnections.clear();
     _connections.add(
       NearbyConnectionEvent(
         peer: _knownPeers[peerId]!,
         state: NearbyConnectionState.connecting,
       ),
     );
+    if (requireBothNativeAccepts) {
+      _connections.add(
+        NearbyConnectionEvent(
+          peer: _knownPeers[peerId]!,
+          state: NearbyConnectionState.incomingRequest,
+          isIncomingRequest: false,
+        ),
+      );
+    }
     final remote = other!;
     remote._connections.add(
       NearbyConnectionEvent(
@@ -514,6 +641,10 @@ class LoopbackTransport implements NearbyTransport {
   }) async {
     acceptCalls.add(peerId);
     acceptedConnections.add(peerId);
+    if (requireBothNativeAccepts &&
+        !other!.acceptedConnections.contains(other!.localEndpointId)) {
+      return;
+    }
     _connectedBoth();
   }
 
@@ -526,6 +657,8 @@ class LoopbackTransport implements NearbyTransport {
   @override
   Future<void> disconnect(String peerId) async {
     disconnectCalls.add(peerId);
+    acceptedConnections.clear();
+    other!.acceptedConnections.clear();
     _connected = false;
     final peer =
         _knownPeers[peerId] ?? NearbyPeer(id: peerId, name: displayName);

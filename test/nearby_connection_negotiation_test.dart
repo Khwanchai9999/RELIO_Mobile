@@ -482,7 +482,12 @@ void main() {
     await Future<void>.delayed(Duration.zero);
 
     await rig.service.connect('stale-peer');
-    await Future<void>.delayed(const Duration(milliseconds: 260));
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (rig.service.peerStates['stale-peer'] !=
+            NearbyConnectionState.failed &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
 
     expect(rig.service.peerStates['stale-peer'], NearbyConnectionState.failed);
     expect(rig.transport.disconnectCount, 1);
