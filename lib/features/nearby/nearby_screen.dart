@@ -37,11 +37,7 @@ bool isFreshNearbyBattery(
 }
 
 Iterable<NearbyPeer> visibleNearbyPeers(NearbyService nearby) =>
-    nearby.discoveredPeers.where(
-      (peer) =>
-          nearby.isEndpointCurrent(peer.endpointId) ||
-          nearby.peerStates[peer.endpointId] == NearbyConnectionState.connected,
-    );
+    nearby.currentPeers;
 
 class NearbyScreen extends StatefulWidget {
   const NearbyScreen({super.key});
@@ -313,7 +309,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       return;
     }
     if (state != NearbyConnectionState.connecting) {
-      await _nearby.connect(peer.endpointId);
+      await _nearby.connectPeer(peer);
     }
   }
 

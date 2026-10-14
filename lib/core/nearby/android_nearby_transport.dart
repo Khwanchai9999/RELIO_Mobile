@@ -9,7 +9,8 @@ import 'package:uuid/uuid.dart';
 
 import 'nearby_transport.dart';
 
-class AndroidNearbyTransport implements NearbyTransport {
+class AndroidNearbyTransport
+    implements NearbyTransport, NearbyIdleSessionRecovery {
   AndroidNearbyTransport({this.serviceId = relioNearbyServiceId}) {
     _nearby.setNativeDiagnosticListener(_onNativeDiagnostic);
   }
@@ -28,6 +29,8 @@ class AndroidNearbyTransport implements NearbyTransport {
   final Set<String> _connectedPeers = {};
   final Set<String> _connectionRequests = {};
   final Set<String> _pendingConnectionRequests = {};
+  final Set<String> _retiredEndpoints = {};
+  final Map<String, String> _connectionTraceIds = {};
   final Map<String, String> _peerNames = {};
   final Map<String, String> _peerFingerprintHints = {};
   final Map<String, NearbyPeer> _discoveredEndpoints = {};
@@ -251,11 +254,31 @@ class AndroidNearbyTransport implements NearbyTransport {
   };
 
   @override
+  Future<void> clearIdleEndpoints() async {
+    if (_advertising ||
+        _discovering ||
+        _connectedPeers.isNotEmpty ||
+        _connectionRequests.isNotEmpty ||
+        _pendingConnectionRequests.isNotEmpty) {
+      throw StateError('Cannot clear native endpoints while Nearby is active.');
+    }
+    // disconnectFromEndpoint จบ MethodChannel ก่อน native radio cleanup;
+    // stopAllEndpoints ล้าง endpoint cache ด้วย โดยเรียกได้เฉพาะ idle เท่านั้น
+    await _nearby.stopAllEndpoints();
+    _discoveredEndpoints.clear();
+    _peerNames.clear();
+    _peerFingerprintHints.clear();
+  }
+
+  @override
   Future<void> acceptConnection(
     String peerId, {
     String? connectionTraceId,
   }) async {
     if (!_pendingConnectionRequests.remove(peerId)) return;
+    if (connectionTraceId != null) {
+      _connectionTraceIds[peerId] = connectionTraceId;
+    }
     try {
       await _nearby.acceptConnection(
         peerId,
@@ -264,8 +287,14 @@ class AndroidNearbyTransport implements NearbyTransport {
         connectionTraceId: connectionTraceId,
       );
     } on PlatformException catch (error) {
+      if (_connectionTraceIds[peerId] == connectionTraceId) {
+        _clearEndpointConnectionState(peerId);
+      }
       throw _platformFailure('acceptConnection', error);
     } on Object catch (error) {
+      if (_connectionTraceIds[peerId] == connectionTraceId) {
+        _clearEndpointConnectionState(peerId);
+      }
       throw NearbyTransportException(
         'Unable to accept Nearby connection.',
         operation: 'acceptConnection',
@@ -279,8 +308,7 @@ class AndroidNearbyTransport implements NearbyTransport {
     String peerId, {
     String? connectionTraceId,
   }) async {
-    _pendingConnectionRequests.remove(peerId);
-    _connectionRequests.remove(peerId);
+    _clearEndpointConnectionState(peerId);
     try {
       await _nearby.rejectConnection(
         peerId,
@@ -311,6 +339,10 @@ class AndroidNearbyTransport implements NearbyTransport {
   }) async {
     if (_disposed || _connectedPeers.contains(peerId)) return;
     if (!_connectionRequests.add(peerId)) return;
+    _retiredEndpoints.remove(peerId);
+    if (connectionTraceId != null) {
+      _connectionTraceIds[peerId] = connectionTraceId;
+    }
     _connections.add(
       NearbyConnectionEvent(
         peer: NearbyPeer(id: peerId, name: _peerNames[peerId] ?? peerId),
@@ -337,13 +369,19 @@ class AndroidNearbyTransport implements NearbyTransport {
         );
       }
     } on NearbyTransportException {
-      _connectionRequests.remove(peerId);
+      if (_connectionTraceIds[peerId] == connectionTraceId) {
+        _clearEndpointConnectionState(peerId);
+      }
       rethrow;
     } on PlatformException catch (error) {
-      _connectionRequests.remove(peerId);
+      if (_connectionTraceIds[peerId] == connectionTraceId) {
+        _clearEndpointConnectionState(peerId);
+      }
       throw _platformFailure('requestConnection', error);
     } on Object catch (error) {
-      _connectionRequests.remove(peerId);
+      if (_connectionTraceIds[peerId] == connectionTraceId) {
+        _clearEndpointConnectionState(peerId);
+      }
       throw NearbyTransportException(
         'Unable to request Nearby connection.',
         code: _failureCode(error),
@@ -355,10 +393,19 @@ class AndroidNearbyTransport implements NearbyTransport {
 
   @override
   Future<void> disconnect(String peerId) async {
+    _clearEndpointConnectionState(peerId);
     await _nearby.disconnectFromEndpoint(peerId);
+  }
+
+  // ทั้ง local disconnect และ remote callback ต้องปลด pending native request ด้วย
+  void _clearEndpointConnectionState(String peerId) {
     _clearIncomingFiles(peerId);
     _connectedPeers.remove(peerId);
     _connectionRequests.remove(peerId);
+    _pendingConnectionRequests.remove(peerId);
+    _rawConnectionResults.remove(peerId);
+    _connectionTraceIds.remove(peerId);
+    _retiredEndpoints.add(peerId);
   }
 
   @override
@@ -394,6 +441,10 @@ class AndroidNearbyTransport implements NearbyTransport {
     String endpointId,
     ConnectionInfo info,
   ) async {
+    if (_retiredEndpoints.contains(endpointId) && !info.isIncomingConnection) {
+      return;
+    }
+    _retiredEndpoints.remove(endpointId);
     final callbackHint = _identityFingerprintHint(info.endpointName);
     final fingerprintHint = callbackHint ?? _peerFingerprintHints[endpointId];
     if (callbackHint != null) {
@@ -548,7 +599,15 @@ class AndroidNearbyTransport implements NearbyTransport {
 
   void _connectionResult(String endpointId, Status status) {
     final raw = _rawConnectionResults.remove(endpointId);
+    final currentTrace = _connectionTraceIds[endpointId];
+    if (_retiredEndpoints.contains(endpointId) ||
+        (raw?.connectionTraceId != null &&
+            currentTrace != null &&
+            raw!.connectionTraceId != currentTrace)) {
+      return;
+    }
     _connectionRequests.remove(endpointId);
+    _pendingConnectionRequests.remove(endpointId);
     final peer = NearbyPeer(
       id: endpointId,
       name: _identityFingerprintHint(_peerNames[endpointId] ?? '') == null
@@ -582,6 +641,7 @@ class AndroidNearbyTransport implements NearbyTransport {
         ),
       );
     } else {
+      _clearEndpointConnectionState(endpointId);
       _connections.add(
         NearbyConnectionEvent(
           peer: peer,
@@ -607,8 +667,7 @@ class AndroidNearbyTransport implements NearbyTransport {
   }
 
   void _disconnected(String endpointId) {
-    _clearIncomingFiles(endpointId);
-    _connectedPeers.remove(endpointId);
+    _clearEndpointConnectionState(endpointId);
     _connections.add(
       NearbyConnectionEvent(
         peer: NearbyPeer(

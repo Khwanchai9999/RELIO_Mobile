@@ -86,6 +86,27 @@ class NearbyPeer {
   final DateTime? lastSeenAt;
   final DateTime? lostAt;
   final bool isCurrent;
+
+  NearbyPeer withIdentity({
+    String? deviceId,
+    String? name,
+    bool? connected,
+    String? fingerprint,
+    List<String>? capabilities,
+  }) => NearbyPeer(
+    id: id,
+    name: name ?? this.name,
+    deviceId: deviceId ?? this.deviceId,
+    connected: connected ?? this.connected,
+    identityFingerprintHint: fingerprint ?? identityFingerprintHint,
+    capabilities: capabilities ?? this.capabilities,
+    discoveryEpoch: discoveryEpoch,
+    foundAt: foundAt,
+    lastSeenAt: lastSeenAt,
+    lostAt: lostAt,
+    isLost: isLost,
+    isCurrent: isCurrent,
+  );
 }
 
 class BondedBluetoothDevice {
@@ -264,6 +285,12 @@ class NearbyTransportException implements Exception {
     return 'NearbyTransportException: $message'
         '${fields.isEmpty ? '' : ' (${fields.join(', ')})'}';
   }
+}
+
+abstract interface class NearbyIdleSessionRecovery {
+  /// Clear native endpoint/radio state only after discovery/advertising stop,
+  /// with no connected endpoint or pending connection attempt.
+  Future<void> clearIdleEndpoints();
 }
 
 abstract interface class NearbyTransport {

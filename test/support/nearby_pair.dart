@@ -77,6 +77,8 @@ class HandshakePair {
     LocalNotificationSink? notificationsA,
     LocalNotificationSink? notificationsB,
     Duration handshakeTimeout = const Duration(seconds: 30),
+    Duration hardNegotiationTimeout = const Duration(seconds: 90),
+    Duration incomingApprovalTimeout = const Duration(minutes: 2),
     bool dropPayloads = false,
     bool corruptSignatureB = false,
     String displayNameA = 'สมชาย',
@@ -139,6 +141,8 @@ class HandshakePair {
       currentUserIdProvider: currentUserIdProviderA,
       diagnostics: logsA,
       handshakeTimeout: handshakeTimeout,
+      hardNegotiationTimeout: hardNegotiationTimeout,
+      incomingApprovalTimeout: incomingApprovalTimeout,
       attachments: repositoriesA.attachments,
       mediaStorage: MediaStorageService(
         rootDirectory: Directory('${logsA.directory!.path}/media'),
@@ -156,6 +160,8 @@ class HandshakePair {
       identityCrypto: cryptoB,
       diagnostics: logsB,
       handshakeTimeout: handshakeTimeout,
+      hardNegotiationTimeout: hardNegotiationTimeout,
+      incomingApprovalTimeout: incomingApprovalTimeout,
       attachments: repositoriesB.attachments,
       mediaStorage: MediaStorageService(
         rootDirectory: Directory('${logsB.directory!.path}/media'),
@@ -301,15 +307,22 @@ class TestIdentityCrypto implements PeerIdentityCrypto {
   Future<String> fingerprint(String publicKey) async =>
       sha256.convert(utf8.encode(publicKey)).toString();
 
+  int verifyCalls = 0;
+  Completer<void>? verificationGate;
+
   @override
   Future<bool> verify({
     required String publicKey,
     required Uint8List message,
     required String signature,
-  }) async => signature == _signature(message, publicKey);
+  }) async {
+    verifyCalls++;
+    await verificationGate?.future;
+    return signature == _signature(message, publicKey);
+  }
 }
 
-class LoopbackTransport implements NearbyTransport {
+class LoopbackTransport implements NearbyTransport, NearbyIdleSessionRecovery {
   LoopbackTransport({
     required this.localEndpointId,
     required this.remoteEndpointId,
@@ -385,8 +398,11 @@ class LoopbackTransport implements NearbyTransport {
   final Set<String> acceptedConnections = {};
   final List<String> acceptCalls = [];
   final List<String> disconnectCalls = [];
+  int requestCalls = 0;
+  int idleEndpointClearCalls = 0;
   int stopDiscoveryCalls = 0;
   int startDiscoveryCalls = 0;
+  int startAdvertisingCalls = 0;
   int _discoveryEpoch = 0;
   NearbyTransportTestMode _testMode = NearbyTransportTestMode.clusterBaseline;
   int stopAdvertisingCalls = 0;
@@ -453,6 +469,18 @@ class LoopbackTransport implements NearbyTransport {
     _knownPeers[localEndpointId] = refreshed;
     _peers.add(refreshed);
   }
+
+  void discoverAlias(NearbyPeer peer) => _peers.add(peer);
+  bool omitLocalDisconnectCallback = false;
+  Completer<void>? requestGate;
+  Completer<void>? acceptGate;
+  Completer<void>? disconnectGate;
+  bool holdConnectionResult = false;
+
+  void completeConnection() => _connectedBoth();
+
+  void emitConnectionEvent(NearbyConnectionEvent event) =>
+      _connections.add(event);
 
   void changeEndpointIds({required String local, required String remote}) {
     localEndpointId = local;
@@ -560,6 +588,8 @@ class LoopbackTransport implements NearbyTransport {
     required String displayName,
     String? identityFingerprint,
   }) async {
+    if (isAdvertising) return;
+    startAdvertisingCalls++;
     isAdvertising = true;
   }
 
@@ -592,11 +622,20 @@ class LoopbackTransport implements NearbyTransport {
   }
 
   @override
+  Future<void> clearIdleEndpoints() async {
+    if (isAdvertising || isDiscovering || _connected) {
+      throw StateError('Cannot clear an active loopback transport.');
+    }
+    idleEndpointClearCalls++;
+  }
+
+  @override
   Future<void> requestConnection(
     String peerId, {
     String? identityFingerprint,
     String? connectionTraceId,
   }) async {
+    requestCalls++;
     if (failNextRequest) {
       failNextRequest = false;
       throw const NearbyTransportException('Simulated native request failure.');
@@ -632,6 +671,7 @@ class LoopbackTransport implements NearbyTransport {
         isIncomingRequest: true,
       ),
     );
+    await requestGate?.future;
   }
 
   @override
@@ -640,12 +680,13 @@ class LoopbackTransport implements NearbyTransport {
     String? connectionTraceId,
   }) async {
     acceptCalls.add(peerId);
+    await acceptGate?.future;
     acceptedConnections.add(peerId);
     if (requireBothNativeAccepts &&
         !other!.acceptedConnections.contains(other!.localEndpointId)) {
       return;
     }
-    _connectedBoth();
+    if (!holdConnectionResult) _connectedBoth();
   }
 
   @override
@@ -656,18 +697,21 @@ class LoopbackTransport implements NearbyTransport {
 
   @override
   Future<void> disconnect(String peerId) async {
+    if (disconnectGate != null) await disconnectGate!.future;
     disconnectCalls.add(peerId);
     acceptedConnections.clear();
     other!.acceptedConnections.clear();
     _connected = false;
     final peer =
         _knownPeers[peerId] ?? NearbyPeer(id: peerId, name: displayName);
-    _connections.add(
-      NearbyConnectionEvent(
-        peer: peer,
-        state: NearbyConnectionState.disconnected,
-      ),
-    );
+    if (!omitLocalDisconnectCallback) {
+      _connections.add(
+        NearbyConnectionEvent(
+          peer: peer,
+          state: NearbyConnectionState.disconnected,
+        ),
+      );
+    }
     final remote = other!;
     remote._connected = false;
     final remotePeer = remote._knownPeers[remote.localEndpointId]!;

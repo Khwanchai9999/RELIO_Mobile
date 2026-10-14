@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:relio_mobile/core/nearby/android_nearby_transport.dart';
+import 'package:relio_mobile/core/nearby/bluetooth_classic_transport.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 
 void main() {
@@ -13,6 +14,115 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
 
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test(
+    'QA compatibility wrapper forwards idle reset to native primary',
+    () async {
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return true;
+      });
+      final NearbyTransport transport = CompatibilityNearbyTransport(
+        primary: AndroidNearbyTransport(),
+        compatibility: MockNearbyTransport(),
+      );
+      addTearDown(transport.dispose);
+      await transport.startAdvertising(displayName: 'RELIO');
+      await transport.startDiscovery();
+      await transport.stopDiscovery();
+      await transport.stopAdvertising();
+      expect(transport, isA<NearbyIdleSessionRecovery>());
+      await (transport as NearbyIdleSessionRecovery).clearIdleEndpoints();
+      expect(
+        calls.where((method) => method == 'stopAllEndpoints'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
+    'idle recovery clears all native endpoint traces before restarting',
+    () async {
+      final calls = <String>[];
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return true;
+      });
+      final transport = AndroidNearbyTransport();
+      addTearDown(transport.dispose);
+      await transport.startAdvertising(displayName: 'RELIO');
+      await transport.startDiscovery();
+      await expectLater(transport.clearIdleEndpoints(), throwsStateError);
+      await transport.requestConnection('peer');
+      await transport.stopDiscovery();
+      await transport.stopAdvertising();
+      await expectLater(transport.clearIdleEndpoints(), throwsStateError);
+      expect(calls.where((method) => method == 'stopAllEndpoints'), isEmpty);
+      await transport.disconnect('peer');
+      await transport.clearIdleEndpoints();
+      await transport.startAdvertising(displayName: 'RELIO');
+      await transport.startDiscovery();
+      final clearIndex = calls.indexOf('stopAllEndpoints');
+      expect(clearIndex, greaterThan(calls.indexOf('disconnectFromEndpoint')));
+      expect(calls.lastIndexOf('startAdvertising'), greaterThan(clearIndex));
+      expect(calls.lastIndexOf('startDiscovery'), greaterThan(clearIndex));
+    },
+  );
+
+  for (final local in [true, false]) {
+    test(
+      'native pending request is released after ${local ? 'local' : 'remote'} disconnect',
+      () async {
+        final calls = <MethodCall>[];
+        messenger.setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return true;
+        });
+        final transport = AndroidNearbyTransport();
+        addTearDown(transport.dispose);
+        await transport.startAdvertising(displayName: 'RELIO');
+        await transport.requestConnection('peer');
+        await nativeEvent({
+          'method': 'dis.onConnectionInitiated',
+          'endpointId': 'peer',
+          'endpointName': 'RELIO peer',
+          'authenticationToken': 'QA',
+          'isIncomingConnection': false,
+        });
+        if (local) {
+          await transport.disconnect('peer');
+        } else {
+          await nativeEvent({
+            'method': 'dis.onDisconnected',
+            'endpointId': 'peer',
+          });
+        }
+        await transport.acceptConnection('peer');
+        expect(
+          calls.where((call) => call.method == 'acceptConnection'),
+          isEmpty,
+        );
+        await transport.requestConnection('peer');
+        expect(
+          calls.where((call) => call.method == 'requestConnection'),
+          hasLength(2),
+        );
+        await nativeEvent({
+          'method': 'dis.onConnectionInitiated',
+          'endpointId': 'peer',
+          'endpointName': 'RELIO peer',
+          'authenticationToken': 'QA',
+          'isIncomingConnection': false,
+        });
+        await transport.acceptConnection('peer');
+        expect(
+          calls.where((call) => call.method == 'acceptConnection'),
+          hasLength(1),
+        );
+      },
+    );
+  }
 
   test('false result remains distinct from PlatformException', () async {
     messenger.setMockMethodCallHandler(channel, (call) async {

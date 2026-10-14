@@ -2183,6 +2183,11 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
     final existing = await (db.select(
       db.nearbyDevices,
     )..where((row) => row.deviceId.equals(deviceId))).getSingleOrNull();
+    // telemetry เก่าจาก alias/session ก่อนหน้าต้องไม่ทับ battery ที่ใหม่กว่าใน SQLite
+    final acceptBattery =
+        existing?.batteryUpdatedAt == null ||
+        (batteryUpdatedAt != null &&
+            !batteryUpdatedAt.isBefore(existing!.batteryUpdatedAt!));
     final companion = NearbyDevicesCompanion.insert(
       deviceId: deviceId,
       displayName: displayName,
@@ -2195,9 +2200,21 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
       autoReconnectEnabled: Value(existing?.autoReconnectEnabled ?? false),
       publicIdentityKey: Value(existing?.publicIdentityKey),
       publicIdentityFingerprint: Value(existing?.publicIdentityFingerprint),
-      batteryLevel: Value(batteryLevel ?? existing?.batteryLevel),
-      isCharging: Value(isCharging ?? existing?.isCharging),
-      batteryUpdatedAt: Value(batteryUpdatedAt ?? existing?.batteryUpdatedAt),
+      batteryLevel: Value(
+        acceptBattery
+            ? batteryLevel ?? existing?.batteryLevel
+            : existing?.batteryLevel,
+      ),
+      isCharging: Value(
+        acceptBattery
+            ? isCharging ?? existing?.isCharging
+            : existing?.isCharging,
+      ),
+      batteryUpdatedAt: Value(
+        acceptBattery
+            ? batteryUpdatedAt ?? existing?.batteryUpdatedAt
+            : existing?.batteryUpdatedAt,
+      ),
       peerLatitude: Value(peerLatitude ?? existing?.peerLatitude),
       peerLongitude: Value(peerLongitude ?? existing?.peerLongitude),
       peerLocationAccuracy: Value(

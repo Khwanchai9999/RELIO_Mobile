@@ -398,7 +398,10 @@ class BluetoothClassicTransport implements NearbyTransport {
 }
 
 class CompatibilityNearbyTransport
-    implements NearbyTransport, CompatibilityTransport {
+    implements
+        NearbyTransport,
+        CompatibilityTransport,
+        NearbyIdleSessionRecovery {
   CompatibilityNearbyTransport({
     required this.primary,
     required this.compatibility,
@@ -533,6 +536,16 @@ class CompatibilityNearbyTransport
   Future<void> resetSessionOperations() async {
     await primary.resetSessionOperations();
     await compatibility.resetSessionOperations();
+  }
+
+  @override
+  Future<void> clearIdleEndpoints() async {
+    if (_active) {
+      throw StateError('Cannot reset Nearby endpoints during Classic mode.');
+    }
+    if (primary case NearbyIdleSessionRecovery recovery) {
+      await recovery.clearIdleEndpoints();
+    }
   }
 
   @override
