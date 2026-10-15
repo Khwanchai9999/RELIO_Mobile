@@ -189,6 +189,8 @@ void main() {
   test('unanswered incoming request expires and is rejected safely', () async {
     await service.close();
     transport = MockNearbyTransport();
+    // incomingApprovalTimeout ตั้งไว้ 300 ms เพื่อให้ intermediate check ที่ 100 ms
+    // มีระยะห่างจาก timer ที่ปลอดภัยแม้รันบน CI ที่มี CPU load สูง
     service = NearbyService(
       transport: transport,
       messages: repositories.messages,
@@ -196,18 +198,23 @@ void main() {
       identity: RelioDeviceIdentityRepository(database),
       nearbyDevices: repositories.nearbyDevices,
       connectionAttemptTimeout: const Duration(milliseconds: 20),
-      incomingApprovalTimeout: const Duration(milliseconds: 100),
+      incomingApprovalTimeout: const Duration(milliseconds: 300),
     );
     await service.initialize();
     transport.simulateIncomingConnection(id: 'expiring-peer', name: 'Peer');
     await Future<void>.delayed(Duration.zero);
     expect(service.pendingConnectionRequests, contains('expiring-peer'));
 
-    await Future<void>.delayed(const Duration(milliseconds: 40));
+    // ตรวจกลางทาง: ยังไม่ถึง timeout 300 ms จึงต้องยังอยู่ใน pending
+    await Future<void>.delayed(const Duration(milliseconds: 100));
     expect(service.pendingConnectionRequests, contains('expiring-peer'));
     expect(transport.rejectedConnections, isNot(contains('expiring-peer')));
 
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    // รอให้ timer ยิงและ _expireIncomingRequest async chain ทำงานจนครบ
+    // peerErrors ถูก set หลัง await disconnect() ดังนั้นต้องให้ event loop หมุนต่อ
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
     expect(service.pendingConnectionRequests, isEmpty);
     expect(transport.rejectedConnections, contains('expiring-peer'));
     expect(service.peerErrors['expiring-peer'], 'incoming_request_timeout');
