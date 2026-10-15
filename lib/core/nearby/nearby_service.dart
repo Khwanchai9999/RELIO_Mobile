@@ -11,6 +11,7 @@ import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
 import '../identity/owner_context.dart';
 import '../diagnostics/diagnostics_log_service.dart';
+import '../connectivity/runtime_connectivity.dart';
 import '../device/battery_info_service.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
@@ -95,6 +96,7 @@ class _PendingVerifiedIdentity {
 }
 
 class NearbyService extends ChangeNotifier {
+  static final Stopwatch _diagnosticClock = Stopwatch()..start();
   NearbyService({
     required this.transport,
     required this.messages,
@@ -109,6 +111,7 @@ class NearbyService extends ChangeNotifier {
     this.localNotifications,
     this.relayEngine,
     this.diagnostics,
+    this.readRuntimeSnapshot,
     this.batteryInfo,
     PeerIdentityCrypto? identityCrypto,
     this.handshakeTimeout = const Duration(seconds: 30),
@@ -193,7 +196,7 @@ class NearbyService extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _sendApplicationBytes(
+  Future<String?> _sendApplicationBytes(
     RelioPacket packet, {
     String? peerId,
     RelioPacket? replyTo,
@@ -255,7 +258,13 @@ class NearbyService extends ChangeNotifier {
             },
           );
     _owners.requireCurrent(owner);
-    await transport.sendBytes(wire.toBytes(), peerId: peerId);
+    return transport.sendBytes(
+      wire.toBytes(),
+      peerId: peerId,
+      capturePayloadDiagnostics:
+          packet.type == RelioPacketType.mediaMetadata ||
+          packet.type == RelioPacketType.mediaAck,
+    );
   }
 
   final NearbyTransport transport;
@@ -271,6 +280,7 @@ class NearbyService extends ChangeNotifier {
   final LocalNotificationSink? localNotifications;
   final RelayEngine? relayEngine;
   final DiagnosticsLogService? diagnostics;
+  final Future<RuntimeConnectivitySnapshot> Function()? readRuntimeSnapshot;
   final BatteryInfoService? batteryInfo;
   final PeerIdentityCrypto identityCrypto;
   final Duration handshakeTimeout;
@@ -372,6 +382,9 @@ class NearbyService extends ChangeNotifier {
   final Map<String, Future<void>> _incomingMediaOperations = {};
   final Map<String, NearbyFilePayloadEvent> _mediaFilesByPayload = {};
   final Map<String, String> _payloadTransferIds = {};
+  final Map<String, Stopwatch> _mediaPipelineClocks = {};
+  final Map<String, Stopwatch> _mediaAckClocks = {};
+  final Map<String, int> _mediaProgressMilestones = {};
   final Map<String, String> endpointToDeviceId = {};
   final Map<String, String> deviceToEndpointId = {};
   final Map<String, NearbyConnectionState> peerStates = {};
@@ -913,8 +926,12 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _onNativeDiagnostic(NearbyNativeDiagnostic event) {
-    final fields = Map<String, Object?>.from(event.fields);
+    final fields = <String, Object?>{
+      'elapsedMs': _diagnosticClock.elapsedMilliseconds,
+      ...event.fields,
+    };
     final endpointId = fields['endpointId'] as String?;
+    fields.remove('endpointId');
     if (endpointId != null) {
       if (event.name == 'native_request_connection_task_success') {
         _nativePhaseAccepted(
@@ -942,6 +959,7 @@ class NearbyService extends ChangeNotifier {
       nativeCode: fields['rawStatusCode'],
       nativeMessage: fields['rawStatusMessage'] as String?,
       fields: fields,
+      peerIdentifier: endpointId,
     );
   }
 
@@ -1096,6 +1114,18 @@ class NearbyService extends ChangeNotifier {
   }
 
   void _recordSessionStop({required String caller, required String reason}) {
+    diagnostics?.record(
+      'lifecycle',
+      'NEARBY_STOP_REQUESTED',
+      operation: 'stopNearbySession',
+      reason: reason,
+      fields: {
+        'elapsedMs': _diagnosticClock.elapsedMilliseconds,
+        'caller': caller,
+        'activeConnections': connectedPeerCount,
+        'appLifecycleState': appLifecycleState,
+      },
+    );
     diagnostics?.record(
       'lifecycle',
       'nearby_session_stop_requested',
@@ -2606,14 +2636,16 @@ class NearbyService extends ChangeNotifier {
 
   Future<void> sendMediaMessage(
     RelioMessage message,
-    RelioMediaAttachment attachment,
-  ) => _owners
-      .run(() => _sendMediaOwned(message, attachment))
+    RelioMediaAttachment attachment, {
+    Stopwatch? pipelineClock,
+  }) => _owners
+      .run(() => _sendMediaOwned(message, attachment, pipelineClock))
       .catchError((Object _) {});
 
   Future<void> _sendMediaOwned(
     RelioMessage message,
     RelioMediaAttachment attachment,
+    Stopwatch? suppliedPipelineClock,
   ) async {
     if (attachments == null || mediaStorage == null) return;
     final peerId = await _endpointForMessage(message);
@@ -2621,16 +2653,68 @@ class NearbyService extends ChangeNotifier {
       _recordMediaStage(null, 'media_queued_offline');
       return;
     }
+    var sendCheckpoint = 'integrity';
     try {
+      final pipelineClock = suppliedPipelineClock ?? (Stopwatch()..start());
+      _mediaPipelineClocks[attachment.transferId] = pipelineClock;
       _recordMediaStage(
         peerId,
-        'media_send_started',
+        'MEDIA_PIPELINE_STARTED',
         fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+        },
+      );
+      if (readRuntimeSnapshot != null) {
+        try {
+          final snapshot = await readRuntimeSnapshot!();
+          _recordMediaStage(
+            peerId,
+            'MEDIA_ENVIRONMENT_SNAPSHOT',
+            fields: {
+              'traceId': attachment.transferId,
+              'messageId': message.id,
+              'attachmentId': attachment.id,
+              'wifiEnabled': snapshot.wifiEnabled,
+              'bluetoothEnabled': snapshot.bluetoothEnabled,
+              'internetValidated': snapshot.internetValidated,
+              'hasInternetRoute': snapshot.hasInternetRoute,
+              'appLifecycleState': appLifecycleState,
+              'nearbyConnected': connectedPeers.isNotEmpty,
+              'activeNetworkType': 'not_exposed',
+              'wifiAssociated': 'not_exposed',
+            },
+          );
+        } on Object {
+          _recordMediaStage(peerId, 'MEDIA_ENVIRONMENT_SNAPSHOT_UNAVAILABLE');
+        }
+      }
+      _recordMediaStage(
+        peerId,
+        'INTEGRITY_CHECK_START',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
           'mediaType': attachment.mediaType.name,
           'sizeBytes': attachment.byteSize,
         },
       );
+      final hashClock = Stopwatch()..start();
       final digest = await mediaStorage!.sha256ForFile(attachment.localPath);
+      _recordMediaStage(
+        peerId,
+        'INTEGRITY_CHECK_RESULT',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'durationMs': hashClock.elapsedMilliseconds,
+          'result': 'success',
+          'direction': 'TX',
+        },
+      );
       _owners.requireCurrent(_owners.capture());
       final remote = conversations is DriftConversationRepository
           ? await (conversations as DriftConversationRepository)
@@ -2640,11 +2724,35 @@ class NearbyService extends ChangeNotifier {
           !RelioPacket.validPrincipal(remote)) {
         return;
       }
+      sendCheckpoint = 'file';
+      _recordMediaStage(
+        peerId,
+        'FILE_SEND_START',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'payloadType': 'FILE',
+          'direction': 'TX',
+        },
+      );
       final payloadId = await transport.sendFile(
         attachment.localPath,
         peerId: peerId,
       );
       _payloadTransferIds[payloadId] = attachment.transferId;
+      _recordMediaStage(
+        peerId,
+        'FILE_SEND_ACCEPTED',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'payloadId': payloadId,
+          'payloadType': 'FILE',
+          'direction': 'TX',
+        },
+      );
       final packet = RelioPacket.mediaMetadata(
         senderDeviceId: await identity.getDeviceId(),
         senderUserId: message.senderId ?? await _senderUserId(),
@@ -2658,8 +2766,39 @@ class NearbyService extends ChangeNotifier {
         payloadId: payloadId,
         sha256: digest,
       );
-      await _sendApplicationBytes(packet, peerId: peerId);
-      _recordMediaStage(peerId, 'media_metadata_sent');
+      _recordMediaStage(
+        peerId,
+        'METADATA_SEND_START',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'filePayloadId': payloadId,
+          'payloadType': 'BYTES',
+          'direction': 'TX',
+        },
+      );
+      sendCheckpoint = 'metadata';
+      final metadataClock = Stopwatch()..start();
+      final metadataPayloadId = await _sendApplicationBytes(
+        packet,
+        peerId: peerId,
+      );
+      _recordMediaStage(
+        peerId,
+        'METADATA_SEND_SUCCESS',
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'payloadId': metadataPayloadId,
+          'filePayloadId': payloadId,
+          'durationMs': metadataClock.elapsedMilliseconds,
+          'payloadType': 'BYTES',
+          'direction': 'TX',
+        },
+      );
+      _mediaAckClocks[attachment.transferId] = Stopwatch()..start();
       await attachments!.updateProgress(
         attachment.id,
         status: MediaTransferState.transferring,
@@ -2689,6 +2828,25 @@ class NearbyService extends ChangeNotifier {
         });
       }
     } on Object catch (error) {
+      _mediaAckClocks.remove(attachment.transferId);
+      _mediaPipelineClocks.remove(attachment.transferId);
+      _recordMediaStage(
+        peerId,
+        switch (sendCheckpoint) {
+          'integrity' => 'INTEGRITY_CHECK_FAILURE',
+          'file' => 'FILE_FAILURE',
+          _ => 'METADATA_SEND_FAILURE',
+        },
+        severity: 'error',
+        reason: 'media_send_stage_failed',
+        nativeCode: _errorCode(error),
+        fields: {
+          'traceId': attachment.transferId,
+          'messageId': message.id,
+          'attachmentId': attachment.id,
+          'checkpoint': sendCheckpoint,
+        },
+      );
       _recordMediaStage(
         peerId,
         'media_send_failed',
@@ -3297,6 +3455,18 @@ class NearbyService extends ChangeNotifier {
           'remoteRelioDeviceId': endpointToDeviceId[endpointId],
           'sessionId': traceId,
         },
+      );
+      diagnostics?.record(
+        'lifecycle',
+        event.state == NearbyConnectionState.connected
+            ? 'NEARBY_CONNECTED'
+            : event.state == NearbyConnectionState.disconnected
+            ? 'NEARBY_DISCONNECTED'
+            : 'NEARBY_CONNECTION_FAILED',
+        connectionTraceId: traceId,
+        peerIdentifier: endpointId,
+        stateTo: event.state.name,
+        fields: {'appLifecycleState': appLifecycleState},
       );
     }
     if (event.state == NearbyConnectionState.incomingRequest) {
@@ -4539,13 +4709,60 @@ class NearbyService extends ChangeNotifier {
 
   void _onFilePayload(NearbyFilePayloadEvent event) {
     _mediaFilesByPayload[event.payloadId] = event;
-    _recordMediaStage(event.peerId, 'media_file_received');
+    _recordMediaStage(
+      event.peerId,
+      'FILE_PAYLOAD_RECEIVED',
+      fields: {
+        'payloadId': event.payloadId,
+        'payloadType': 'FILE',
+        'direction': 'RX',
+      },
+    );
     _track(_tryCompleteIncomingMedia(event.payloadId));
   }
 
   void _onTransfer(NearbyTransferEvent event) {
     final transferId = _payloadTransferIds[event.payloadId];
+    final percent = event.totalBytes <= 0
+        ? 0
+        : (event.bytesTransferred * 100 ~/ event.totalBytes)
+              .clamp(0, 100)
+              .toInt();
+    final milestone = percent >= 100 ? 100 : (percent ~/ 25) * 25;
+    final lastMilestone = _mediaProgressMilestones[event.payloadId] ?? -1;
+    if (milestone > lastMilestone ||
+        event.status == NearbyTransferStatus.failure ||
+        event.status == NearbyTransferStatus.cancelled ||
+        event.status == NearbyTransferStatus.success) {
+      _mediaProgressMilestones[event.payloadId] = milestone;
+      _recordMediaStage(
+        event.peerId,
+        event.status == NearbyTransferStatus.success
+            ? 'FILE_SUCCESS'
+            : event.status == NearbyTransferStatus.failure ||
+                  event.status == NearbyTransferStatus.cancelled
+            ? 'FILE_FAILURE'
+            : 'FILE_PROGRESS',
+        reason: event.error,
+        fields: {
+          'traceId': transferId,
+          'payloadId': event.payloadId,
+          'payloadType': event.payloadType ?? 'FILE',
+          'direction': event.direction ?? 'TX',
+          'progressPercent': milestone,
+          'bytesTransferred': event.bytesTransferred,
+          'totalBytes': event.totalBytes,
+          'durationMs': event.durationMs,
+        },
+      );
+    }
     if (transferId == null || attachments == null) return;
+    if (event.status == NearbyTransferStatus.success ||
+        event.status == NearbyTransferStatus.failure ||
+        event.status == NearbyTransferStatus.cancelled) {
+      _payloadTransferIds.remove(event.payloadId);
+      _mediaProgressMilestones.remove(event.payloadId);
+    }
     _recordMediaStage(
       event.peerId,
       'media_native_transfer_${event.status.name}',
@@ -4606,6 +4823,26 @@ class NearbyService extends ChangeNotifier {
     try {
       final packet = RelioPacket.fromBytes(event.bytes);
       receivedPacket = packet;
+      if (packet.type == RelioPacketType.mediaMetadata ||
+          packet.type == RelioPacketType.mediaAck) {
+        diagnostics?.record(
+          'native_nearby',
+          'native_payload_received',
+          peerIdentifier: event.peerId,
+          fields: {
+            'elapsedMs': _diagnosticClock.elapsedMilliseconds,
+            'payloadId': event.nativePayloadId,
+            'payloadType': 'BYTES',
+            'direction': 'RX',
+            'bytesTransferred': event.bytes.length,
+            'totalBytes': event.bytes.length,
+            'connectionState': peerStates[event.peerId]?.name ?? 'unknown',
+            'traceId': packet.payload['transferId'],
+            'messageId': packet.payload['messageId'],
+            'attachmentId': packet.payload['attachmentId'],
+          },
+        );
+      }
       final mappedDeviceId = endpointToDeviceId[event.peerId];
       final isIdentityHandshake =
           packet.type == RelioPacketType.identityChallenge ||
@@ -4665,9 +4902,13 @@ class NearbyService extends ChangeNotifier {
         case RelioPacketType.sos:
           await _handleSos(event.peerId, packet);
         case RelioPacketType.mediaMetadata:
-          await _handleMediaMetadata(event.peerId, packet);
+          await _handleMediaMetadata(
+            event.peerId,
+            packet,
+            event.nativePayloadId,
+          );
         case RelioPacketType.mediaAck:
-          await _handleMediaAck(packet);
+          await _handleMediaAck(packet, event.nativePayloadId);
         case RelioPacketType.locationMessage:
           await _handleLocation(event.peerId, packet);
         case RelioPacketType.readReceipt:
@@ -4725,6 +4966,7 @@ class NearbyService extends ChangeNotifier {
   Future<void> _handleMediaMetadata(
     String endpointId,
     RelioPacket packet,
+    String? nativePayloadId,
   ) async {
     final payloadId = packet.payload['payloadId'] as String?;
     if (payloadId == null || payloadId.isEmpty) {
@@ -4733,7 +4975,33 @@ class NearbyService extends ChangeNotifier {
     }
     _mediaMetadataOwners[payloadId] = _owners.capture();
     _mediaMetadataByPayload[payloadId] = packet;
-    _recordMediaStage(endpointId, 'media_metadata_received');
+    _recordMediaStage(
+      endpointId,
+      'METADATA_RECEIVED',
+      fields: {
+        'traceId': packet.payload['transferId'],
+        'messageId': packet.payload['messageId'],
+        'attachmentId': packet.payload['attachmentId'],
+        'payloadId': nativePayloadId,
+        'filePayloadId': payloadId,
+        'payloadType': 'BYTES',
+        'direction': 'RX',
+      },
+    );
+    // คงชื่อ event เดิมไว้ให้ตัวตรวจและชุดทดสอบที่อาศัย diagnostics รุ่นก่อน
+    _recordMediaStage(
+      endpointId,
+      'media_metadata_received',
+      fields: {
+        'traceId': packet.payload['transferId'],
+        'messageId': packet.payload['messageId'],
+        'attachmentId': packet.payload['attachmentId'],
+        'payloadId': nativePayloadId,
+        'filePayloadId': payloadId,
+        'payloadType': 'BYTES',
+        'direction': 'RX',
+      },
+    );
     await _tryCompleteIncomingMedia(payloadId);
   }
 
@@ -4760,6 +5028,18 @@ class NearbyService extends ChangeNotifier {
       return;
     }
     final messageId = packet.payload['messageId']! as String;
+    _recordMediaStage(
+      file.peerId,
+      'METADATA_FILE_MATCHED',
+      fields: {
+        'traceId': packet.payload['transferId'],
+        'messageId': messageId,
+        'attachmentId': packet.payload['attachmentId'],
+        'payloadId': payloadId,
+        'payloadType': 'FILE',
+        'direction': 'RX',
+      },
+    );
     final active = _incomingMediaOperations[messageId];
     if (active != null) {
       await active;
@@ -4820,7 +5100,45 @@ class NearbyService extends ChangeNotifier {
         await _sendMediaAck(file.peerId, packet, 'completed');
         return;
       }
+      final fileCheck = File(file.filePath);
+      final fileExistsClock = Stopwatch()..start();
+      final sourceExists = await fileCheck.exists();
+      _recordMediaStage(
+        file.peerId,
+        'FILE_EXISTS_CHECK',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'exists': sourceExists,
+          'durationMs': fileExistsClock.elapsedMilliseconds,
+        },
+      );
       receiveStage = 'file_validation_and_storage';
+      final persistClock = Stopwatch()..start();
+      _recordMediaStage(
+        file.peerId,
+        'INTEGRITY_CHECK_START',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'direction': 'RX',
+        },
+      );
+      _recordMediaStage(
+        file.peerId,
+        'FILE_PERSIST_START',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'direction': 'RX',
+        },
+      );
       if (diagnostics?.enabled == true) {
         final sourceFile = File(file.filePath);
         final exists = await sourceFile.exists();
@@ -4844,6 +5162,32 @@ class NearbyService extends ChangeNotifier {
         expectedMimeType: payload['mimeType']! as String,
         expectedBytes: (payload['byteSize']! as num).toInt(),
         expectedSha256: payload['sha256'] as String?,
+      );
+      _recordMediaStage(
+        file.peerId,
+        'FILE_PERSIST_RESULT',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'result': 'success',
+          'validationAndStorageDurationMs': persistClock.elapsedMilliseconds,
+          'direction': 'RX',
+        },
+      );
+      _recordMediaStage(
+        file.peerId,
+        'INTEGRITY_CHECK_RESULT',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'result': 'success',
+          'durationMs': persistClock.elapsedMilliseconds,
+          'direction': 'RX',
+        },
       );
       receiveStage = 'conversation_resolution';
       final conversationId = await _conversationIdForDevice(
@@ -4893,10 +5237,27 @@ class NearbyService extends ChangeNotifier {
       }
       _recordMediaStage(
         file.peerId,
-        'media_received_persisted',
+        'ATTACHMENT_LINKED',
         fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'direction': 'RX',
           'mediaType': payload['mediaType'],
           'sizeBytes': payload['byteSize'],
+          'durationMs': persistClock.elapsedMilliseconds,
+        },
+      );
+      _recordMediaStage(
+        file.peerId,
+        'MESSAGE_READY_FOR_UI',
+        fields: {
+          'traceId': payload['transferId'],
+          'messageId': payload['messageId'],
+          'attachmentId': payload['attachmentId'],
+          'payloadId': payloadId,
+          'direction': 'RX',
         },
       );
       // ACK สำเร็จได้เมื่อไฟล์ตรวจผ่าน เก็บแล้ว และผูก attachment กับข้อความแล้วเท่านั้น
@@ -4925,11 +5286,29 @@ class NearbyService extends ChangeNotifier {
     }
   }
 
-  Future<void> _handleMediaAck(RelioPacket packet) async {
+  Future<void> _handleMediaAck(
+    RelioPacket packet,
+    String? nativePayloadId,
+  ) async {
     final transferId = packet.payload['transferId']! as String;
     final attachment = await attachments?.getByTransferId(transferId);
     if (attachment == null) return;
     final status = packet.payload['status']! as String;
+    final ackClock = _mediaAckClocks.remove(transferId);
+    _recordMediaStage(
+      null,
+      'MEDIA_ACK_RECEIVED',
+      fields: {
+        'traceId': transferId,
+        'messageId': attachment.messageId,
+        'attachmentId': attachment.id,
+        'payloadId': nativePayloadId,
+        'payloadType': 'BYTES',
+        'direction': 'RX',
+        'status': status,
+        if (ackClock != null) 'ackWaitMs': ackClock.elapsedMilliseconds,
+      },
+    );
     if (status == 'completed') {
       await attachments?.markCompleted(attachment.id);
       await messages.updateDeliveryStatus(
@@ -4937,6 +5316,18 @@ class NearbyService extends ChangeNotifier {
         DeliveryStatus.delivered,
       );
       acknowledgementCount += 1;
+      final pipelineClock = _mediaPipelineClocks.remove(transferId);
+      _recordMediaStage(
+        null,
+        'MESSAGE_DELIVERED',
+        fields: {
+          'traceId': transferId,
+          'messageId': attachment.messageId,
+          'attachmentId': attachment.id,
+          if (pipelineClock != null)
+            'totalPipelineMs': pipelineClock.elapsedMilliseconds,
+        },
+      );
       _log('ACK media received status=completed');
     } else if (status == 'failed') {
       await attachments?.markFailed(
@@ -4997,7 +5388,24 @@ class NearbyService extends ChangeNotifier {
       status: status,
       errorCode: errorCode,
     );
-    await _sendApplicationBytes(ack, peerId: endpointId, replyTo: source);
+    final nativePayloadId = await _sendApplicationBytes(
+      ack,
+      peerId: endpointId,
+      replyTo: source,
+    );
+    _recordMediaStage(
+      endpointId,
+      'MEDIA_ACK_SENT',
+      fields: {
+        'traceId': payload['transferId'],
+        'messageId': payload['messageId'],
+        'attachmentId': payload['attachmentId'],
+        'payloadId': nativePayloadId,
+        'payloadType': 'BYTES',
+        'status': status,
+        'direction': 'TX',
+      },
+    );
     lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
     _log('ACK media sent status=$status');
@@ -5070,7 +5478,7 @@ class NearbyService extends ChangeNotifier {
       peerIdentifier: endpointId,
       reason: reason,
       nativeCode: nativeCode,
-      fields: fields,
+      fields: {'elapsedMs': _diagnosticClock.elapsedMilliseconds, ...fields},
     );
   }
 

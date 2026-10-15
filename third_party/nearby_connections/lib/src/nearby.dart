@@ -382,14 +382,12 @@ class Nearby {
   /// String str = String.fromCharCodes(payload.bytes);
   /// ```
   ///
-  Future<void> sendBytesPayload(String endpointId, Uint8List bytes) async {
-    return await _channel.invokeMethod(
-      'sendPayload',
-      <String, dynamic>{
-        'endpointId': endpointId,
-        'bytes': bytes,
-      },
-    );
+  Future<int> sendBytesPayload(String endpointId, Uint8List bytes) async {
+    return await _channel.invokeMethod<int>(
+          'sendPayload',
+          <String, dynamic>{'endpointId': endpointId, 'bytes': bytes},
+        ) ??
+        (throw StateError('Native sendPayload returned no payload ID.'));
   }
 
   /// Returns the payloadID as soon as file transfer has begun

@@ -979,11 +979,16 @@ class _TwoPeerTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     if (!connected) throw StateError('peer is not connected');
     other._payloads.add(
       NearbyPayloadEvent(peerId: localEndpointId, bytes: bytes),
     );
+    return null;
   }
 
   @override

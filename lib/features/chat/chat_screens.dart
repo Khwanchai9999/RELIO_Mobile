@@ -372,16 +372,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         : await picker.pickVideo(source: source ?? ImageSource.gallery);
     if (picked == null) return;
     try {
+      final pipelineClock = Stopwatch()..start();
       final deviceId = await dependencies.identity.getDeviceId();
+      final traceId = const Uuid().v4();
+      final messageId = const Uuid().v4();
+      final attachmentId = const Uuid().v4();
+      dependencies.diagnostics.record(
+        'media',
+        'MEDIA_SEND_REQUESTED',
+        fields: {
+          'traceId': traceId,
+          'messageId': messageId,
+          'attachmentId': attachmentId,
+          'mediaType': type.name,
+        },
+      );
       final validation = await dependencies.mediaStorageService.validateFile(
         picked.path,
       );
       final localPath = await dependencies.mediaStorageService.copySelectedFile(
         picked.path,
       );
-      final messageId = const Uuid().v4();
-      final attachmentId = const Uuid().v4();
-      final transferId = const Uuid().v4();
+      final transferId = traceId;
       await dependencies.repositories.attachments.createPending(
         id: attachmentId,
         conversationId: _activeChatId,
@@ -395,6 +407,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         localPath: localPath,
         byteSize: validation.byteSize,
       );
+      dependencies.diagnostics.record(
+        'media',
+        'ATTACHMENT_CREATED',
+        fields: {
+          'traceId': traceId,
+          'messageId': messageId,
+          'attachmentId': attachmentId,
+        },
+      );
       final message = await dependencies.repositories.messages
           .createOutgoingMedia(
             conversationId: _activeChatId,
@@ -406,11 +427,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             attachmentId: attachmentId,
             messageId: messageId,
           );
+      dependencies.diagnostics.record(
+        'media',
+        'LOCAL_MESSAGE_CREATED',
+        fields: {
+          'traceId': traceId,
+          'messageId': messageId,
+          'attachmentId': attachmentId,
+        },
+      );
       final attachment = await dependencies.repositories.attachments.getById(
         attachmentId,
       );
       if (attachment != null) {
-        await dependencies.nearbyService.sendMediaMessage(message, attachment);
+        await dependencies.nearbyService.sendMediaMessage(
+          message,
+          attachment,
+          pipelineClock: pipelineClock,
+        );
       }
     } on Object {
       if (!mounted) return;

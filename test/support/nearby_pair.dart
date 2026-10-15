@@ -741,7 +741,11 @@ class LoopbackTransport implements NearbyTransport, NearbyIdleSessionRecovery {
   }
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     if (!_connected) throw StateError('Loopback endpoint is not connected.');
     final packet = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     sentPackets.add(packet['type'] as String);
@@ -756,6 +760,7 @@ class LoopbackTransport implements NearbyTransport, NearbyIdleSessionRecovery {
         !fileBeforeMetadata) {
       await deliverFiles();
     }
+    return null;
   }
 
   @override

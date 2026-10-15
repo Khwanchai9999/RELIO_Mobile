@@ -203,7 +203,11 @@ class BluetoothClassicTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     final recipients = peerId == null ? _connectedPeers.toList() : [peerId];
     if (recipients.isEmpty) {
       throw const NearbyTransportException('No connected Bluetooth peer.');
@@ -214,6 +218,7 @@ class BluetoothClassicTransport implements NearbyTransport {
         'bytes': bytes,
       });
     }
+    return null;
   }
 
   @override
@@ -617,14 +622,31 @@ class CompatibilityNearbyTransport
       _sourceFor(peerId).disconnect(peerId);
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     if (peerId != null) {
-      return _sourceFor(peerId).sendBytes(bytes, peerId: peerId);
+      return _sourceFor(peerId).sendBytes(
+        bytes,
+        peerId: peerId,
+        capturePayloadDiagnostics: capturePayloadDiagnostics,
+      );
     }
-    await primary.sendBytes(bytes, peerId: peerId);
+    final payloadId = await primary.sendBytes(
+      bytes,
+      peerId: peerId,
+      capturePayloadDiagnostics: capturePayloadDiagnostics,
+    );
     if (_active && _compatibilityPeers.isNotEmpty) {
-      await compatibility.sendBytes(bytes, peerId: peerId);
+      await compatibility.sendBytes(
+        bytes,
+        peerId: peerId,
+        capturePayloadDiagnostics: capturePayloadDiagnostics,
+      );
     }
+    return payloadId;
   }
 
   @override

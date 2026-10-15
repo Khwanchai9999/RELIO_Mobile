@@ -37,6 +37,10 @@ class AndroidNearbyTransport
   final Map<(String, int), Payload> _incomingFiles = {};
   final Map<(String, int), PayloadStatus> _terminalPayloads = {};
   final Set<(String, int)> _handledFiles = {};
+  final Map<(String, int), String> _payloadTypes = {};
+  final Map<(String, int), String> _payloadDirections = {};
+  final Map<(String, int), Stopwatch> _payloadClocks = {};
+  final Map<(String, int), int> _payloadMilestones = {};
   bool _advertising = false;
   bool _discovering = false;
   bool _disposed = false;
@@ -406,17 +410,47 @@ class AndroidNearbyTransport
     _rawConnectionResults.remove(peerId);
     _connectionTraceIds.remove(peerId);
     _retiredEndpoints.add(peerId);
+    _payloadTypes.removeWhere((key, _) => key.$1 == peerId);
+    _payloadDirections.removeWhere((key, _) => key.$1 == peerId);
+    _payloadClocks.removeWhere((key, _) => key.$1 == peerId);
+    _payloadMilestones.removeWhere((key, _) => key.$1 == peerId);
   }
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     final recipients = peerId == null ? _connectedPeers.toList() : [peerId];
     if (recipients.isEmpty) {
       throw const NearbyTransportException('No connected Nearby peer.');
     }
+    final payloadIds = <String>[];
     for (final endpointId in recipients) {
-      await _nearby.sendBytesPayload(endpointId, bytes);
+      final payloadId = await _nearby.sendBytesPayload(endpointId, bytes);
+      if (capturePayloadDiagnostics) {
+        final key = (endpointId, payloadId);
+        _payloadTypes[key] = 'BYTES';
+        _payloadDirections[key] = 'TX';
+        _payloadClocks[key] = Stopwatch()..start();
+        _nativeDiagnostics.add(
+          NearbyNativeDiagnostic(
+            name: 'native_payload_send_started',
+            fields: {
+              'endpointId': endpointId,
+              'payloadId': payloadId,
+              'payloadType': 'BYTES',
+              'direction': 'TX',
+              'totalBytes': bytes.length,
+              'connectionState': 'connected',
+            },
+          ),
+        );
+        payloadIds.add('$payloadId');
+      }
     }
+    return payloadIds.isEmpty ? null : payloadIds.first;
   }
 
   @override
@@ -429,6 +463,22 @@ class AndroidNearbyTransport
     for (final endpointId in recipients) {
       try {
         final payloadId = await _nearby.sendFilePayload(endpointId, filePath);
+        final key = (endpointId, payloadId);
+        _payloadTypes[key] = 'FILE';
+        _payloadDirections[key] = 'TX';
+        _payloadClocks[key] = Stopwatch()..start();
+        _nativeDiagnostics.add(
+          NearbyNativeDiagnostic(
+            name: 'native_payload_send_started',
+            fields: {
+              'endpointId': endpointId,
+              'payloadId': payloadId,
+              'payloadType': 'FILE',
+              'direction': 'TX',
+              'connectionState': 'connected',
+            },
+          ),
+        );
         payloadIds.add(payloadId.toString());
       } on Object catch (error) {
         throw NearbyTransportException('Unable to send file payload: $error');
@@ -486,8 +536,35 @@ class AndroidNearbyTransport
   }
 
   void _payloadReceived(String id, Payload payload) {
+    final key = (id, payload.id);
+    final type = payload.type.name.toUpperCase();
+    if (payload.type != PayloadType.BYTES) {
+      _payloadTypes[key] = type;
+      _payloadDirections[key] = 'RX';
+      _payloadClocks.putIfAbsent(key, () => Stopwatch()..start());
+      _nativeDiagnostics.add(
+        NearbyNativeDiagnostic(
+          name: 'native_payload_received',
+          fields: {
+            'endpointId': id,
+            'payloadId': payload.id,
+            'payloadType': type,
+            'direction': 'RX',
+            'connectionState': _connectedPeers.contains(id)
+                ? 'connected'
+                : 'disconnected',
+          },
+        ),
+      );
+    }
     if (payload.type == PayloadType.BYTES && payload.bytes != null) {
-      _payloads.add(NearbyPayloadEvent(peerId: id, bytes: payload.bytes!));
+      _payloads.add(
+        NearbyPayloadEvent(
+          peerId: id,
+          bytes: payload.bytes!,
+          nativePayloadId: '${payload.id}',
+        ),
+      );
     } else if (payload.type == PayloadType.FILE) {
       final key = (id, payload.id);
       if (_handledFiles.contains(key)) return;
@@ -497,6 +574,13 @@ class AndroidNearbyTransport
   }
 
   void _payloadTransferUpdated(String id, PayloadTransferUpdate update) {
+    final key = (id, update.id);
+    final isTrackedPayload = _payloadTypes.containsKey(key);
+    final clock =
+        _payloadClocks[key] ??
+        (isTrackedPayload
+            ? (_payloadClocks[key] = Stopwatch()..start())
+            : null);
     if (update.status == PayloadStatus.SUCCESS ||
         update.status == PayloadStatus.FAILURE ||
         update.status == PayloadStatus.CANCELED) {
@@ -506,6 +590,51 @@ class AndroidNearbyTransport
         _terminalPayloads.remove(_terminalPayloads.keys.first);
       }
       _completeIncomingFile(key);
+    }
+    final terminal =
+        update.status == PayloadStatus.SUCCESS ||
+        update.status == PayloadStatus.FAILURE ||
+        update.status == PayloadStatus.CANCELED;
+    final payloadType = _payloadTypes[key] ?? 'UNKNOWN';
+    final direction = _payloadDirections[key] ?? 'UNKNOWN';
+    final progress = update.totalBytes <= 0
+        ? 0
+        : (update.bytesTransferred * 100 ~/ update.totalBytes)
+              .clamp(0, 100)
+              .toInt();
+    final milestone = progress >= 100 ? 100 : (progress ~/ 25) * 25;
+    if (_payloadTypes.containsKey(key) &&
+        (terminal || milestone > (_payloadMilestones[key] ?? -1))) {
+      _payloadMilestones[key] = milestone;
+      _nativeDiagnostics.add(
+        NearbyNativeDiagnostic(
+          name: terminal
+              ? 'native_payload_transfer_${update.status.name.toLowerCase()}'
+              : 'native_payload_transfer_progress',
+          fields: {
+            'endpointId': id,
+            'payloadId': update.id,
+            'payloadType': payloadType,
+            'direction': direction,
+            'bytesTransferred': update.bytesTransferred,
+            'totalBytes': update.totalBytes,
+            'progressPercent': milestone,
+            'durationMs': clock?.elapsedMilliseconds,
+            'connectionState': _connectedPeers.contains(id)
+                ? 'connected'
+                : 'disconnected',
+            'failureCode': update.status == PayloadStatus.FAILURE
+                ? 'native_payload_failure'
+                : null,
+          },
+        ),
+      );
+    }
+    if (terminal) {
+      _payloadClocks.remove(key);
+      _payloadTypes.remove(key);
+      _payloadDirections.remove(key);
+      _payloadMilestones.remove(key);
     }
     _transfers.add(
       NearbyTransferEvent(
@@ -520,6 +649,9 @@ class AndroidNearbyTransport
         },
         bytesTransferred: update.bytesTransferred,
         totalBytes: update.totalBytes,
+        payloadType: payloadType,
+        direction: direction,
+        durationMs: clock?.elapsedMilliseconds,
       ),
     );
   }

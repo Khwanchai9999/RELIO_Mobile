@@ -21,6 +21,51 @@ final imageBytes = base64Decode(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'media diagnostics keep transfer and file payload correlation',
+    () async {
+      final pair = await connectedPair();
+      addTearDown(pair.close);
+      final media = await prepareImage(pair);
+      await pair.serviceA.sendMediaMessage(media.message, media.attachment);
+      await waitFor(
+        () async =>
+            (await pair.repositoriesA.messages.getMessage(
+              media.message.id,
+            ))?.status ==
+            DeliveryStatus.delivered,
+      );
+
+      final senderEvents = await readEvents(pair.logsA);
+      final receiverEvents = await readEvents(pair.logsB);
+      final fileSent = senderEvents.firstWhere(
+        (event) => event['event'] == 'FILE_SEND_ACCEPTED',
+      );
+      final metadataSent = senderEvents.firstWhere(
+        (event) => event['event'] == 'METADATA_SEND_SUCCESS',
+      );
+      final fileMatched = receiverEvents.firstWhere(
+        (event) => event['event'] == 'METADATA_FILE_MATCHED',
+      );
+      final messageReady = receiverEvents.firstWhere(
+        (event) => event['event'] == 'MESSAGE_READY_FOR_UI',
+      );
+
+      for (final fields in [
+        fileSent,
+        metadataSent,
+        fileMatched,
+        messageReady,
+      ]) {
+        expect(fields['traceId'], media.attachment.transferId);
+        expect(fields['messageId'], media.message.id);
+        expect(fields['attachmentId'], media.attachment.id);
+      }
+      expect(metadataSent['filePayloadId'], fileSent['payloadId']);
+      expect(fileMatched['payloadId'], fileSent['payloadId']);
+    },
+  );
+
   for (final fileFirst in [false, true]) {
     test(
       'video persists, ACKs and deduplicates with fileFirst=$fileFirst without crossing account scope',

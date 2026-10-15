@@ -146,9 +146,14 @@ List<BondedBluetoothDevice> deduplicateBondedBluetoothDevices(
 }
 
 class NearbyPayloadEvent {
-  const NearbyPayloadEvent({required this.peerId, required this.bytes});
+  const NearbyPayloadEvent({
+    required this.peerId,
+    required this.bytes,
+    this.nativePayloadId,
+  });
   final String peerId;
   final Uint8List bytes;
+  final String? nativePayloadId;
 }
 
 class NearbyFilePayloadEvent {
@@ -175,6 +180,9 @@ class NearbyTransferEvent {
     required this.bytesTransferred,
     required this.totalBytes,
     this.error,
+    this.payloadType,
+    this.direction,
+    this.durationMs,
   });
 
   final String peerId;
@@ -183,6 +191,9 @@ class NearbyTransferEvent {
   final int bytesTransferred;
   final int totalBytes;
   final String? error;
+  final String? payloadType;
+  final String? direction;
+  final int? durationMs;
 }
 
 enum NearbyConnectionState {
@@ -323,7 +334,11 @@ abstract interface class NearbyTransport {
     String? connectionTraceId,
   });
   Future<void> disconnect(String peerId);
-  Future<void> sendBytes(Uint8List bytes, {String? peerId});
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  });
   Future<String> sendFile(String filePath, {String? peerId});
   Future<void> dispose();
 }
@@ -579,12 +594,17 @@ class MockNearbyTransport implements NearbyTransport {
   }
 
   @override
-  Future<void> sendBytes(Uint8List bytes, {String? peerId}) async {
+  Future<String?> sendBytes(
+    Uint8List bytes, {
+    String? peerId,
+    bool capturePayloadDiagnostics = false,
+  }) async {
     if (failSends) {
       throw const NearbyTransportException('Mock send failure.');
     }
     sentPayloads.add(bytes);
     sentPeerIds.add(peerId);
+    return null;
   }
 
   @override

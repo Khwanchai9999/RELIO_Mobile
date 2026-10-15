@@ -51,34 +51,70 @@ void main() {
     expect(entries.single, isNot(contains('QA_VERIFICATION_MATERIAL')));
     expect(entries.single, isNot(contains('authenticationToken')));
     expect(entries.single, contains('"role":"responder"'));
+    await logs.flush();
   });
 
-  test('QA SOS diagnostics expose lifecycle without private payload data', () {
-    final entries = <String>[];
-    final logs = DiagnosticsLogService(qaLogcatSink: entries.add);
+  test(
+    'QA SOS diagnostics expose lifecycle without private payload data',
+    () async {
+      final entries = <String>[];
+      final logs = DiagnosticsLogService(qaLogcatSink: entries.add);
 
-    logs.record(
-      'sos',
-      'outbound_send_failure',
-      reason: 'transport_send_failed',
-      fields: {
-        'stateRevision': 4,
-        'isActive': true,
-        'transport': 'Nearby',
-        'message_body': 'private distress text',
-        'latitude': 14.0,
-        'longitude': 100.0,
-      },
-    );
+      logs.record(
+        'sos',
+        'outbound_send_failure',
+        reason: 'transport_send_failed',
+        fields: {
+          'stateRevision': 4,
+          'isActive': true,
+          'transport': 'Nearby',
+          'message_body': 'private distress text',
+          'latitude': 14.0,
+          'longitude': 100.0,
+        },
+      );
 
-    expect(entries, hasLength(1));
-    expect(entries.single, contains('outbound_send_failure'));
-    expect(entries.single, contains('"stateRevision":4'));
-    expect(entries.single, contains('"isActive":true'));
-    expect(entries.single, isNot(contains('private distress text')));
-    expect(entries.single, isNot(contains('latitude')));
-    expect(entries.single, isNot(contains('longitude')));
-  });
+      expect(entries, hasLength(1));
+      expect(entries.single, contains('outbound_send_failure'));
+      expect(entries.single, contains('"stateRevision":4'));
+      expect(entries.single, contains('"isActive":true'));
+      expect(entries.single, isNot(contains('private distress text')));
+      expect(entries.single, isNot(contains('latitude')));
+      expect(entries.single, isNot(contains('longitude')));
+      await logs.flush();
+    },
+  );
+
+  test(
+    'media payload diagnostics reach QA logcat without private content',
+    () async {
+      final entries = <String>[];
+      final logs = DiagnosticsLogService(qaLogcatSink: entries.add);
+      logs.record(
+        'media',
+        'FILE_SUCCESS',
+        fields: {
+          'traceId': 'transfer-1',
+          'messageId': 'message-1',
+          'attachmentId': 'attachment-1',
+          'payloadId': 42,
+          'payloadType': 'FILE',
+          'direction': 'TX',
+          'bytesTransferred': 2048,
+          'message_body': 'PRIVATE_CHAT_CONTENT',
+          'filePath': r'C:\private\photo.jpg',
+        },
+      );
+
+      expect(entries, hasLength(1));
+      expect(entries.single, contains('FILE_SUCCESS'));
+      expect(entries.single, contains('"payloadType":"FILE"'));
+      expect(entries.single, contains('"payloadId":42'));
+      expect(entries.single, isNot(contains('PRIVATE_CHAT_CONTENT')));
+      expect(entries.single, isNot(contains(r'C:\private\photo.jpg')));
+      await logs.flush();
+    },
+  );
 
   test('export archive redacts secret-like fields and private content', () async {
     final logs = DiagnosticsLogService(

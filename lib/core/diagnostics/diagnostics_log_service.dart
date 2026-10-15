@@ -108,6 +108,7 @@ class DiagnosticsLogService {
       'nearby',
       'sos',
       'native_nearby',
+      'media',
       'lifecycle',
       'trust',
     };

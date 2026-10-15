@@ -157,6 +157,7 @@ class RelioDependencies {
       localNotifications: localNotificationService,
       relayEngine: relayEngine,
       diagnostics: diagnostics,
+      readRuntimeSnapshot: connectivityStatus.readRuntimeSnapshot,
       batteryInfo: this.batteryInfoService,
       connectionAttemptTimeout: connectionAttemptTimeout,
       incomingApprovalTimeout: incomingApprovalTimeout,
@@ -409,6 +410,17 @@ class RelioDependencies {
     final changed = _nearbyForeground != foreground;
     if (changed && foreground) _nearbyRestart = true;
     _nearbyForeground = foreground;
+    if (changed) {
+      diagnostics.record(
+        'lifecycle',
+        foreground ? 'APP_FOREGROUND' : 'APP_BACKGROUND',
+        operation: 'setNearbyForeground',
+        fields: {
+          'appLifecycleState': nearbyService.appLifecycleState,
+          'nearbyConnected': nearbyService.connectedPeers.isNotEmpty,
+        },
+      );
+    }
     if (changed && nearbyService.hasActiveConnectionAttempts) {
       diagnostics.record(
         'lifecycle',
