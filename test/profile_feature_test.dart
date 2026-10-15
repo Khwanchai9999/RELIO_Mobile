@@ -225,7 +225,7 @@ void main() {
       expect(
         await Directory(
           '${appFiles.path}/relio_profile/avatars',
-        ).list().isEmpty,
+        ).list(recursive: true).where((entry) => entry is File).isEmpty,
         isTrue,
       );
     },

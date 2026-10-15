@@ -38,8 +38,12 @@ class RelioPacket {
     required this.senderUserId,
     required this.createdAt,
     required this.payload,
+    this.senderPrincipal,
+    this.recipientPrincipal,
   });
 
+  final String? senderPrincipal;
+  final String? recipientPrincipal;
   final int protocolVersion;
   final String packetId;
   final RelioPacketType type;
@@ -444,12 +448,35 @@ class RelioPacket {
     payload: {'relayPacketId': relayPacketId, 'status': status},
   );
 
+  RelioPacket withPrincipals(
+    String sender,
+    String? recipient, {
+    int? profileRevision,
+  }) => RelioPacket(
+    protocolVersion: protocolVersion,
+    packetId: packetId,
+    type: type,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: createdAt,
+    senderPrincipal: sender,
+    recipientPrincipal: recipient,
+    payload: {...payload, 'profileRevision': ?profileRevision},
+  );
+
+  static bool validPrincipal(String? value) =>
+      value != null &&
+      value.length <= 160 &&
+      RegExp(r'^(account|guest):[a-zA-Z0-9_-]+$').hasMatch(value);
+
   Map<String, Object?> toJson() => {
     'protocolVersion': protocolVersion,
     'packetId': packetId,
     'type': type.name,
     'senderDeviceId': senderDeviceId,
     'senderUserId': senderUserId,
+    'senderPrincipal': ?senderPrincipal,
+    'recipientPrincipal': ?recipientPrincipal,
     'createdAt': createdAt.toUtc().toIso8601String(),
     'payload': payload,
   };
@@ -507,8 +534,23 @@ class RelioPacket {
       senderDeviceId: _requiredString(json, 'senderDeviceId'),
       senderUserId: _requiredString(json, 'senderUserId'),
       createdAt: createdAt,
+      senderPrincipal: json['senderPrincipal'] as String?,
+      recipientPrincipal: json['recipientPrincipal'] as String?,
       payload: payload,
     );
+    if ((packet.senderPrincipal != null &&
+            !validPrincipal(packet.senderPrincipal)) ||
+        (packet.recipientPrincipal != null &&
+            !validPrincipal(packet.recipientPrincipal))) {
+      throw const RelioPacketException('Invalid application principal');
+    }
+    for (final field in ['principalGeneration', 'profileRevision']) {
+      final value = payload[field];
+      if (value != null &&
+          (value is! int || value < 0 || value > 9007199254740991)) {
+        throw const RelioPacketException('Invalid principal metadata revision');
+      }
+    }
     packet._validatePayload();
     return packet;
   }

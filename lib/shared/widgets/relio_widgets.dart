@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/sync/sync_types.dart';
+import '../../core/relio_dependencies.dart';
 import '../../data/models/prototype_models.dart';
 
 class RelioAppBar extends StatelessWidget implements PreferredSizeWidget {
@@ -812,39 +813,53 @@ class _ImageMessagePreview extends StatelessWidget {
   );
 
   Future<void> _showViewer(BuildContext context, String path) async {
+    final owners = context
+        .getInheritedWidgetOfExactType<RelioDependencyScope>()
+        ?.dependencies
+        .repositories
+        .ownerContext;
+    final owner = owners?.capture();
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        insetPadding: const EdgeInsets.all(16),
-        child: Stack(
-          children: [
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.sizeOf(dialogContext).width - 32,
-                maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.8,
-              ),
-              child: InteractiveViewer(
-                child: Image.file(
-                  File(path),
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Padding(
-                    padding: EdgeInsets.all(32),
-                    child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
+      builder: (dialogContext) => StreamBuilder<Object?>(
+        stream: owners?.changes,
+        builder: (context, _) {
+          if (owners != null && !owners.isCurrent(owner!)) {
+            return const SizedBox.shrink();
+          }
+          return Dialog(
+            insetPadding: const EdgeInsets.all(16),
+            child: Stack(
+              children: [
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.sizeOf(dialogContext).width - 32,
+                    maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.8,
+                  ),
+                  child: InteractiveViewer(
+                    child: Image.file(
+                      File(path),
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => const Padding(
+                        padding: EdgeInsets.all(32),
+                        child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: IconButton(
+                    tooltip: 'ปิดรูปภาพ',
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+              ],
             ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: IconButton(
-                tooltip: 'ปิดรูปภาพ',
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                icon: const Icon(Icons.close),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

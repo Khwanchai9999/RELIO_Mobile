@@ -884,7 +884,7 @@ void main() {
   });
 
   test(
-    'legacy custom device name is preserved during default migration',
+    'legacy global name is preserved without assigning it to Guest',
     () async {
       await database
           .into(database.appSettings)
@@ -897,8 +897,14 @@ void main() {
           );
       final identity = RelioDeviceIdentityRepository(database);
 
-      expect(await identity.getDisplayName(), 'ทีมกู้ภัยเดิม');
-      expect(await identity.isUsingDefaultDisplayName(), isFalse);
+      expect(await identity.getDisplayName(), isNot('ทีมกู้ภัยเดิม'));
+      expect(
+        (await (database.select(
+          database.appSettings,
+        )..where((r) => r.key.equals('display_name'))).getSingle()).value,
+        'ทีมกู้ภัยเดิม',
+      );
+      expect(await identity.isUsingDefaultDisplayName(), isTrue);
     },
   );
 
@@ -1062,7 +1068,7 @@ void main() {
         await upgradedRepositories.cloudLinks.listForOwner('account-a'),
         isEmpty,
       );
-      expect(upgraded.schemaVersion, 9);
+      expect(upgraded.schemaVersion, 10);
       await upgraded.close();
     },
   );

@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import '../../app/environment.dart';
 import '../../data/models/prototype_models.dart';
 import '../domain/relio_entities.dart';
+import '../identity/owner_context.dart';
 import '../diagnostics/diagnostics_log_service.dart';
 import '../device/battery_info_service.dart';
 import '../media/media_storage_service.dart';
@@ -118,7 +119,144 @@ class NearbyService extends ChangeNotifier {
            identityCrypto ??
            (transport is MockNearbyTransport
                ? MockPeerIdentityCrypto('mock-local-device')
-               : AndroidPeerIdentityCrypto());
+               : AndroidPeerIdentityCrypto()) {
+    identity.profiles.addListener(_onProfileChanged);
+  }
+
+  OwnerContext get _owners => conversations is DriftConversationRepository
+      ? (conversations as DriftConversationRepository).ownerContext
+      : identity.profiles.owners;
+  final Map<String, String> _remotePrincipals = {};
+  final Map<String, int> _remotePrincipalEpochs = {};
+  final Map<String, int> _remoteProfileRevisions = {};
+  static const _privateTypes = {
+    RelioPacketType.textMessage,
+    RelioPacketType.locationMessage,
+    RelioPacketType.mediaMetadata,
+    RelioPacketType.mediaAck,
+    RelioPacketType.readReceipt,
+  };
+  bool _isPrivate(RelioPacket packet) =>
+      _privateTypes.contains(packet.type) ||
+      (packet.type == RelioPacketType.ack &&
+          (packet.payload['messageId'] != null ||
+              _packetMessageIds.containsKey(packet.payload['packetId'])));
+
+  void _onProfileChanged() {
+    if (connectedPeers.isEmpty) return;
+    _track(
+      _owners
+          .run(() async {
+            for (final peer in connectedPeers.toList()) {
+              await sendHello(peerId: peer.endpointId);
+            }
+          })
+          .catchError((Object _) {}),
+    );
+  }
+
+  Future<String> _activePrincipal() async {
+    final owner = _owners.capture();
+    final id = await identity.profiles.principalFor(owner);
+    _owners.requireCurrent(owner);
+    return id;
+  }
+
+  Future<bool> _validPrivateRecipient(
+    String endpoint,
+    RelioPacket packet,
+  ) async {
+    final owner = _owners.capture();
+    final local = await _activePrincipal();
+    _owners.requireCurrent(owner);
+    if (!RelioPacket.validPrincipal(packet.senderPrincipal) ||
+        packet.recipientPrincipal != local ||
+        _remotePrincipals[endpoint] != packet.senderPrincipal) {
+      return false;
+    }
+    if (packet.type == RelioPacketType.ack ||
+        packet.type == RelioPacketType.mediaAck ||
+        packet.type == RelioPacketType.readReceipt) {
+      final id =
+          packet.payload['messageId'] as String? ??
+          _packetMessageIds[packet.payload['packetId']];
+      final message = id == null ? null : await messages.getMessage(id);
+      if (message?.conversationId == null ||
+          conversations is! DriftConversationRepository) {
+        return false;
+      }
+      final remote = await (conversations as DriftConversationRepository)
+          .remotePrincipalForConversation(message!.conversationId!);
+      _owners.requireCurrent(owner);
+      return remote == packet.senderPrincipal;
+    }
+    return true;
+  }
+
+  Future<void> _sendApplicationBytes(
+    RelioPacket packet, {
+    String? peerId,
+    RelioPacket? replyTo,
+  }) async {
+    final owner = _owners.capture();
+    final local = await _activePrincipal();
+    String? recipient;
+    if (_isPrivate(packet)) {
+      if (peerId == null) throw const OwnerChangedException();
+      if (replyTo != null) {
+        if (!await _validPrivateRecipient(peerId, replyTo)) {
+          throw const OwnerChangedException();
+        }
+        recipient = replyTo.senderPrincipal;
+      } else {
+        final messageId = packet.payload['messageId'] as String?;
+        final message = messageId == null
+            ? null
+            : await messages.getMessage(messageId);
+        if (message?.conversationId == null ||
+            conversations is! DriftConversationRepository) {
+          throw const OwnerChangedException();
+        }
+        recipient = await (conversations as DriftConversationRepository)
+            .remotePrincipalForConversation(message!.conversationId!);
+      }
+      if (!RelioPacket.validPrincipal(recipient) ||
+          _remotePrincipals[peerId] != recipient) {
+        throw const OwnerChangedException();
+      }
+    }
+    final announcement =
+        packet.type == RelioPacketType.hello ||
+        packet.type == RelioPacketType.deviceStatus;
+    final profile = announcement
+        ? await identity.profiles.forPrincipal(local)
+        : null;
+    _owners.requireCurrent(owner);
+    final outgoing = packet.withPrincipals(
+      local,
+      recipient,
+      profileRevision: profile?.revision,
+    );
+    final wire = profile == null
+        ? outgoing
+        : RelioPacket(
+            protocolVersion: outgoing.protocolVersion,
+            packetId: outgoing.packetId,
+            type: outgoing.type,
+            senderDeviceId: outgoing.senderDeviceId,
+            senderUserId: outgoing.senderUserId,
+            createdAt: outgoing.createdAt,
+            senderPrincipal: local,
+            recipientPrincipal: recipient,
+            payload: {
+              ...outgoing.payload,
+              'displayName': profile.displayName,
+              'principalGeneration': owner.generation,
+            },
+          );
+    _owners.requireCurrent(owner);
+    await transport.sendBytes(wire.toBytes(), peerId: peerId);
+  }
 
   final NearbyTransport transport;
   final MessageRepository messages;
@@ -230,6 +368,7 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _pendingConversationFlushes = {};
   final Set<String> _incomingTextMessagesInProgress = {};
   final Map<String, RelioPacket> _mediaMetadataByPayload = {};
+  final Map<String, OwnerSnapshot> _mediaMetadataOwners = {};
   final Map<String, Future<void>> _incomingMediaOperations = {};
   final Map<String, NearbyFilePayloadEvent> _mediaFilesByPayload = {};
   final Map<String, String> _payloadTransferIds = {};
@@ -1608,6 +1747,9 @@ class NearbyService extends ChangeNotifier {
     _pendingIdentityApprovalReasons.remove(endpointId);
     _userInitiatedEndpoints.remove(endpointId);
     _identityChallenges.remove(endpointId);
+    _remotePrincipals.remove(endpointId);
+    _remotePrincipalEpochs.remove(endpointId);
+    _remoteProfileRevisions.remove(endpointId);
     _completedIdentityHandshakes.remove(endpointId);
     _reconnectFingerprintByEndpoint.remove(endpointId);
     _freshEndpointRetryEndpoints.remove(endpointId);
@@ -2362,7 +2504,10 @@ class NearbyService extends ChangeNotifier {
     );
   }
 
-  Future<void> sendMessage(RelioMessage message) async {
+  Future<void> sendMessage(RelioMessage message) =>
+      _owners.run(() => _sendMessageOwned(message)).catchError((Object _) {});
+
+  Future<void> _sendMessageOwned(RelioMessage message) async {
     final packet = RelioPacket.textMessage(
       senderDeviceId: await identity.getDeviceId(),
       senderUserId: message.senderId ?? await _senderUserId(),
@@ -2373,14 +2518,14 @@ class NearbyService extends ChangeNotifier {
     );
     _packetMessageIds[packet.packetId] = message.id;
     final peerId = await _endpointForMessage(message);
-    if (peerId == null && transport is! MockNearbyTransport) {
+    if (peerId == null) {
       lastError = 'ยังไม่พบการเชื่อมต่อของผู้รับข้อความ';
       _log('เก็บข้อความ ${message.id} ไว้ pending: peer ยังไม่ connected');
       notifyListeners();
       return;
     }
     try {
-      await transport.sendBytes(packet.toBytes(), peerId: peerId);
+      await _sendApplicationBytes(packet, peerId: peerId);
       await messages.updateDeliveryStatus(
         message.id,
         DeliveryStatus.nearbySent,
@@ -2398,7 +2543,7 @@ class NearbyService extends ChangeNotifier {
         );
         Future<void>.delayed(const Duration(milliseconds: 120), () {
           (transport as MockNearbyTransport).simulateIncoming(
-            peerId: peerId ?? 'mock-peer',
+            peerId: peerId,
             bytes: ack.toBytes(),
           );
         });
@@ -2409,13 +2554,17 @@ class NearbyService extends ChangeNotifier {
     }
   }
 
-  Future<void> sendLocationMessage(RelioMessage message) async {
+  Future<void> sendLocationMessage(RelioMessage message) => _owners
+      .run(() => _sendLocationMessageOwned(message))
+      .catchError((Object _) {});
+
+  Future<void> _sendLocationMessageOwned(RelioMessage message) async {
     if (message.latitude == null || message.longitude == null) {
       await messages.markFailed(message.id, 'location_unavailable');
       return;
     }
     final peerId = await _endpointForMessage(message);
-    if (peerId == null && transport is! MockNearbyTransport) return;
+    if (peerId == null) return;
     final packet = RelioPacket.locationMessage(
       senderDeviceId: await identity.getDeviceId(),
       senderUserId: message.senderId ?? await _senderUserId(),
@@ -2427,7 +2576,7 @@ class NearbyService extends ChangeNotifier {
     );
     _packetMessageIds[packet.packetId] = message.id;
     try {
-      await transport.sendBytes(packet.toBytes(), peerId: peerId);
+      await _sendApplicationBytes(packet, peerId: peerId);
       await messages.updateDeliveryStatus(
         message.id,
         DeliveryStatus.nearbySent,
@@ -2444,7 +2593,7 @@ class NearbyService extends ChangeNotifier {
         );
         Future<void>.delayed(const Duration(milliseconds: 80), () {
           (transport as MockNearbyTransport).simulateIncoming(
-            peerId: peerId ?? 'mock-peer',
+            peerId: peerId,
             bytes: ack.toBytes(),
           );
         });
@@ -2458,10 +2607,17 @@ class NearbyService extends ChangeNotifier {
   Future<void> sendMediaMessage(
     RelioMessage message,
     RelioMediaAttachment attachment,
+  ) => _owners
+      .run(() => _sendMediaOwned(message, attachment))
+      .catchError((Object _) {});
+
+  Future<void> _sendMediaOwned(
+    RelioMessage message,
+    RelioMediaAttachment attachment,
   ) async {
     if (attachments == null || mediaStorage == null) return;
     final peerId = await _endpointForMessage(message);
-    if (peerId == null && transport is! MockNearbyTransport) {
+    if (peerId == null) {
       _recordMediaStage(null, 'media_queued_offline');
       return;
     }
@@ -2475,6 +2631,15 @@ class NearbyService extends ChangeNotifier {
         },
       );
       final digest = await mediaStorage!.sha256ForFile(attachment.localPath);
+      _owners.requireCurrent(_owners.capture());
+      final remote = conversations is DriftConversationRepository
+          ? await (conversations as DriftConversationRepository)
+                .remotePrincipalForConversation(message.conversationId!)
+          : null;
+      if (_remotePrincipals[peerId] != remote ||
+          !RelioPacket.validPrincipal(remote)) {
+        return;
+      }
       final payloadId = await transport.sendFile(
         attachment.localPath,
         peerId: peerId,
@@ -2493,7 +2658,7 @@ class NearbyService extends ChangeNotifier {
         payloadId: payloadId,
         sha256: digest,
       );
-      await transport.sendBytes(packet.toBytes(), peerId: peerId);
+      await _sendApplicationBytes(packet, peerId: peerId);
       _recordMediaStage(peerId, 'media_metadata_sent');
       await attachments!.updateProgress(
         attachment.id,
@@ -2518,7 +2683,7 @@ class NearbyService extends ChangeNotifier {
         );
         Future<void>.delayed(const Duration(milliseconds: 120), () {
           (transport as MockNearbyTransport).simulateIncoming(
-            peerId: peerId ?? 'mock-peer',
+            peerId: peerId,
             bytes: ack.toBytes(),
           );
         });
@@ -2548,18 +2713,10 @@ class NearbyService extends ChangeNotifier {
     final conversationId = message.conversationId;
     if (conversationId == null) return null;
     final conversation = await conversations.getConversation(conversationId);
-    final deviceId = conversation?.participantId ?? conversationId;
+    if (conversation == null) return null;
+    final deviceId = conversation.participantId;
     final exact = deviceToEndpointId[deviceId];
     if (exact != null) return exact;
-    for (final peer in connectedPeers) {
-      if (peer.endpointId == deviceId ||
-          peer.name == conversation?.displayName) {
-        return peer.endpointId;
-      }
-    }
-    if (transport is MockNearbyTransport && connectedPeers.length == 1) {
-      return connectedPeers.single.endpointId;
-    }
     return null;
   }
 
@@ -2582,7 +2739,7 @@ class NearbyService extends ChangeNotifier {
           connectedPeers.isEmpty) {
         throw const NearbyTransportException('No connected mock peer.');
       }
-      await transport.sendBytes(packet.toBytes(), peerId: peerId);
+      await _sendApplicationBytes(packet, peerId: peerId);
       lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง $description แล้ว');
       notifyListeners();
@@ -3605,6 +3762,9 @@ class NearbyService extends ChangeNotifier {
       peerErrors.remove(endpointId);
       _connectionStartedAt.putIfAbsent(endpointId, DateTime.now().toUtc);
       _identityHandshakeTimeouts.remove(endpointId)?.cancel();
+      _remotePrincipals.remove(endpointId);
+      _remotePrincipalEpochs.remove(endpointId);
+      _remoteProfileRevisions.remove(endpointId);
       _completedIdentityHandshakes.remove(endpointId);
       _identityHandshakeTimeouts[endpointId] = Timer(handshakeTimeout, () {
         if (peerStates[endpointId] == NearbyConnectionState.connected &&
@@ -3982,7 +4142,7 @@ class NearbyService extends ChangeNotifier {
       expiresAt: expiresAt,
     );
     if (!_isCurrentConnectionSession(endpointId, traceId)) return;
-    await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+    await _sendApplicationBytes(packet, peerId: endpointId);
     _recordIdentityStage(endpointId, 'identity_challenge_sent');
   }
 
@@ -4347,22 +4507,12 @@ class NearbyService extends ChangeNotifier {
     _reconnectTimers.remove(fingerprint)?.cancel();
     _nextReconnectAt.remove(fingerprint);
     _reconnectAttemptCounts.remove(fingerprint);
-    final conversationId = await _conversationIdForDevice(deviceId, deviceId);
-    if (!_isCurrentConnectionSession(endpointId, traceId)) return;
-    final conversation = await conversations.ensureConversation(
-      id: conversationId,
-      participantId: deviceId,
-      displayName: payload['displayName']! as String,
-      participantStatus: status,
-    );
-    if (!_isCurrentConnectionSession(endpointId, traceId)) return;
     _completedIdentityHandshakes.add(endpointId);
     _identityHandshakeTimeouts.remove(endpointId)?.cancel();
     peerErrors.remove(endpointId);
     _recordIdentityStage(endpointId, 'identity_handshake_completed');
     _recordIdentityStage(endpointId, 'identity_hello_sent');
     await sendHello(peerId: endpointId);
-    _track(_flushPendingMessages(conversation.id));
     final latest = await sos?.readLatest(
       ownerDeviceId: await identity.getDeviceId(),
     );
@@ -4434,7 +4584,24 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _handlePayload(NearbyPayloadEvent event) async {
+  final Map<String, Future<void>> _applicationPayloadTails = {};
+  Future<void> _handlePayload(NearbyPayloadEvent event) {
+    final owner = _owners.capture();
+    final previous =
+        _applicationPayloadTails[event.peerId] ?? Future<void>.value();
+    final next = previous
+        .then(
+          (_) => _owners.run(() async {
+            _owners.requireCurrent(owner);
+            await _handleOwnedPayload(event);
+          }),
+        )
+        .catchError((Object _) {});
+    _applicationPayloadTails[event.peerId] = next;
+    return next;
+  }
+
+  Future<void> _handleOwnedPayload(NearbyPayloadEvent event) async {
     RelioPacket? receivedPacket;
     try {
       final packet = RelioPacket.fromBytes(event.bytes);
@@ -4469,6 +4636,11 @@ class NearbyService extends ChangeNotifier {
           mappedDeviceId != packet.senderDeviceId) {
         protocolErrorCount += 1;
         _log('ปฏิเสธ ${packet.type.name}: endpoint ยังไม่ผ่าน hello handshake');
+        return;
+      }
+      if (_isPrivate(packet) &&
+          !await _validPrivateRecipient(event.peerId, packet)) {
+        protocolErrorCount++;
         return;
       }
       // Packet อาจมีข้อความ/SOS/พิกัดส่วนตัว จึงเก็บ diagnostics แค่ type กับ ID
@@ -4559,12 +4731,20 @@ class NearbyService extends ChangeNotifier {
       _fail('mediaMetadata ไม่มี payloadId');
       return;
     }
+    _mediaMetadataOwners[payloadId] = _owners.capture();
     _mediaMetadataByPayload[payloadId] = packet;
     _recordMediaStage(endpointId, 'media_metadata_received');
     await _tryCompleteIncomingMedia(payloadId);
   }
 
   Future<void> _tryCompleteIncomingMedia(String payloadId) async {
+    final owner = _mediaMetadataOwners[payloadId];
+    if (owner != null && !_owners.isCurrent(owner)) {
+      _mediaMetadataByPayload.remove(payloadId);
+      _mediaMetadataOwners.remove(payloadId);
+      _mediaFilesByPayload.remove(payloadId);
+      return;
+    }
     final packet = _mediaMetadataByPayload[payloadId];
     final file = _mediaFilesByPayload[payloadId];
     if (packet == null ||
@@ -4599,7 +4779,16 @@ class NearbyService extends ChangeNotifier {
     String payloadId,
     RelioPacket packet,
     NearbyFilePayloadEvent file,
+  ) => _owners
+      .run(() => _persistIncomingMediaOwned(payloadId, packet, file))
+      .catchError((Object _) {});
+
+  Future<void> _persistIncomingMediaOwned(
+    String payloadId,
+    RelioPacket packet,
+    NearbyFilePayloadEvent file,
   ) async {
+    if (!await _validPrivateRecipient(file.peerId, packet)) return;
     final payload = packet.payload;
     var receiveStage = 'source_identity';
     try {
@@ -4731,6 +4920,7 @@ class NearbyService extends ChangeNotifier {
       );
     } finally {
       _mediaMetadataByPayload.remove(payloadId);
+      _mediaMetadataOwners.remove(payloadId);
       _mediaFilesByPayload.remove(payloadId);
     }
   }
@@ -4807,7 +4997,7 @@ class NearbyService extends ChangeNotifier {
       status: status,
       errorCode: errorCode,
     );
-    await transport.sendBytes(ack.toBytes(), peerId: endpointId);
+    await _sendApplicationBytes(ack, peerId: endpointId, replyTo: source);
     lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
     _log('ACK media sent status=$status');
@@ -4845,6 +5035,7 @@ class NearbyService extends ChangeNotifier {
     final showPreview =
         !urgent &&
         await setting.getBool('notification_preview', defaultValue: false);
+    _owners.requireCurrent(_owners.capture());
     await sink.show(
       id: id,
       title: urgent ? 'แจ้งเตือน SOS' : title,
@@ -4919,6 +5110,31 @@ class NearbyService extends ChangeNotifier {
       _log('unapproved peer identity rejected');
       await disconnect(endpointId, reason: 'unapproved_peer');
       return;
+    }
+    if (RelioPacket.validPrincipal(packet.senderPrincipal)) {
+      final epoch = packet.payload['principalGeneration'] as int? ?? 0;
+      final revision = packet.payload['profileRevision'] as int? ?? 0;
+      final previousEpoch = _remotePrincipalEpochs[endpointId];
+      if (previousEpoch != null &&
+          (epoch < previousEpoch ||
+              (epoch == previousEpoch &&
+                  _remotePrincipals[endpointId] != packet.senderPrincipal) ||
+              (epoch == previousEpoch &&
+                  revision < (_remoteProfileRevisions[endpointId] ?? 0)))) {
+        return;
+      }
+      _remotePrincipalEpochs[endpointId] = epoch;
+      _remoteProfileRevisions[endpointId] = revision;
+      _remotePrincipals[endpointId] = packet.senderPrincipal!;
+      if (conversations is DriftConversationRepository) {
+        await (conversations as DriftConversationRepository)
+            .rememberRemotePrincipal(
+              packet.senderDeviceId,
+              packet.senderPrincipal!,
+              packet.payload['displayName']! as String,
+              packet.payload['profileRevision'] as int? ?? 0,
+            );
+      }
     }
     final reportedStatus = _statusFrom(packet.payload['status'] as String);
     final helloStatusAt = DateTime.tryParse(
@@ -5192,7 +5408,7 @@ class NearbyService extends ChangeNotifier {
       messageId: messageId,
       readAt: DateTime.now(),
     );
-    await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+    await _sendApplicationBytes(packet, peerId: endpointId);
     lastSentPacket = _diagnosticPacket(packet);
     _log('ส่ง readReceipt แล้ว');
   }
@@ -5388,7 +5604,7 @@ class NearbyService extends ChangeNotifier {
       acknowledgedPacketId: packet.packetId,
       messageId: packet.payload['messageId'] as String?,
     );
-    await transport.sendBytes(ack.toBytes(), peerId: endpointId);
+    await _sendApplicationBytes(ack, peerId: endpointId, replyTo: packet);
     lastSentPacket = _diagnosticPacket(ack);
     acknowledgementCount += 1;
     _log('ACK sent packet=${packet.type.name}');
@@ -5401,6 +5617,16 @@ class NearbyService extends ChangeNotifier {
     final existing = (await conversations.listConversations())
         .where((conversation) => conversation.participantId == deviceId)
         .toList();
+    if (conversations is DriftConversationRepository) {
+      final repository = conversations as DriftConversationRepository;
+      final remote = await repository.activeRemotePrincipal(deviceId);
+      for (final row in existing) {
+        if (await repository.remotePrincipalForConversation(row.id) == remote) {
+          return row.id;
+        }
+      }
+      return fallback;
+    }
     return existing.isEmpty ? fallback : existing.first.id;
   }
 
@@ -5615,12 +5841,14 @@ class NearbyService extends ChangeNotifier {
 
   @override
   void dispose() {
+    identity.profiles.removeListener(_onProfileChanged);
     super.dispose();
     unawaited(close());
   }
 
   Future<void> close() async {
     if (_closed) return;
+    identity.profiles.removeListener(_onProfileChanged);
     _recordSessionStop(
       caller: 'NearbyService.close',
       reason: 'service_dispose',

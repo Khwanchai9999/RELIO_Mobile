@@ -183,7 +183,7 @@ void main() {
           text: 'ถึงไหนแล้ว',
           timestamp: DateTime.now(),
         );
-        pair.transportB.receivePacket(packet);
+        pair.transportB.receivePacket(await pair.packetFromA(packet));
         await waitFor(
           () =>
               pair.transportB.packets.any((p) => p.type == RelioPacketType.ack),
@@ -274,7 +274,7 @@ void main() {
           await engine.run();
         }
         for (var i = 0; i < 3; i++) {
-          pair.transportB.receivePacket(packet);
+          pair.transportB.receivePacket(await pair.packetFromA(packet));
         }
         await waitFor(
           () =>

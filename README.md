@@ -15,6 +15,17 @@ when a temporary transport connection ends.
 The React prototype is intentionally kept as a separate project. This Flutter
 app lives in `RELIO_Mobile` and does not replace or modify `RELIO_SOS`.
 
+## Identity isolation candidate
+
+SQLite schema 10 separates installation/device trust from account and stable
+Guest principals. Profiles, avatars and logical chats are principal scoped;
+unknown legacy ownership is preserved in quarantine. Private Nearby packets
+require sender and intended recipient principals. Account changes reannounce
+application metadata without resetting device identity or radio lifecycle.
+See [identity architecture and physical QA plan](docs/IDENTITY_ISOLATION_IMPLEMENTATION.md).
+Physical account-switch acceptance remains pending; no phone installation is
+part of this implementation round.
+
 ## Project overview
 
 RELIO addresses the loss of direct communication during an Internet outage.
@@ -90,7 +101,7 @@ physically verified: Build 33 still requires the two-phone checklist.
   endpoint and connection state
 - Chat list and chat room with persistent text, image, video, and location
   message flows
-- Drift database schema version 9 with conversations, persistent unread/read
+- Drift database schema version 10 with principal-owned profiles/conversations, persistent unread/read
   state, trusted/blocked peer metadata, messages, attachments,
   nearby devices, sync queue, SOS events, app settings, relay packets, and
   relay forward history tables

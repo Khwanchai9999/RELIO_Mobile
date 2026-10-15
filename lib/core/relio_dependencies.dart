@@ -89,7 +89,7 @@ class RelioDependencies {
     this.cloudDataSource =
         cloudDataSource ??
         SupabaseCloudDataSource(internetSimulator: this.internetSimulator);
-    authService = CloudAuthService(this.cloudDataSource);
+
     repositories = RelioRepositories(
       this.database,
       ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
@@ -99,9 +99,18 @@ class RelioDependencies {
     );
     this.featureFlags =
         featureFlags ?? createFeatureFlagController(repositories.settings);
-    identity = RelioDeviceIdentityRepository(this.database);
+    repositories.profiles.cloud = this.cloudDataSource;
+    authService = CloudAuthService(
+      this.cloudDataSource,
+      rebind: repositories.profiles.refresh,
+    );
+    identity = RelioDeviceIdentityRepository(
+      this.database,
+      profiles: repositories.profiles,
+    );
     this.profileAvatarRepository =
         profileAvatarRepository ?? ProfileAvatarRepository(this.database);
+    this.profileAvatarRepository.bindProfiles(repositories.profiles);
     this.permissionService =
         permissionService ??
         PermissionService(
@@ -552,6 +561,8 @@ class RelioDependencies {
     appUpdateService.dispose();
     await cloudDataSource.dispose();
     featureFlags.dispose();
+    repositories.profiles.dispose();
+    await repositories.ownerContext.dispose();
     await database.close();
   }
 }

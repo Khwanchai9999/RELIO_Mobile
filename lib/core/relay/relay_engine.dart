@@ -299,8 +299,19 @@ class RelayEngine {
     }
   }
 
-  Future<void> _materialize(RelayEnvelope envelope) async {
+  Future<void> _materialize(RelayEnvelope envelope) =>
+      identity.profiles.owners.run(() => _materializeOwned(envelope));
+
+  Future<void> _materializeOwned(RelayEnvelope envelope) async {
     final packet = envelope.toPayloadPacket();
+    if (packet.type == RelioPacketType.textMessage ||
+        packet.type == RelioPacketType.locationMessage) {
+      final local = (await identity.profiles.current()).principalId;
+      if (!RelioPacket.validPrincipal(packet.senderPrincipal) ||
+          packet.recipientPrincipal != local) {
+        throw StateError('Private relay principal is unavailable');
+      }
+    }
     switch (packet.type) {
       case RelioPacketType.textMessage:
         if (messages == null || conversations == null) {
@@ -310,6 +321,7 @@ class RelayEngine {
         final conversation = await conversations!.ensureConversation(
           id: conversationId,
           participantId: envelope.originDeviceId,
+          remotePrincipalId: packet.senderPrincipal,
           displayName: envelope.originDeviceId,
           participantStatus: DeviceStatus.normal,
         );
@@ -329,6 +341,7 @@ class RelayEngine {
         final conversation = await conversations!.ensureConversation(
           id: conversationId,
           participantId: envelope.originDeviceId,
+          remotePrincipalId: packet.senderPrincipal,
           displayName: envelope.originDeviceId,
           participantStatus: DeviceStatus.normal,
         );

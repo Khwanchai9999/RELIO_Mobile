@@ -212,13 +212,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator migrator) async {
       await migrator.createAll();
       await _createConversationScopes();
+      await _createPrincipalSchema();
     },
     onUpgrade: (Migrator migrator, int from, int to) async {
       if (from < 2) {
@@ -310,6 +311,38 @@ class AppDatabase extends _$AppDatabase {
         );
         await migrator.addColumn(nearbyDevices, nearbyDevices.peerDeviceModel);
       }
+      if (from < 10) {
+        await _createPrincipalSchema();
+        // หลักฐาน owner ต้องไม่ขัดกัน; แถวที่ระบุไม่ได้เก็บไว้ ไม่เปิดให้ Guest
+        await customStatement('''
+          INSERT OR IGNORE INTO conversation_principals
+            (conversation_id, local_principal, remote_principal, remote_device_id, state)
+          SELECT c.id,
+            CASE WHEN s.owner_user_id IS NULL THEN 'legacyUnknown:' || c.id
+              ELSE 'account:' || s.owner_user_id END,
+            COALESCE((SELECT 'account:' || l.peer_user_id FROM cloud_conversation_links l
+              WHERE l.local_conversation_id = c.id AND l.owner_user_id = s.owner_user_id LIMIT 1),
+              'legacy-device:' || c.participant_id),
+            c.participant_id,
+            CASE WHEN s.owner_user_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM cloud_conversation_links l
+                WHERE l.local_conversation_id = c.id AND l.owner_user_id != s.owner_user_id)
+              AND NOT EXISTS (SELECT 1 FROM sync_queue q
+                WHERE (q.entity_id = c.id OR q.entity_id IN
+                  (SELECT m.id FROM messages m WHERE m.conversation_id = c.id))
+                AND (q.owner_user_id IS NULL OR q.owner_user_id != s.owner_user_id))
+              THEN 'active' ELSE 'legacyUnknown' END
+          FROM conversations c LEFT JOIN conversation_scopes s ON s.conversation_id = c.id
+        ''');
+        await customStatement('''
+          INSERT OR IGNORE INTO local_principal_profiles
+            (principal_id, kind, display_name, is_custom, avatar_path, revision, updated_at)
+          SELECT 'legacyUnknown:installation', 'legacyUnknown',
+            COALESCE((SELECT value FROM app_settings WHERE key = 'display_name'), 'Legacy profile'),
+            1, (SELECT value FROM app_settings WHERE key = 'profile_avatar_path'), 0, 0
+          WHERE EXISTS (SELECT 1 FROM app_settings WHERE key IN ('display_name', 'profile_avatar_path'))
+        ''');
+      }
     },
     beforeOpen: (OpeningDetails details) async {
       await customStatement('PRAGMA foreign_keys = ON');
@@ -333,5 +366,51 @@ class AppDatabase extends _$AppDatabase {
       CREATE UNIQUE INDEX IF NOT EXISTS conversation_scopes_source_idx
       ON conversation_scopes(owner_user_id, source_id)
     ''');
+  }
+
+  Future<void> _createPrincipalSchema() async {
+    await customStatement(
+      '''CREATE TABLE IF NOT EXISTS local_principal_profiles (
+      principal_id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('guest','account','legacyUnknown')),
+      cloud_user_id TEXT,
+      display_name TEXT NOT NULL,
+      is_custom INTEGER NOT NULL DEFAULT 0,
+      avatar_path TEXT,
+      revision INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    )''',
+    );
+    await customStatement(
+      '''CREATE TABLE IF NOT EXISTS conversation_principals (
+      conversation_id TEXT PRIMARY KEY NOT NULL REFERENCES conversations(id),
+      local_principal TEXT NOT NULL,
+      remote_principal TEXT NOT NULL,
+      remote_device_id TEXT,
+      state TEXT NOT NULL CHECK(state IN ('active','legacyUnknown'))
+    )''',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS conversation_principal_pair_idx ON conversation_principals(local_principal, remote_principal)',
+    );
+    await customStatement(
+      '''CREATE TABLE IF NOT EXISTS remote_principal_profiles (
+      device_id TEXT NOT NULL, principal_id TEXT NOT NULL,
+      display_name TEXT NOT NULL, revision INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      PRIMARY KEY(device_id, principal_id)
+    )''',
+    );
+    await customStatement(
+      '''CREATE TABLE IF NOT EXISTS nearby_active_principals (
+      device_id TEXT PRIMARY KEY NOT NULL, principal_id TEXT NOT NULL
+    )''',
+    );
+    await customStatement('''CREATE TABLE IF NOT EXISTS profile_sync_snapshots (
+      queue_id TEXT PRIMARY KEY NOT NULL, owner_user_id TEXT NOT NULL,
+      display_name TEXT NOT NULL, revision INTEGER NOT NULL
+    )''');
+    await customStatement('''CREATE TABLE IF NOT EXISTS queue_principals (
+      queue_id TEXT PRIMARY KEY NOT NULL, local_principal TEXT NOT NULL
+    )''');
   }
 }

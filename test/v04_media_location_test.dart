@@ -12,6 +12,8 @@ import 'package:relio_mobile/core/nearby/relio_packet.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
+import 'support/principal_packets.dart';
+
 void main() {
   test('protocol v1 encodes media metadata and location packets', () {
     final media = RelioPacket.mediaMetadata(
@@ -84,6 +86,7 @@ void main() {
       await repos.conversations.ensureConversation(
         id: 'peer',
         participantId: 'peer',
+        remotePrincipalId: 'guest:peer',
         displayName: 'Peer',
         participantStatus: DeviceStatus.normal,
       );
@@ -110,7 +113,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 9);
+      expect(db.schemaVersion, 10);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',
@@ -269,6 +272,7 @@ void main() {
       await repositories.conversations.ensureConversation(
         id: 'video-peer',
         participantId: 'video-peer',
+        remotePrincipalId: 'guest:video-peer',
         displayName: 'Video peer',
         participantStatus: DeviceStatus.offline,
       );
@@ -333,6 +337,7 @@ void main() {
     await repos.conversations.ensureConversation(
       id: 'peer',
       participantId: 'peer-device',
+      remotePrincipalId: 'guest:peer-device',
       displayName: 'Peer',
       participantStatus: DeviceStatus.normal,
     );
@@ -370,6 +375,25 @@ void main() {
       await directory.delete(recursive: true);
     });
     await service.initialize();
+    transport.simulatePeer(
+      id: 'peer-endpoint',
+      name: 'Peer',
+      deviceId: 'peer-device',
+    );
+    await Future<void>.delayed(Duration.zero);
+    await service.connect('peer-endpoint');
+    transport.simulateIncoming(
+      peerId: 'peer-endpoint',
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'peer-device',
+          senderUserId: 'peer-user',
+          displayName: 'Peer',
+        ),
+        repos,
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
 
     await service.sendMediaMessage(message, attachment);
 
@@ -396,6 +420,7 @@ void main() {
       await repositories.conversations.ensureConversation(
         id: 'offline-peer',
         participantId: 'offline-peer-device',
+        remotePrincipalId: 'guest:offline-peer-device',
         displayName: 'Offline peer',
         participantStatus: DeviceStatus.offline,
       );
@@ -448,11 +473,14 @@ void main() {
       await service.connect('offline-peer-endpoint');
       transport.simulateIncoming(
         peerId: 'offline-peer-endpoint',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'offline-peer-device',
-          senderUserId: 'peer-user',
-          displayName: 'Offline peer',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'offline-peer-device',
+            senderUserId: 'peer-user',
+            displayName: 'Offline peer',
+          ),
+          repositories,
+        ),
       );
       final sendDeadline = DateTime.now().add(const Duration(seconds: 2));
       while ((await repositories.messages.getMessage(message.id))?.status !=
@@ -502,11 +530,14 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
       transport.simulateIncoming(
         peerId: 'endpoint-1',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'peer-device',
-          senderUserId: 'peer-user',
-          displayName: 'Peer',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'peer-device',
+            senderUserId: 'peer-user',
+            displayName: 'Peer',
+          ),
+          repos,
+        ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       final packet = RelioPacket.mediaMetadata(
@@ -527,7 +558,10 @@ void main() {
         payloadId: 'native-payload-1',
         filePath: source.path,
       );
-      transport.simulateIncoming(peerId: 'endpoint-1', bytes: packet.toBytes());
+      transport.simulateIncoming(
+        peerId: 'endpoint-1',
+        bytes: await applicationBytes(packet, repos),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 100));
 
       expect(

@@ -51,14 +51,18 @@ void main() {
         await c.close();
       });
 
-      final packet = RelioPacket.textMessage(
-        senderDeviceId: 'device-a',
-        senderUserId: 'account-a',
-        messageId: 'message-a',
-        conversationId: 'conversation-a',
-        text: 'private text',
-        timestamp: DateTime.utc(2026, 1, 1),
-      );
+      final packet =
+          RelioPacket.textMessage(
+            senderDeviceId: 'device-a',
+            senderUserId: 'account-a',
+            messageId: 'message-a',
+            conversationId: 'conversation-a',
+            text: 'private text',
+            timestamp: DateTime.utc(2026, 1, 1),
+          ).withPrincipals(
+            (await a.identity.profiles.current()).principalId,
+            (await c.identity.profiles.current()).principalId,
+          );
       final envelope = RelayEnvelope.fromPayloadPacket(
         packet: packet,
         destinationDeviceId: 'device-c',
@@ -234,16 +238,20 @@ void main() {
     );
     expect(storedSos?.locationAccuracy, 12.5);
 
-    final locationPacket = RelioPacket.locationMessage(
-      senderDeviceId: 'device-a',
-      senderUserId: 'account-a',
-      messageId: 'location-a',
-      conversationId: 'conversation-a',
-      latitude: 13.71,
-      longitude: 100.51,
-      capturedAt: capturedAt,
-      accuracyMeters: 9.0,
-    );
+    final locationPacket =
+        RelioPacket.locationMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'account-a',
+          messageId: 'location-a',
+          conversationId: 'conversation-a',
+          latitude: 13.71,
+          longitude: 100.51,
+          capturedAt: capturedAt,
+          accuracyMeters: 9.0,
+        ).withPrincipals(
+          'guest:device-a',
+          (await node.identity.profiles.current()).principalId,
+        );
     final locationEnvelope = RelayEnvelope.fromPayloadPacket(
       packet: locationPacket,
       destinationDeviceId: 'device-c',

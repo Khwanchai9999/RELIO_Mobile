@@ -87,17 +87,28 @@ class HandshakePair {
     BatteryInfoService? batteryInfoB,
     bool requireBothNativeAccepts = false,
     String? Function()? currentUserIdProviderA,
+    Stream<Object?>? ownerChangesA,
   }) async {
     final databaseA = AppDatabase.memory();
     final databaseB = AppDatabase.memory();
     await _setDeviceId(databaseA, 'device-a');
     await _setDeviceId(databaseB, 'device-b');
-    final identityA = RelioDeviceIdentityRepository(databaseA);
-    final identityB = RelioDeviceIdentityRepository(databaseB);
+    final repositoriesA = RelioRepositories(
+      databaseA,
+      ownerUserIdProvider: currentUserIdProviderA,
+      ownerScopeChanges: ownerChangesA,
+    );
+    final repositoriesB = RelioRepositories(databaseB);
+    final identityA = RelioDeviceIdentityRepository(
+      databaseA,
+      profiles: repositoriesA.profiles,
+    );
+    final identityB = RelioDeviceIdentityRepository(
+      databaseB,
+      profiles: repositoriesB.profiles,
+    );
     await identityA.setDisplayName(displayNameA);
     if (displayNameB != null) await identityB.setDisplayName(displayNameB);
-    final repositoriesA = RelioRepositories(databaseA);
-    final repositoriesB = RelioRepositories(databaseB);
     final cryptoA = TestIdentityCrypto('device-a');
     final cryptoB = TestIdentityCrypto(
       'device-b',
@@ -195,6 +206,12 @@ class HandshakePair {
       logsB: logsB,
     );
   }
+
+  Future<RelioPacket> packetFromA(RelioPacket packet) async =>
+      packet.withPrincipals(
+        (await repositoriesA.profiles.current()).principalId,
+        (await repositoriesB.profiles.current()).principalId,
+      );
 
   Future<void> restartServices() async {
     final oldA = transportA;

@@ -9,6 +9,8 @@ import 'package:relio_mobile/core/notifications/local_notification_service.dart'
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
+import 'support/principal_packets.dart';
+
 void main() {
   late AppDatabase database;
   late RelioRepositories repositories;
@@ -67,24 +69,30 @@ void main() {
       await service.connect('preview-endpoint');
       transport.simulateIncoming(
         peerId: 'preview-endpoint',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'mali-device',
-          senderUserId: 'mali-user',
-          displayName: 'Mali',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'mali-device',
+            senderUserId: 'mali-user',
+            displayName: 'Mali',
+          ),
+          repositories,
+        ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       transport.simulateIncoming(
         peerId: 'preview-endpoint',
-        bytes: RelioPacket.textMessage(
-          senderDeviceId: 'mali-device',
-          senderUserId: 'mali-user',
-          messageId: 'private-message',
-          conversationId: 'mali-device',
-          text: 'Meet at the north gate.',
-          timestamp: DateTime.now(),
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.textMessage(
+            senderDeviceId: 'mali-device',
+            senderUserId: 'mali-user',
+            messageId: 'private-message',
+            conversationId: 'mali-device',
+            text: 'Meet at the north gate.',
+            timestamp: DateTime.now(),
+          ),
+          repositories,
+        ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(notifications.calls.single.title, 'Mali');
@@ -93,14 +101,17 @@ void main() {
       await repositories.settings.setBool('notification_preview', true);
       transport.simulateIncoming(
         peerId: 'preview-endpoint',
-        bytes: RelioPacket.textMessage(
-          senderDeviceId: 'mali-device',
-          senderUserId: 'mali-user',
-          messageId: 'preview-message',
-          conversationId: 'mali-device',
-          text: 'Bring water.',
-          timestamp: DateTime.now(),
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.textMessage(
+            senderDeviceId: 'mali-device',
+            senderUserId: 'mali-user',
+            messageId: 'preview-message',
+            conversationId: 'mali-device',
+            text: 'Bring water.',
+            timestamp: DateTime.now(),
+          ),
+          repositories,
+        ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(notifications.calls.last.title, 'Mali');
@@ -301,6 +312,7 @@ void main() {
     await repositories.conversations.ensureConversation(
       id: 'history-peer',
       participantId: 'history-peer',
+      remotePrincipalId: 'guest:history-peer',
       displayName: 'Peer',
       participantStatus: DeviceStatus.normal,
     );
@@ -326,6 +338,7 @@ void main() {
       await repositories.conversations.ensureConversation(
         id: 'peer-1',
         participantId: 'peer-1',
+        remotePrincipalId: 'guest:peer-1',
         displayName: 'Peer One',
         participantStatus: DeviceStatus.normal,
       );
@@ -335,11 +348,14 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
       transport.simulateIncoming(
         peerId: 'peer-1',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'peer-1',
-          senderUserId: 'peer-1',
-          displayName: 'Peer One',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'peer-1',
+            senderUserId: 'peer-1',
+            displayName: 'Peer One',
+          ),
+          repositories,
+        ),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       final message = await repositories.messages.createOutgoingText(
@@ -368,7 +384,7 @@ void main() {
       );
       transport.simulateIncoming(
         peerId: 'peer-1',
-        bytes: Uint8List.fromList(ack.toBytes()),
+        bytes: Uint8List.fromList(await applicationBytes(ack, repositories)),
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(
@@ -393,7 +409,10 @@ void main() {
         text: 'รับข้อความแล้ว',
         timestamp: DateTime.now(),
       );
-      transport.simulateIncoming(peerId: 'peer-1', bytes: packet.toBytes());
+      transport.simulateIncoming(
+        peerId: 'peer-1',
+        bytes: await applicationBytes(packet, repositories),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(await repositories.messages.listMessages('peer-device'), isEmpty);
 
@@ -402,9 +421,15 @@ void main() {
         senderUserId: 'peer-1',
         displayName: 'Peer One',
       );
-      transport.simulateIncoming(peerId: 'peer-1', bytes: hello.toBytes());
+      transport.simulateIncoming(
+        peerId: 'peer-1',
+        bytes: await applicationBytes(hello, repositories),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 10));
-      transport.simulateIncoming(peerId: 'peer-1', bytes: packet.toBytes());
+      transport.simulateIncoming(
+        peerId: 'peer-1',
+        bytes: await applicationBytes(packet, repositories),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(
         (await repositories.messages.listMessages('peer-device')).single.text,

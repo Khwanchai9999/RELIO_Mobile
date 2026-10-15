@@ -10,6 +10,8 @@ import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 import 'support/recording_notifications.dart';
 
+import 'support/principal_packets.dart';
+
 void main() {
   late AppDatabase database;
   late RelioRepositories repositories;
@@ -94,11 +96,14 @@ void main() {
       await settle();
       transport.simulateIncoming(
         peerId: 'endpoint-sos-visible-loss',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'device-sos-visible-loss',
-          senderUserId: 'sos-user',
-          displayName: 'SOS Peer',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'device-sos-visible-loss',
+            senderUserId: 'sos-user',
+            displayName: 'SOS Peer',
+          ),
+          repositories,
+        ),
       );
       await settle();
       transport.sentPayloads.clear();
@@ -139,12 +144,15 @@ void main() {
 
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'device-peer-a',
-          senderUserId: 'peer-a',
-          displayName: 'Peer A',
-          status: DeviceStatus.rescue,
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'device-peer-a',
+            senderUserId: 'peer-a',
+            displayName: 'Peer A',
+            status: DeviceStatus.rescue,
+          ),
+          repositories,
+        ),
       );
       await settle();
 
@@ -162,6 +170,7 @@ void main() {
       await repositories.conversations.ensureConversation(
         id: 'conversation-a',
         participantId: 'device-peer-a',
+        remotePrincipalId: 'guest:device-peer-a',
         displayName: 'Peer A',
         participantStatus: DeviceStatus.normal,
       );
@@ -171,11 +180,14 @@ void main() {
       await settle();
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'device-peer-a',
-          senderUserId: 'peer-a',
-          displayName: 'Peer A',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'device-peer-a',
+            senderUserId: 'peer-a',
+            displayName: 'Peer A',
+          ),
+          repositories,
+        ),
       );
       await settle();
 
@@ -209,11 +221,11 @@ void main() {
       );
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: incoming.toBytes(),
+        bytes: await applicationBytes(incoming, repositories),
       );
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: incoming.toBytes(),
+        bytes: await applicationBytes(incoming, repositories),
       );
       await settle();
       expect(
@@ -238,11 +250,11 @@ void main() {
       );
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: Uint8List.fromList(ack.toBytes()),
+        bytes: Uint8List.fromList(await applicationBytes(ack, repositories)),
       );
       transport.simulateIncoming(
         peerId: 'endpoint-a',
-        bytes: Uint8List.fromList(ack.toBytes()),
+        bytes: Uint8List.fromList(await applicationBytes(ack, repositories)),
       );
       await settle();
       expect(
@@ -259,6 +271,7 @@ void main() {
       await repositories.conversations.ensureConversation(
         id: peerDeviceId,
         participantId: peerDeviceId,
+        remotePrincipalId: 'guest:$peerDeviceId',
         displayName: 'Queued Peer',
         participantStatus: DeviceStatus.normal,
       );
@@ -282,11 +295,14 @@ void main() {
 
       transport.simulateIncoming(
         peerId: 'endpoint-queued',
-        bytes: RelioPacket.hello(
-          senderDeviceId: peerDeviceId,
-          senderUserId: 'peer-user',
-          displayName: 'Queued Peer',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: peerDeviceId,
+            senderUserId: 'peer-user',
+            displayName: 'Queued Peer',
+          ),
+          repositories,
+        ),
       );
       await settle();
 
@@ -312,11 +328,14 @@ void main() {
       await settle();
       transport.simulateIncoming(
         peerId: 'endpoint-sos-replace',
-        bytes: RelioPacket.hello(
-          senderDeviceId: 'device-sos-replace',
-          senderUserId: 'sos-user',
-          displayName: 'SOS Peer',
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.hello(
+            senderDeviceId: 'device-sos-replace',
+            senderUserId: 'sos-user',
+            displayName: 'SOS Peer',
+          ),
+          repositories,
+        ),
       );
       await settle();
 
@@ -342,7 +361,7 @@ void main() {
       ]) {
         transport.simulateIncoming(
           peerId: 'endpoint-sos-replace',
-          bytes: sos.toBytes(),
+          bytes: await applicationBytes(sos, repositories),
         );
         await settle();
       }
@@ -365,11 +384,14 @@ void main() {
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.hello(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+        ),
+        repositories,
+      ),
     );
     await settle();
     final packet = RelioPacket.sos(
@@ -382,8 +404,14 @@ void main() {
       isActive: true,
       stateRevision: 1,
     );
-    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
-    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: await applicationBytes(packet, repositories),
+    );
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: await applicationBytes(packet, repositories),
+    );
     await settle();
 
     expect((await repositories.sos.getById('sos-1'))?.isActive, isTrue);
@@ -415,7 +443,7 @@ void main() {
     ]) {
       transport.simulateIncoming(
         peerId: 'endpoint-sos',
-        bytes: statusPacket.toBytes(),
+        bytes: await applicationBytes(statusPacket, repositories),
       );
       await settle();
       expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
@@ -427,41 +455,50 @@ void main() {
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.normal,
-        rescueActive: false,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.normal,
+          rescueActive: false,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.sos,
-        rescueActive: true,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.sos,
+          rescueActive: true,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.sos(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        sosId: 'sos-1',
-        message: 'need help',
-        createdAt: packet.createdAt,
-        isActive: false,
-        stateRevision: 2,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-1',
+          message: 'need help',
+          createdAt: packet.createdAt,
+          isActive: false,
+          stateRevision: 2,
+        ),
+        repositories,
+      ),
     );
     await settle();
 
@@ -480,7 +517,10 @@ void main() {
       DeviceStatus.rescue,
     );
 
-    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: await applicationBytes(packet, repositories),
+    );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
     expect(
@@ -490,58 +530,70 @@ void main() {
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.sos(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        sosId: 'sos-1',
-        createdAt: packet.createdAt,
-        isActive: true,
-        stateRevision: 3,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-1',
+          createdAt: packet.createdAt,
+          isActive: true,
+          stateRevision: 3,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.sos,
-        rescueActive: true,
-        updatedAt: DateTime.now().add(const Duration(seconds: 2)),
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.sos,
+          rescueActive: true,
+          updatedAt: DateTime.now().add(const Duration(seconds: 2)),
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.sos,
-        rescueActive: false,
-        updatedAt: DateTime.now().add(const Duration(seconds: 1)),
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.sos,
+          rescueActive: false,
+          updatedAt: DateTime.now().add(const Duration(seconds: 1)),
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.sos);
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.sos(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        sosId: 'sos-1',
-        createdAt: packet.createdAt,
-        isActive: false,
-        stateRevision: 4,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-1',
+          createdAt: packet.createdAt,
+          isActive: false,
+          stateRevision: 4,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
@@ -552,14 +604,17 @@ void main() {
 
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.normal,
-        rescueActive: false,
-        updatedAt: DateTime.now().add(const Duration(seconds: 3)),
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.normal,
+          rescueActive: false,
+          updatedAt: DateTime.now().add(const Duration(seconds: 3)),
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
@@ -567,17 +622,23 @@ void main() {
     // Duplicate clear is idempotent; an old active SOS cannot resurrect it.
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.sos(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        sosId: 'sos-1',
-        createdAt: packet.createdAt,
-        isActive: false,
-        stateRevision: 4,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.sos(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          sosId: 'sos-1',
+          createdAt: packet.createdAt,
+          isActive: false,
+          stateRevision: 4,
+        ),
+        repositories,
+      ),
     );
-    transport.simulateIncoming(peerId: 'endpoint-sos', bytes: packet.toBytes());
+    transport.simulateIncoming(
+      peerId: 'endpoint-sos',
+      bytes: await applicationBytes(packet, repositories),
+    );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
     expect(
@@ -591,13 +652,16 @@ void main() {
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.hello(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.normal,
-        rescueActive: false,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.normal,
+          rescueActive: false,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
@@ -608,13 +672,16 @@ void main() {
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.hello(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.rescue,
-        rescueActive: true,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.rescue,
+          rescueActive: true,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.rescue);
@@ -636,13 +703,16 @@ void main() {
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-sos',
-      bytes: RelioPacket.hello(
-        senderDeviceId: 'device-sos',
-        senderUserId: 'sos-user',
-        displayName: 'SOS Peer',
-        status: DeviceStatus.sos,
-        rescueActive: false,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'device-sos',
+          senderUserId: 'sos-user',
+          displayName: 'SOS Peer',
+          status: DeviceStatus.sos,
+          rescueActive: false,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-sos'], DeviceStatus.normal);
@@ -662,11 +732,14 @@ void main() {
         await settle();
         transport.simulateIncoming(
           peerId: endpoint,
-          bytes: RelioPacket.hello(
-            senderDeviceId: deviceId,
-            senderUserId: '$deviceId-user',
-            displayName: deviceId,
-          ).toBytes(),
+          bytes: await applicationBytes(
+            RelioPacket.hello(
+              senderDeviceId: deviceId,
+              senderUserId: '$deviceId-user',
+              displayName: deviceId,
+            ),
+            repositories,
+          ),
         );
         await settle();
       }
@@ -702,11 +775,14 @@ void main() {
 
       transport.simulateIncoming(
         peerId: 'classic:realme-address',
-        bytes: RelioPacket.ack(
-          senderDeviceId: 'device-realme',
-          senderUserId: 'device-realme-user',
-          acknowledgedPacketId: sentPacket.packetId,
-        ).toBytes(),
+        bytes: await applicationBytes(
+          RelioPacket.ack(
+            senderDeviceId: 'device-realme',
+            senderUserId: 'device-realme-user',
+            acknowledgedPacketId: sentPacket.packetId,
+          ),
+          repositories,
+        ),
       );
       await settle();
 
@@ -729,22 +805,28 @@ void main() {
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-rescue',
-      bytes: RelioPacket.hello(
-        senderDeviceId: 'device-rescue',
-        senderUserId: 'rescue-user',
-        displayName: 'Rescue Peer',
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'device-rescue',
+          senderUserId: 'rescue-user',
+          displayName: 'Rescue Peer',
+        ),
+        repositories,
+      ),
     );
     await settle();
 
     transport.simulateIncoming(
       peerId: 'endpoint-rescue',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-rescue',
-        senderUserId: 'rescue-user',
-        displayName: 'Rescue Peer',
-        status: DeviceStatus.rescue,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-rescue',
+          senderUserId: 'rescue-user',
+          displayName: 'Rescue Peer',
+          status: DeviceStatus.rescue,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-rescue'], DeviceStatus.rescue);
@@ -755,12 +837,15 @@ void main() {
 
     transport.simulateIncoming(
       peerId: 'endpoint-rescue',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-rescue',
-        senderUserId: 'rescue-user',
-        displayName: 'Rescue Peer',
-        status: DeviceStatus.normal,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-rescue',
+          senderUserId: 'rescue-user',
+          displayName: 'Rescue Peer',
+          status: DeviceStatus.normal,
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-rescue'], DeviceStatus.normal);
@@ -772,26 +857,32 @@ void main() {
     final newestStatusAt = DateTime.now().add(const Duration(seconds: 2));
     transport.simulateIncoming(
       peerId: 'endpoint-rescue',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-rescue',
-        senderUserId: 'rescue-user',
-        displayName: 'Rescue Peer',
-        status: DeviceStatus.normal,
-        rescueActive: false,
-        updatedAt: newestStatusAt,
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-rescue',
+          senderUserId: 'rescue-user',
+          displayName: 'Rescue Peer',
+          status: DeviceStatus.normal,
+          rescueActive: false,
+          updatedAt: newestStatusAt,
+        ),
+        repositories,
+      ),
     );
     await settle();
     transport.simulateIncoming(
       peerId: 'endpoint-rescue',
-      bytes: RelioPacket.deviceStatus(
-        senderDeviceId: 'device-rescue',
-        senderUserId: 'rescue-user',
-        displayName: 'Rescue Peer',
-        status: DeviceStatus.rescue,
-        rescueActive: true,
-        updatedAt: newestStatusAt.subtract(const Duration(seconds: 1)),
-      ).toBytes(),
+      bytes: await applicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-rescue',
+          senderUserId: 'rescue-user',
+          displayName: 'Rescue Peer',
+          status: DeviceStatus.rescue,
+          rescueActive: true,
+          updatedAt: newestStatusAt.subtract(const Duration(seconds: 1)),
+        ),
+        repositories,
+      ),
     );
     await settle();
     expect(service.peerStatuses['device-rescue'], DeviceStatus.normal);
@@ -801,9 +892,29 @@ void main() {
     await repositories.conversations.ensureConversation(
       id: 'peer-fail',
       participantId: 'peer-fail',
+      remotePrincipalId: 'guest:peer-fail',
       displayName: 'Peer Fail',
       participantStatus: DeviceStatus.normal,
     );
+    transport.simulatePeer(
+      id: 'fail-endpoint',
+      name: 'Peer Fail',
+      deviceId: 'peer-fail',
+    );
+    await settle();
+    await service.connect('fail-endpoint');
+    transport.simulateIncoming(
+      peerId: 'fail-endpoint',
+      bytes: await applicationBytes(
+        RelioPacket.hello(
+          senderDeviceId: 'peer-fail',
+          senderUserId: 'peer-fail',
+          displayName: 'Peer Fail',
+        ),
+        repositories,
+      ),
+    );
+    await settle();
     transport.failSends = true;
     final message = await repositories.messages.createOutgoingText(
       conversationId: 'peer-fail',

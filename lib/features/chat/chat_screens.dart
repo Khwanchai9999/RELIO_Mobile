@@ -108,6 +108,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _resolvedChatId;
   bool _routeResolutionStarted = false;
   bool _routeResolved = false;
+  StreamSubscription<Object?>? _ownerSubscription;
+  StreamSubscription<List<RelioConversation>>? _titleSubscription;
+  int _routeGeneration = 0;
 
   String get _activeChatId => _resolvedChatId ?? widget.chatId;
 
@@ -125,6 +128,33 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _dependencies = RelioDependencyScope.of(context);
     if (_routeResolutionStarted) return;
     _routeResolutionStarted = true;
+    _ownerSubscription = _dependencies!.repositories.ownerContext.changes
+        .listen((_) {
+          if (!mounted) return;
+          _routeGeneration++;
+          _dependencies!.nearbyService.setActiveConversation(null);
+          setState(() {
+            _resolvedChatId = null;
+            _persistedPeerName = null;
+            _persistedPeerDeviceId = null;
+            _demoDevice = null;
+            _routeResolved = false;
+            _messagesStream = Stream.value(const []);
+            _composer.clear();
+          });
+          unawaited(_resolveChatRoute());
+        });
+    _titleSubscription = _dependencies!.repositories.conversations
+        .watchConversations()
+        .listen((rows) {
+          if (!mounted || !_routeResolved) return;
+          for (final row in rows) {
+            if (row.id == _resolvedChatId &&
+                row.displayName != _persistedPeerName) {
+              setState(() => _persistedPeerName = row.displayName);
+            }
+          }
+        });
     _messagesStream = _dependencies!.repositories.messages.watchMessages(
       widget.chatId,
     );
@@ -133,9 +163,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _resolveChatRoute() async {
     final dependencies = _dependencies!;
-    final conversation = await dependencies.repositories.conversations
-        .resolveRouteTarget(widget.chatId);
-    if (!mounted) return;
+    final generation = _routeGeneration;
+    final owner = dependencies.repositories.ownerContext.capture();
+    RelioConversation conversation;
+    try {
+      conversation = await dependencies.repositories.conversations
+          .resolveRouteTarget(widget.chatId);
+    } on Object {
+      return;
+    }
+    if (!mounted ||
+        generation != _routeGeneration ||
+        !dependencies.repositories.ownerContext.isCurrent(owner)) {
+      return;
+    }
     setState(() {
       _resolvedChatId = conversation.id;
       _routeResolved = true;
@@ -149,7 +190,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     await _markConversationRead();
   }
 
-  Future<void> _markConversationRead() async {
+  Future<void> _markConversationRead() => RelioDependencyScope.of(context)
+      .repositories
+      .ownerContext
+      .run(() => _markConversationReadOwned())
+      .catchError((Object _) {});
+
+  Future<void> _markConversationReadOwned() async {
     final dependencies = _dependencies;
     if (dependencies == null) return;
     final conversation = await dependencies.repositories.conversations
@@ -172,12 +219,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void dispose() {
     _dependencies?.nearbyService.setActiveConversation(null);
+    _ownerSubscription?.cancel();
+    _titleSubscription?.cancel();
     _composer.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _send() async {
+  Future<void> _send() => RelioDependencyScope.of(
+    context,
+  ).repositories.ownerContext.run(() => _sendOwned()).catchError((Object _) {});
+
+  Future<void> _sendOwned() async {
     if (!_routeResolved) return;
     final text = _composer.text.trim();
     if (text.isEmpty) return;
@@ -244,7 +297,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  Future<void> _linkCloudConversation() async {
+  Future<void> _linkCloudConversation() => RelioDependencyScope.of(context)
+      .repositories
+      .ownerContext
+      .run(() => _linkCloudConversationOwned())
+      .catchError((Object _) {});
+
+  Future<void> _linkCloudConversationOwned() async {
     final dependencies = _dependencies;
     if (!_routeResolved ||
         dependencies == null ||
@@ -299,7 +358,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  Future<void> _pickMedia(MessageType type, {ImageSource? source}) async {
+  Future<void> _pickMedia(MessageType type, {ImageSource? source}) =>
+      RelioDependencyScope.of(context).repositories.ownerContext
+          .run(() => _pickMediaOwned(type, source: source))
+          .catchError((Object _) {});
+
+  Future<void> _pickMediaOwned(MessageType type, {ImageSource? source}) async {
     if (!_routeResolved) return;
     final dependencies = RelioDependencyScope.of(context);
     final picker = ImagePicker();
@@ -356,7 +420,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
-  Future<void> _sendLocation() async {
+  Future<void> _sendLocation() => RelioDependencyScope.of(context)
+      .repositories
+      .ownerContext
+      .run(() => _sendLocationOwned())
+      .catchError((Object _) {});
+
+  Future<void> _sendLocationOwned() async {
     if (!_routeResolved) return;
     final dependencies = RelioDependencyScope.of(context);
     final result = await dependencies.locationService.getCurrentOrLastKnown();
@@ -473,6 +543,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         children: [
           Expanded(
             child: StreamBuilder<List<RelioMessage>>(
+              key: ValueKey(_routeGeneration),
               stream: _messagesStream,
               builder: (context, snapshot) {
                 final messages = snapshot.data ?? const <RelioMessage>[];

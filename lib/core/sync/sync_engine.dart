@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:drift/drift.dart' show Variable;
+import '../identity/owner_context.dart';
 
 import '../diagnostics/diagnostics_log_service.dart';
 import '../cloud/cloud_data_source.dart';
@@ -132,6 +134,7 @@ class SyncEngine {
   int _pullRetryCount = 0;
   bool _started = false;
   bool _disposed = false;
+  bool _runAgainForOwner = false;
 
   SyncEngineSnapshot get snapshot => _snapshot;
 
@@ -156,7 +159,13 @@ class SyncEngine {
     if (_runOperation != null) return _runOperation!;
     final operation = _run(adoptUnownedItems: adoptUnownedItems);
     _runOperation = operation;
-    return operation.whenComplete(() => _runOperation = null);
+    return operation.whenComplete(() {
+      _runOperation = null;
+      if (_runAgainForOwner && _started && !_disposed) {
+        _runAgainForOwner = false;
+        scheduleMicrotask(_scheduleRun);
+      }
+    });
   }
 
   Future<void> retryFailed(String id) async {
@@ -179,6 +188,7 @@ class SyncEngine {
     required String localConversationId,
     required String peerUserId,
   }) async {
+    final epoch = repositories.ownerContext.capture();
     final owner = cloud.currentIdentity;
     if (!_isCloudReady || owner == null) {
       throw const CloudException(
@@ -201,6 +211,7 @@ class SyncEngine {
     final remote = await cloud.createOrGetDirectConversation(
       peerUserId: peerUserId.trim(),
     );
+    repositories.ownerContext.requireCurrent(epoch);
     final link = CloudConversationBinding(
       localConversationId: localConversationId,
       cloudConversationId: remote.id,
@@ -245,6 +256,19 @@ class SyncEngine {
   }
 
   Future<void> _run({required bool adoptUnownedItems}) async {
+    try {
+      await repositories.ownerContext.run(
+        () => _runOwned(adoptUnownedItems: adoptUnownedItems),
+      );
+    } on OwnerChangedException {
+      _runAgainForOwner = true;
+      _pullRetryTimer?.cancel();
+      _pullRetryTimer = null;
+      await _setWaitingForCloud();
+    }
+  }
+
+  Future<void> _runOwned({required bool adoptUnownedItems}) async {
     if (_disposed) return;
     if (!_internetSimulator.internetAvailable || !_isCloudReady) {
       await _setWaitingForCloud();
@@ -268,6 +292,8 @@ class SyncEngine {
       _pullRetryCount = 0;
       _pullRetryTimer?.cancel();
       _pullRetryTimer = null;
+    } on OwnerChangedException {
+      rethrow;
     } on Object catch (error) {
       hadFailure = true;
       _schedulePullRetry();
@@ -695,11 +721,18 @@ class SyncEngine {
     );
   }
 
-  Future<void> _importAndPull(String userId) async {
+  Future<void> _importAndPull(String userId) =>
+      repositories.ownerContext.run(() => _importAndPullOwned(userId));
+
+  Future<void> _importAndPullOwned(String userId) async {
+    final owner = repositories.ownerContext.capture();
     if (!_isCloudReady || cloud.currentIdentity?.userId != userId) return;
     final remoteConversations = await cloud.listMyDirectConversations();
+    repositories.ownerContext.requireCurrent(owner);
     var links = await repositories.cloudLinks.listForOwner(userId);
+    repositories.ownerContext.requireCurrent(owner);
     for (final remote in remoteConversations) {
+      repositories.ownerContext.requireCurrent(owner);
       if (remote.id.isEmpty ||
           remote.participantId.isEmpty ||
           remote.participantId == userId) {
@@ -716,11 +749,13 @@ class SyncEngine {
           .ensureConversation(
             id: remote.id,
             participantId: remote.participantId,
+            remotePrincipalId: 'account:${remote.participantId}',
             displayName: remote.displayName.isEmpty
                 ? 'ผู้ใช้ RELIO'
                 : remote.displayName,
             participantStatus: DeviceStatus.offline,
           );
+      repositories.ownerContext.requireCurrent(owner);
       final link = CloudConversationBinding(
         localConversationId: localConversation.id,
         cloudConversationId: remote.id,
@@ -738,6 +773,7 @@ class SyncEngine {
           conversationId: link.cloudConversationId,
           cursor: link.messageCursor,
         );
+        repositories.ownerContext.requireCurrent(owner);
         if (page.messages.isEmpty) break;
         for (final remote in page.messages) {
           if (remote.conversationId != link.cloudConversationId ||
@@ -761,6 +797,7 @@ class SyncEngine {
               updatedAt: remote.updatedAt,
               currentUserId: userId,
             );
+            repositories.ownerContext.requireCurrent(owner);
             if (inserted && remote.senderId != userId) {
               await _notifyCloudMessage(link, remote);
             }
@@ -791,6 +828,7 @@ class SyncEngine {
           afterMessageId: link.receiptCursorMessageId,
           afterReaderId: link.receiptCursorReaderId,
         );
+        repositories.ownerContext.requireCurrent(owner);
         if (receipts.isEmpty) break;
         for (final receipt in receipts) {
           if (receipt.readerId != userId &&
@@ -880,7 +918,28 @@ class SyncEngine {
     }
     switch (operation) {
       case SyncOperation.profileUpsert:
-        await cloud.upsertProfile(displayName: await identity.getDisplayName());
+        final epoch = repositories.ownerContext.capture();
+        final row = await repositories.database
+            .customSelect(
+              'SELECT display_name FROM profile_sync_snapshots WHERE queue_id=? AND owner_user_id=?',
+              variables: [
+                Variable.withString(item.id),
+                Variable.withString(userId),
+              ],
+            )
+            .getSingleOrNull();
+        repositories.ownerContext.requireCurrent(epoch);
+        if (row == null || epoch.userId != userId) {
+          throw const SyncOwnershipException('missing_profile_owner_snapshot');
+        }
+        final current = await repositories.profiles.forPrincipal(
+          'account:$userId',
+        );
+        repositories.ownerContext.requireCurrent(epoch);
+        if (current.displayName != row.read<String>('display_name')) return;
+        await cloud.upsertProfile(
+          displayName: row.read<String>('display_name'),
+        );
       case SyncOperation.conversationUpsert:
         final conversation = await repositories.conversations.getConversation(
           item.entityId,
@@ -1162,6 +1221,7 @@ class SyncEngine {
   }
 
   void _schedulePullRetry() {
+    if (_disposed) return;
     _pullRetryTimer?.cancel();
     final delay = Duration(seconds: 15 + (5 * _pullRetryCount.clamp(0, 9)));
     _pullRetryCount++;
@@ -1288,6 +1348,11 @@ class SyncEngine {
     _pullRetryTimer?.cancel();
     for (final subscription in _subscriptions) {
       await subscription.cancel();
+    }
+    try {
+      await _runOperation;
+    } on Object {
+      /* owner-bound work may abort on disposal */
     }
     await _stateController.close();
   }

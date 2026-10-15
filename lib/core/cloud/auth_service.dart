@@ -21,7 +21,8 @@ abstract interface class AuthService {
 
 // ให้ UI เรียก Auth ผ่าน interface เดียว โดยไม่ผูกกับ Supabase SDK
 class CloudAuthService implements AuthService {
-  CloudAuthService(this.source);
+  CloudAuthService(this.source, {this.rebind});
+  final Future<void> Function()? rebind;
   final CloudDataSource source;
   @override
   AuthState get state => source.authState;
@@ -34,20 +35,39 @@ class CloudAuthService implements AuthService {
     required String email,
     required String password,
     String? displayName,
-  }) => source.register(
-    email: email,
-    password: password,
-    displayName: displayName,
-  );
+  }) async {
+    final result = await source.register(
+      email: email,
+      password: password,
+      displayName: displayName,
+    );
+    await rebind?.call();
+    return result;
+  }
+
   @override
   Future<CloudIdentity> signIn({
     required String email,
     required String password,
-  }) => source.signIn(email: email, password: password);
+  }) async {
+    final result = await source.signIn(email: email, password: password);
+    await rebind?.call();
+    return result;
+  }
+
   @override
-  Future<void> signOut() => source.signOut();
+  Future<void> signOut() async {
+    await source.signOut();
+    await rebind?.call();
+  }
+
   @override
-  Future<CloudIdentity?> restoreSession() => source.restoreSession();
+  Future<CloudIdentity?> restoreSession() async {
+    final result = await source.restoreSession();
+    await rebind?.call();
+    return result;
+  }
+
   @override
   Future<void> deleteAccount() => source.deleteMyAccount();
 }

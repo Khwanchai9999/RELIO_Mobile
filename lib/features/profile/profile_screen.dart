@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../app/environment.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/cloud/cloud_models.dart';
+import '../../core/repositories/principal_profile_repository.dart';
 import '../../core/relio_dependencies.dart';
 import '../../core/repositories/profile_avatar_repository.dart';
 import '../../shared/widgets/relio_widgets.dart';
@@ -25,6 +26,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<String>? _localDisplayNameFuture;
   Future<bool>? _usingDefaultNameFuture;
   Future<String?>? _avatarPathFuture;
+  PrincipalProfileRepository? _profiles;
+  int _profileRevision = 0;
   bool _busy = false;
   bool _avatarBusy = false;
 
@@ -32,10 +35,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final dependencies = RelioDependencyScope.of(context);
+    if (_profiles != dependencies.repositories.profiles) {
+      _profiles?.removeListener(_refreshProfile);
+      _profiles = dependencies.repositories.profiles;
+      _profiles!.addListener(_refreshProfile);
+    }
     _localDisplayNameFuture ??= dependencies.identity.getDisplayName();
     _usingDefaultNameFuture ??= dependencies.identity
         .isUsingDefaultDisplayName();
     _avatarPathFuture ??= dependencies.profileAvatarRepository.getAvatarPath();
+  }
+
+  void _refreshProfile() {
+    if (!mounted) return;
+    final dependencies = RelioDependencyScope.of(context);
+    setState(() {
+      _profileRevision++;
+      _localDisplayNameFuture = dependencies.identity.getDisplayName();
+      _usingDefaultNameFuture = dependencies.identity
+          .isUsingDefaultDisplayName();
+      _avatarPathFuture = dependencies.profileAvatarRepository.getAvatarPath();
+    });
+  }
+
+  @override
+  void dispose() {
+    _profiles?.removeListener(_refreshProfile);
+    super.dispose();
   }
 
   @override
@@ -79,6 +105,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(16),
                             child: FutureBuilder<String?>(
+                              key: ValueKey('avatar:$_profileRevision'),
                               future: _avatarPathFuture,
                               builder: (context, snapshot) {
                                 final imagePath = snapshot.data;
@@ -123,6 +150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         _memberName(context),
                         FutureBuilder<bool>(
+                          key: ValueKey('default:$_profileRevision'),
                           future: _usingDefaultNameFuture,
                           builder: (context, snapshot) => snapshot.data == true
                               ? Padding(
@@ -273,6 +301,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _memberName(BuildContext context) {
     final style = Theme.of(context).textTheme.headlineSmall;
     return FutureBuilder<String>(
+      key: ValueKey('name:$_profileRevision'),
       future: _localDisplayNameFuture,
       builder: (context, snapshot) => Text(
         snapshot.data ?? 'ผู้ใช้ RELIO',
@@ -283,7 +312,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Future<void> _editDisplayName(BuildContext context) async {
+  Future<void> _editDisplayName(BuildContext context) =>
+      RelioDependencyScope.of(context).repositories.ownerContext
+          .run(() => _editDisplayNameOwned(context))
+          .catchError((Object _) {});
+
+  Future<void> _editDisplayNameOwned(BuildContext context) async {
     final dependencies = RelioDependencyScope.of(context);
     String initialName;
     try {
@@ -335,7 +369,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _editAvatar(BuildContext context) async {
+  Future<void> _editAvatar(BuildContext context) =>
+      RelioDependencyScope.of(context).repositories.ownerContext
+          .run(() => _editAvatarOwned(context))
+          .catchError((Object _) {});
+
+  Future<void> _editAvatarOwned(BuildContext context) async {
     final dependencies = RelioDependencyScope.of(context);
     final repository = dependencies.profileAvatarRepository;
     final currentAvatar = await repository.getAvatarPath();
@@ -417,6 +456,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final owners = RelioDependencyScope.of(context).repositories.ownerContext;
+    final owner = owners.capture();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -437,7 +478,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
     );
-    if (confirmed != true || !context.mounted || _busy) return;
+    if (confirmed != true ||
+        !context.mounted ||
+        _busy ||
+        !owners.isCurrent(owner)) {
+      return;
+    }
 
     setState(() => _busy = true);
     try {

@@ -282,3 +282,22 @@ this define and remain OFF on a clean install; DEV and PROD cannot activate it.
   materially change.
 - All maintained scripts derive the project root from `$PSScriptRoot`; no
   runnable command may point to an old ASCII or Thai workspace path.
+
+## Identity isolation candidate (schema 10)
+
+- Keep device identity/trust separate from `account:<raw UUID>` and the persisted
+  installation Guest principal. Account switches must not reset Nearby radio,
+  Keystore keys, device_id or trusted pins.
+- Profiles/avatars use principal-owned repository state; global legacy profile
+  settings are preservation-only. Unknown or conflicting legacy ownership stays
+  quarantined and must never implicitly become Guest/account history.
+- Conversations resolve by local + remote principal. Private application packets
+  require both sender and intended recipient principal; missing/mismatched
+  recipients fail closed. Names never select private transport routes.
+- Carry OwnerContext generation across asynchronous work, including A → B → A;
+  check it inside SQLite transactions before commit. Profile queue names are
+  immutable owner snapshots, never the currently visible UI profile.
+- Existing relay-v1 private payload materialization obeys the same recipient gate;
+  forwarding policy and SOS remain unchanged. Do not expand relay capabilities.
+- See docs/IDENTITY_ISOLATION_IMPLEMENTATION.md for migration, protocol and the
+  later physical account-switch QA plan. Physical acceptance remains pending.

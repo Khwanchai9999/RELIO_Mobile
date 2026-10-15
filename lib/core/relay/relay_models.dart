@@ -112,6 +112,8 @@ class RelayEnvelope {
       payload: {
         'senderDeviceId': packet.senderDeviceId,
         'senderUserId': packet.senderUserId,
+        'senderPrincipal': ?packet.senderPrincipal,
+        'recipientPrincipal': ?packet.recipientPrincipal,
         'createdAt': packet.createdAt.toUtc().toIso8601String(),
         'payload': packet.payload,
       },
@@ -207,6 +209,8 @@ class RelayEnvelope {
       'type': payloadType,
       'senderDeviceId': senderDeviceId,
       'senderUserId': senderUserId,
+      'senderPrincipal': ?payload['senderPrincipal'],
+      'recipientPrincipal': ?payload['recipientPrincipal'],
       'createdAt': createdAt,
       'payload': nested.map((key, value) => MapEntry(key.toString(), value)),
     });
