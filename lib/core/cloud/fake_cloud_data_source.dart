@@ -43,6 +43,7 @@ class FakeCloudDataSource implements CloudDataSource {
     this.configured = true,
     this.offline = false,
     this.failureMode = FakeCloudFailure.none,
+    this.restoreIdentityOnInitialize,
     FakeCloudBackend? backend,
   }) : backend = backend ?? FakeCloudBackend();
 
@@ -52,9 +53,12 @@ class FakeCloudDataSource implements CloudDataSource {
     anonKey: 'fake',
   );
   final bool configured;
+  final CloudIdentity? restoreIdentityOnInitialize;
   final FakeCloudBackend backend;
   bool offline;
   FakeCloudFailure failureMode;
+  int initializeCalls = 0;
+  int restoreSessionCalls = 0;
   CloudState _state = CloudState.signedOut;
   AuthState _authState = AuthState.guest;
   CloudIdentity? _identity;
@@ -154,9 +158,17 @@ class FakeCloudDataSource implements CloudDataSource {
 
   @override
   Future<void> initialize() async {
+    initializeCalls++;
     if (!configured) return;
+    var restoredIdentity = false;
+    if (_identity == null && restoreIdentityOnInitialize != null) {
+      _identity = restoreIdentityOnInitialize;
+      _authState = AuthState.authenticated;
+      restoredIdentity = true;
+    }
     _state = _identity == null ? CloudState.signedOut : CloudState.ready;
     _cloudStates.add(_state);
+    if (restoredIdentity) _authStates.add(_authState);
   }
 
   @override
@@ -216,6 +228,7 @@ class FakeCloudDataSource implements CloudDataSource {
 
   @override
   Future<CloudIdentity?> restoreSession() async {
+    restoreSessionCalls++;
     await initialize();
     return _identity;
   }

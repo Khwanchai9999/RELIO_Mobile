@@ -126,6 +126,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
   late final bool _ownsDependencies;
   late final bool _ownsThemeController;
   StreamSubscription<AuthState>? _authStateSubscription;
+  StreamSubscription<void>? _localAuthSubscription;
 
   @override
   void initState() {
@@ -140,10 +141,13 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _routerRefresh = _RouterRefresh();
     _router = createRelioRouter(
       authReady: () => _dependencies.authInitialized,
-      hasSession: () => _dependencies.authService.identity != null,
+      hasSession: () => _dependencies.hasAuthenticatedPrincipal,
       refreshListenable: _routerRefresh,
     );
     _authStateSubscription = _dependencies.authService.watchState().listen((_) {
+      _routerRefresh.refresh();
+    });
+    _localAuthSubscription = _dependencies.localAuthChanges.listen((_) {
       _routerRefresh.refresh();
     });
     _router.routerDelegate.addListener(_updateNearbyLifecycleContext);
@@ -165,6 +169,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _router.routerDelegate.removeListener(_updateNearbyLifecycleContext);
     _router.dispose();
     unawaited(_authStateSubscription?.cancel());
+    unawaited(_localAuthSubscription?.cancel());
     _routerRefresh.dispose();
     _themeController.removeListener(_handleThemeChanged);
     if (_ownsThemeController) _themeController.dispose();

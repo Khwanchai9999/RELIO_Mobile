@@ -11,6 +11,7 @@ import 'connectivity/qa_internet_simulator.dart';
 import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
+import 'cloud/cloud_models.dart';
 import 'cloud/supabase_cloud_data_source.dart';
 import 'diagnostics/diagnostics_log_service.dart';
 import 'device/battery_info_service.dart';
@@ -90,12 +91,23 @@ class RelioDependencies {
         cloudDataSource ??
         SupabaseCloudDataSource(internetSimulator: this.internetSimulator);
 
+    _cloudAuthSubscription = this.cloudDataSource.watchAuthState().listen((
+      state,
+    ) {
+      _ownerScopeChanges.add(state);
+      if (state == AuthState.guest &&
+          this.internetSimulator.internetAvailable &&
+          _authInitialized &&
+          _offlineAuthenticatedUserId != null) {
+        unawaited(_clearOfflineAuthenticatedPrincipal());
+      }
+    });
+    this.internetSimulator.addListener(_handleInternetSimulatorChanged);
+
     repositories = RelioRepositories(
       this.database,
-      ownerUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
-      ownerScopeChanges: this.cloudDataSource.watchAuthState().map<Object?>(
-        (state) => state,
-      ),
+      ownerUserIdProvider: _activeOwnerUserId,
+      ownerScopeChanges: _ownerScopeChanges.stream,
     );
     this.featureFlags =
         featureFlags ?? createFeatureFlagController(repositories.settings);
@@ -103,6 +115,8 @@ class RelioDependencies {
     authService = CloudAuthService(
       this.cloudDataSource,
       rebind: repositories.profiles.refresh,
+      onAuthenticated: _rememberOfflineAuthenticatedPrincipal,
+      onSignOut: _clearOfflineAuthenticatedPrincipal,
     );
     identity = RelioDeviceIdentityRepository(
       this.database,
@@ -190,10 +204,18 @@ class RelioDependencies {
   late final AuthService authService;
   late final AppUpdateService appUpdateService;
   Future<void>? _initialization;
+  Completer<void>? _localSeedReady;
   Future<void>? _authInitialization;
   Future<void>? _internetSimulatorInitialization;
   bool _authInitialized = false;
   StreamSubscription<InternetStatus>? _readinessSubscription;
+  final StreamController<Object?> _ownerScopeChanges =
+      StreamController<Object?>.broadcast(sync: true);
+  final StreamController<void> _localAuthChanges =
+      StreamController<void>.broadcast(sync: true);
+  late final StreamSubscription<AuthState> _cloudAuthSubscription;
+  String? _offlineAuthenticatedUserId;
+  Future<void>? _onlineAuthResume;
   Future<bool>? _nearbySyncOperation;
   bool _nearbyForeground = true;
   bool _nearbyRestart = false;
@@ -210,6 +232,80 @@ class RelioDependencies {
   int get nearbyRetryAttempt => _nearbyRetryBackoff.attempt;
 
   bool get authInitialized => _authInitialized;
+  bool get hasAuthenticatedPrincipal =>
+      cloudDataSource.currentIdentity != null ||
+      _offlineAuthenticatedUserId != null;
+  bool get hasOfflineAuthenticatedPrincipal =>
+      _offlineAuthenticatedUserId != null &&
+      cloudDataSource.currentIdentity == null;
+  Stream<void> get localAuthChanges => _localAuthChanges.stream;
+
+  String? _activeOwnerUserId() =>
+      cloudDataSource.currentIdentity?.userId ?? _offlineAuthenticatedUserId;
+
+  Future<void> _rememberOfflineAuthenticatedPrincipal(String userId) async {
+    final previousOwner = _activeOwnerUserId();
+    await repositories.settings.setValue(
+      'offline_authenticated_principal',
+      userId,
+    );
+    _offlineAuthenticatedUserId = userId;
+    if (previousOwner == userId) return;
+    _ownerScopeChanges.add(userId);
+    _localAuthChanges.add(null);
+  }
+
+  Future<void> _restoreOfflineAuthenticatedPrincipal() async {
+    final principal = (await repositories.settings.getValue(
+      'offline_authenticated_principal',
+    ))?.trim();
+    if (principal == null || principal.isEmpty || principal.length > 128) {
+      await repositories.settings.remove('offline_authenticated_principal');
+      return;
+    }
+    _offlineAuthenticatedUserId = principal;
+    _ownerScopeChanges.add(principal);
+    _localAuthChanges.add(null);
+  }
+
+  Future<void> _clearOfflineAuthenticatedPrincipal() async {
+    await repositories.settings.remove('offline_authenticated_principal');
+    if (_offlineAuthenticatedUserId == null) return;
+    _offlineAuthenticatedUserId = null;
+    if (cloudDataSource.currentIdentity != null) return;
+    _ownerScopeChanges.add(null);
+    _localAuthChanges.add(null);
+  }
+
+  void _handleInternetSimulatorChanged() {
+    if (!internetSimulator.internetAvailable || _disposed) return;
+    unawaited(_resumeOnlineAuth());
+  }
+
+  Future<void> _resumeOnlineAuth() async {
+    final pending = _onlineAuthResume;
+    if (pending != null) return pending;
+    final operation = _performOnlineAuthResume();
+    _onlineAuthResume = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_onlineAuthResume, operation)) _onlineAuthResume = null;
+    }
+  }
+
+  Future<void> _performOnlineAuthResume() async {
+    if (!_authInitialized) await initializeAuth();
+    if (_disposed || !internetSimulator.internetAvailable) return;
+    try {
+      await cloudDataSource.initialize();
+      final restored = await authService.restoreSession();
+      if (restored == null) await _clearOfflineAuthenticatedPrincipal();
+      if (restored != null) unawaited(syncEngine.run());
+    } on Object {
+      // Keep local owner context while Cloud validation cannot reach the server.
+    }
+  }
 
   Future<void> initializeAuth() => _authInitialization ??= _initializeAuth();
 
@@ -235,8 +331,15 @@ class RelioDependencies {
     try {
       await featureFlags.initialize();
       await _restoreInternetSimulator();
+      if (!internetSimulator.internetAvailable) {
+        final seedReady = _localSeedReady;
+        if (seedReady != null) await seedReady.future;
+        await _restoreOfflineAuthenticatedPrincipal();
+        return;
+      }
       await cloudDataSource.initialize();
-      await authService.restoreSession();
+      final restored = await authService.restoreSession();
+      if (restored == null) await _clearOfflineAuthenticatedPrincipal();
       unawaited(syncPushRegistration());
     } on Object {
       // Cloud เป็น optional; เมื่อกู้ session ไม่ได้ ให้ startup ไปหน้า Welcome
@@ -245,7 +348,11 @@ class RelioDependencies {
     }
   }
 
-  Future<void> initialize() => _initialization ??= _initialize();
+  Future<void> initialize() {
+    if (_initialization != null) return _initialization!;
+    _localSeedReady ??= Completer<void>();
+    return _initialization = _initialize();
+  }
 
   Future<bool> syncPushRegistration() async {
     if (!RelioBuildInfo.isTest ||
@@ -498,19 +605,24 @@ class RelioDependencies {
   ].join('/');
 
   Future<void> _initialize() async {
-    await featureFlags.initialize();
-    await _restoreInternetSimulator();
-    unawaited(diagnostics.initialize());
-    if (_isAndroid && !useMockTransport) {
-      _readinessSubscription = connectivityStatus.changes.listen((_) {
-        unawaited(startNearbySessionIfPermitted());
-        unawaited(syncEngine.run());
-      });
+    try {
+      await featureFlags.initialize();
+      await _restoreInternetSimulator();
+      unawaited(diagnostics.initialize());
+      if (_isAndroid && !useMockTransport) {
+        _readinessSubscription = connectivityStatus.changes.listen((_) {
+          unawaited(startNearbySessionIfPermitted());
+          unawaited(syncEngine.run());
+        });
+      }
+      unawaited(connectivityStatus.initialize());
+      await identity.getDeviceId();
+      await identity.getDisplayName();
+      await repositories.seedPrototypeData();
+    } finally {
+      final seedReady = _localSeedReady;
+      if (seedReady != null && !seedReady.isCompleted) seedReady.complete();
     }
-    unawaited(connectivityStatus.initialize());
-    await identity.getDeviceId();
-    await identity.getDisplayName();
-    await repositories.seedPrototypeData();
     await nearbyService.initialize();
     nearbyService.addListener(_onNearbyServiceChanged);
     _nearbyServiceListenerAttached = true;
@@ -545,6 +657,8 @@ class RelioDependencies {
 
   Future<void> dispose() async {
     _disposed = true;
+    internetSimulator.removeListener(_handleInternetSimulatorChanged);
+    await _cloudAuthSubscription.cancel();
     _nearbyHealthCheck?.cancel();
     _nearbyRetryTimer?.cancel();
     _backgroundNegotiationGraceTimer?.cancel();
@@ -560,6 +674,8 @@ class RelioDependencies {
     await syncEngine.dispose();
     appUpdateService.dispose();
     await cloudDataSource.dispose();
+    await _ownerScopeChanges.close();
+    await _localAuthChanges.close();
     featureFlags.dispose();
     repositories.profiles.dispose();
     await repositories.ownerContext.dispose();

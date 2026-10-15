@@ -2641,6 +2641,22 @@ class RelioSettingsRepository {
     await (db.delete(db.appSettings)..where((row) => row.key.equals(key))).go();
   }
 
+  Future<String?> getValue(String key) async => (await (db.select(
+    db.appSettings,
+  )..where((row) => row.key.equals(key))).getSingleOrNull())?.value;
+
+  Future<void> setValue(String key, String value) async {
+    await db
+        .into(db.appSettings)
+        .insertOnConflictUpdate(
+          AppSettingsCompanion.insert(
+            key: key,
+            value: value,
+            updatedAt: DateTime.now(),
+          ),
+        );
+  }
+
   Future<void> setBool(String key, bool value) async {
     await db
         .into(db.appSettings)

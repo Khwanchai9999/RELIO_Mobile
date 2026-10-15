@@ -273,7 +273,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () => _showAbout(context),
           ),
           const SizedBox(height: 14),
-          if (identity != null)
+          if (dependencies.hasAuthenticatedPrincipal)
             OutlinedButton.icon(
               onPressed: _busy
                   ? null
