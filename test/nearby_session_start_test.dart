@@ -59,6 +59,25 @@ void main() {
     },
   );
 
+  test('hung advertising does not block discovery startup', () async {
+    transport.startDelay = const Duration(milliseconds: 40);
+    await service.close();
+    service = NearbyService(
+      transport: transport,
+      messages: repositories.messages,
+      conversations: repositories.conversations,
+      identity: RelioDeviceIdentityRepository(database),
+      nearbyDevices: repositories.nearbyDevices,
+      advertisingStartWatchdog: const Duration(milliseconds: 1),
+    );
+    await service.initialize();
+
+    await service.startSession();
+
+    expect(transport.discoveryStartCount, 1);
+    expect(service.isDiscovering, isTrue);
+  });
+
   test('already-advertising native status reconciles local state', () async {
     transport.advertisingStartFailure = const NearbyTransportException(
       'Already advertising',

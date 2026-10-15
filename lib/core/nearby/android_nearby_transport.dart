@@ -42,6 +42,7 @@ class AndroidNearbyTransport
   final Map<(String, int), Stopwatch> _payloadClocks = {};
   final Map<(String, int), int> _payloadMilestones = {};
   bool _advertising = false;
+  bool _advertisingStarting = false;
   bool _discovering = false;
   bool _disposed = false;
   int _discoveryEpoch = 0;
@@ -105,8 +106,9 @@ class AndroidNearbyTransport
     required String displayName,
     String? identityFingerprint,
   }) async {
-    if (_disposed || _advertising) return;
+    if (_disposed || _advertising || _advertisingStarting) return;
     final endpointName = _endpointName(displayName, identityFingerprint);
+    _advertisingStarting = true;
     try {
       final started = await _nearby.startAdvertising(
         endpointName,
@@ -138,12 +140,14 @@ class AndroidNearbyTransport
         operation: 'startAdvertising',
         exceptionType: error.runtimeType.toString(),
       );
+    } finally {
+      _advertisingStarting = false;
     }
   }
 
   @override
   Future<void> stopAdvertising() async {
-    if (!_advertising) return;
+    if (!_advertising && !_advertisingStarting) return;
     await _nearby.stopAdvertising();
     _advertising = false;
   }

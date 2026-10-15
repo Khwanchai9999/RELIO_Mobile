@@ -118,6 +118,7 @@ class NearbyService extends ChangeNotifier {
     this.connectionAttemptTimeout = const Duration(seconds: 35),
     this.incomingApprovalTimeout = const Duration(seconds: 90),
     this.hardNegotiationTimeout = const Duration(seconds: 90),
+    this.advertisingStartWatchdog = const Duration(seconds: 12),
   }) : identityCrypto =
            identityCrypto ??
            (transport is MockNearbyTransport
@@ -290,6 +291,9 @@ class NearbyService extends ChangeNotifier {
   /// ค่านี้จึงมีไว้กัน native attempt ค้างถาวร ไม่ใช่ UX timeout
   final Duration hardNegotiationTimeout;
   final Duration connectionAttemptTimeout;
+  // Google Nearby บาง Bluetooth stack ค้างระหว่าง advertising; discovery
+  // แยกทำงานได้ จึงต้องไม่ปล่อยให้ peer ที่ประกาศอยู่แล้วหายไปจากการค้นหา
+  final Duration advertisingStartWatchdog;
   NearbyReadiness? readiness;
   NearbyDiagnosticRole _diagnosticRole = NearbyDiagnosticRole.auto;
   NearbyApplicationState? _transition;
@@ -1043,8 +1047,28 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
     switch (_diagnosticRole) {
       case NearbyDiagnosticRole.auto:
-        await startAdvertising();
-        if (isAdvertising) {
+        final advertising = startAdvertising();
+        var advertisingStartTimedOut = false;
+        try {
+          await advertising.timeout(advertisingStartWatchdog);
+        } on TimeoutException {
+          advertisingStartTimedOut = true;
+          diagnostics?.record(
+            'nearby',
+            'advertising_start_watchdog_elapsed',
+            severity: 'warning',
+            operation: 'startAdvertising',
+            fields: {
+              'watchdogMs': advertisingStartWatchdog.inMilliseconds,
+              'strategy': transport.strategyName,
+              ..._radioSnapshotFields(),
+            },
+          );
+          _log('advertising start remains pending; starting discovery');
+        }
+        // P2P_CLUSTER ทำ discovery แยกจาก local advertising ได้ จึงไม่ให้
+        // native advertising ที่ค้างปิดกั้นการพบ peer ที่อีกฝั่งประกาศอยู่
+        if (isAdvertising || advertisingStartTimedOut) {
           await startDiscovery();
         } else {
           _log('discovery skipped because advertising did not start');
