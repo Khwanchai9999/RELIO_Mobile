@@ -85,6 +85,24 @@ void main() {
     );
   });
 
+  test('same-owner auth refresh does not invalidate in-flight work', () async {
+    var active = 'jane';
+    final changes = StreamController<Object?>.broadcast(sync: true);
+    final context = OwnerContext(() => active, changes.stream);
+    addTearDown(context.dispose);
+    addTearDown(changes.close);
+
+    final snapshot = context.capture();
+    changes.add(null);
+
+    expect(context.isCurrent(snapshot), isTrue);
+    expect(context.capture().generation, snapshot.generation);
+
+    active = 'minnie';
+    changes.add(null);
+    expect(context.isCurrent(snapshot), isFalse);
+  });
+
   test(
     'new B subscriber never receives cached A conversation preview',
     () async {

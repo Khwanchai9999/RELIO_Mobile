@@ -16,7 +16,7 @@ class OwnerSnapshot {
 class OwnerContext {
   OwnerContext(this.provider, [Stream<Object?>? source]) {
     _userId = provider?.call();
-    _subscription = source?.listen((_) => _refresh(force: true));
+    _subscription = source?.listen((_) => _refresh());
   }
 
   final String? Function()? provider;
