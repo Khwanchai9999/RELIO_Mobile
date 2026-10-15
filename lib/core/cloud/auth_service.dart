@@ -1,5 +1,6 @@
 import 'cloud_data_source.dart';
 import 'cloud_models.dart';
+import '../identity/owner_context.dart';
 
 abstract interface class AuthService {
   AuthState get state;
@@ -24,6 +25,20 @@ class CloudAuthService implements AuthService {
   CloudAuthService(this.source, {this.rebind});
   final Future<void> Function()? rebind;
   final CloudDataSource source;
+
+  Future<void> _rebind(String? expectedUserId) async {
+    try {
+      await rebind?.call();
+    } on OwnerChangedException {
+      // Auth event ซ้ำอาจยกเลิก profile refresh เดิม; listener โหลด owner ล่าสุดต่อได้
+      // ยอมรับเฉพาะ session เดิมที่สำเร็จแล้ว ไม่กลบการสลับไปบัญชีอื่นจริง
+      if (source.currentIdentity?.userId != expectedUserId) rethrow;
+    }
+    if (source.currentIdentity?.userId != expectedUserId) {
+      throw const OwnerChangedException();
+    }
+  }
+
   @override
   AuthState get state => source.authState;
   @override
@@ -41,7 +56,7 @@ class CloudAuthService implements AuthService {
       password: password,
       displayName: displayName,
     );
-    await rebind?.call();
+    await _rebind(source.currentIdentity?.userId);
     return result;
   }
 
@@ -51,20 +66,20 @@ class CloudAuthService implements AuthService {
     required String password,
   }) async {
     final result = await source.signIn(email: email, password: password);
-    await rebind?.call();
+    await _rebind(result.userId);
     return result;
   }
 
   @override
   Future<void> signOut() async {
     await source.signOut();
-    await rebind?.call();
+    await _rebind(null);
   }
 
   @override
   Future<CloudIdentity?> restoreSession() async {
     final result = await source.restoreSession();
-    await rebind?.call();
+    await _rebind(result?.userId);
     return result;
   }
 

@@ -8,6 +8,8 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:relio_mobile/core/cloud/cloud_models.dart';
+import 'package:relio_mobile/core/cloud/auth_service.dart';
+import 'package:relio_mobile/core/identity/owner_context.dart';
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
@@ -36,6 +38,54 @@ class DelayedProfileCloud extends FakeCloudDataSource {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'duplicate auth event cancelling profile refresh does not fail login',
+    () async {
+      final cloud = FakeCloudDataSource();
+      addTearDown(cloud.dispose);
+      final account = await cloud.register(
+        email: 'race@qa.test',
+        password: 'password',
+      );
+      await cloud.signOut();
+      final auth = CloudAuthService(
+        cloud,
+        rebind: () async {
+          throw const OwnerChangedException();
+        },
+      );
+      final result = await auth.signIn(
+        email: 'race@qa.test',
+        password: 'password',
+      );
+      expect(result.userId, account.userId);
+      expect(auth.state, AuthState.authenticated);
+      expect(auth.identity?.userId, account.userId);
+    },
+  );
+
+  test(
+    'profile rebind cancellation cannot hide a real account switch',
+    () async {
+      final cloud = FakeCloudDataSource();
+      addTearDown(cloud.dispose);
+      await cloud.register(email: 'race@qa.test', password: 'password');
+      await cloud.signOut();
+      final auth = CloudAuthService(
+        cloud,
+        rebind: () async {
+          await cloud.signOut();
+          throw const OwnerChangedException();
+        },
+      );
+      await expectLater(
+        auth.signIn(email: 'race@qa.test', password: 'password'),
+        throwsA(isA<OwnerChangedException>()),
+      );
+      expect(auth.identity, isNull);
+    },
+  );
 
   test(
     'A B Guest profiles, avatars and histories remain isolated offline',

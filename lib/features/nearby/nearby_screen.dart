@@ -183,7 +183,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
             );
             return;
           }
-          context.push('/chat/${device.id}');
+          unawaited(_openPeerChat(device.id, device.name, device.status));
         },
         onNavigate: () {
           if (!NearbyMapCalculations.isValidPoint(
@@ -289,10 +289,35 @@ class _NearbyScreenState extends State<NearbyScreen> {
     await _dependencies.permissionService.openNearbySettings(action);
   }
 
+  Future<void> _openPeerChat(
+    String deviceId,
+    String displayName,
+    DeviceStatus status,
+  ) async {
+    try {
+      // device ID ไม่ใช่ conversation ID; ให้ Repository เลือกคู่ principal ปัจจุบันก่อน
+      final conversation = await _dependencies.repositories.ownerContext.run(
+        () => _dependencies.repositories.conversations.ensureConversation(
+          id: deviceId,
+          participantId: deviceId,
+          displayName: displayName,
+          participantStatus: status,
+        ),
+      );
+      if (mounted) context.push('/chat/${conversation.id}');
+    } on Object {
+      if (mounted) _showSnack('เปิดแชทไม่สำเร็จ กรุณาลองอีกครั้ง');
+    }
+  }
+
   Future<void> _openRealPeer(NearbyPeer peer) async {
     final state = _nearby.peerStates[peer.endpointId];
     if (state == NearbyConnectionState.connected && peer.deviceId != null) {
-      if (mounted) context.push('/chat/${peer.deviceId}');
+      await _openPeerChat(
+        peer.deviceId!,
+        peer.name,
+        _nearby.peerStatuses[peer.deviceId] ?? DeviceStatus.normal,
+      );
       return;
     }
     if (state == NearbyConnectionState.connected) {

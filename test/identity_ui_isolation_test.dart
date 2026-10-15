@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:relio_mobile/core/feature_flags/feature_flags.dart';
+import 'package:relio_mobile/core/repositories/local_repositories.dart';
+import 'package:relio_mobile/features/nearby/nearby_screen.dart';
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
@@ -9,6 +13,89 @@ import 'package:relio_mobile/features/chat/chat_screens.dart';
 import 'package:relio_mobile/features/profile/profile_screen.dart';
 
 void main() {
+  testWidgets(
+    'Nearby opens a new scoped chat after account switches on same hardware',
+    (tester) async {
+      final cloud = FakeCloudDataSource();
+      await cloud.register(email: 'a@route.test', password: 'password');
+      final db = AppDatabase.memory();
+      final flags = FeatureFlagController(
+        repository: FeatureFlagRepository(RelioSettingsRepository(db)),
+        allowLocalOverrides: true,
+      );
+      await flags.initialize();
+      await flags.setOverride(RelioFeatureFlag.nearbyMapUi, false);
+      final deps = RelioDependencies(
+        database: db,
+        transport: MockNearbyTransport(),
+        cloudDataSource: cloud,
+        featureFlags: flags,
+      );
+      final old = await deps.repositories.conversations.ensureConversation(
+        id: 'physical-bob',
+        participantId: 'physical-bob',
+        displayName: 'Jane private header',
+        participantStatus: DeviceStatus.normal,
+        remotePrincipalId: 'guest:bob',
+      );
+      await (deps.repositories.conversations as DriftConversationRepository)
+          .rememberRemotePrincipal(
+            'physical-bob',
+            'guest:bob',
+            'Bob scoped peer',
+            1,
+          );
+      await deps.authService.register(
+        email: 'b@route.test',
+        password: 'password',
+      );
+      deps.nearbyService.discoveredPeers.add(
+        const NearbyPeer(
+          id: 'endpoint-bob',
+          name: 'Bob scoped peer',
+          deviceId: 'physical-bob',
+          connected: true,
+        ),
+      );
+      deps.nearbyService.peerStates['endpoint-bob'] =
+          NearbyConnectionState.connected;
+      final router = GoRouter(
+        initialLocation: '/nearby',
+        routes: [
+          GoRoute(path: '/nearby', builder: (_, _) => const NearbyScreen()),
+          GoRoute(
+            path: '/chat/:id',
+            builder: (_, state) =>
+                ChatRoomScreen(chatId: state.pathParameters['id']!),
+          ),
+        ],
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        router.dispose();
+        await deps.dispose();
+      });
+      await tester.pumpWidget(
+        RelioDependencyScope(
+          dependencies: deps,
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await tester.ensureVisible(find.text('Bob scoped peer'));
+      await tester.tap(find.text('Bob scoped peer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Bob scoped peer'), findsOneWidget);
+      expect(find.text('Jane private header'), findsNothing);
+      final rooms = await deps.repositories.conversations.listConversations();
+      expect(rooms, hasLength(1));
+      expect(rooms.single.id, isNot(old.id));
+      expect(
+        await deps.repositories.conversations.getConversation(old.id),
+        isNull,
+      );
+    },
+  );
   testWidgets(
     'private image viewer hides its captured file after owner switch',
     (tester) async {

@@ -2897,7 +2897,8 @@ class RelioRepositories {
             ),
           );
     }
-    await conversations.updateLastActivity('somchai', DateTime.now());
+    // ใช้ scoped ID ที่ Repository คืนมา เพราะ legacy demo อาจเป็นของ owner อื่น
+    await conversations.updateLastActivity(somchai.id, DateTime.now());
   }
 }
 

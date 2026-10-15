@@ -16,6 +16,92 @@ import 'test_database.dart';
 
 void main() {
   test(
+    'legacy demo ID collision cannot abort Nearby bootstrap after migration',
+    () async {
+      final db = AppDatabase.memory();
+      final legacyTime = DateTime(2025, 1, 2);
+      await db
+          .into(db.appSettings)
+          .insert(
+            AppSettingsCompanion.insert(
+              key: 'device_id',
+              value: 'preserved-device',
+              updatedAt: legacyTime,
+            ),
+          );
+      await db
+          .into(db.conversations)
+          .insert(
+            ConversationsCompanion.insert(
+              id: 'somchai',
+              participantId: 'somchai',
+              displayName: 'Legacy demo',
+              participantStatus: 'normal',
+              createdAt: legacyTime,
+              updatedAt: legacyTime,
+            ),
+          );
+      await db.customStatement(
+        'INSERT INTO conversation_principals VALUES (?,?,?,?,?)',
+        [
+          'somchai',
+          'legacyUnknown:somchai',
+          'legacy-device:somchai',
+          'somchai',
+          'legacyUnknown',
+        ],
+      );
+      await db
+          .into(db.messages)
+          .insert(
+            MessagesCompanion.insert(
+              id: 'legacy-preserved-message',
+              conversationId: 'somchai',
+              senderId: 'legacy',
+              messageType: 'text',
+              content: 'keep unknown history local',
+              createdAt: legacyTime,
+              updatedAt: legacyTime,
+              deliveryStatus: 'delivered',
+              isOutgoing: false,
+            ),
+          );
+      final deps = RelioDependencies(database: db);
+      addTearDown(deps.dispose);
+
+      await deps.initialize();
+
+      expect(deps.nearbyService.initialized, isTrue);
+      expect(await deps.identity.getDeviceId(), 'preserved-device');
+      final guest = (await deps.repositories.conversations.listConversations())
+          .singleWhere((room) => room.participantId == 'somchai');
+      expect(guest.id, isNot('somchai'));
+      expect(
+        await deps.repositories.conversations.getConversation('somchai'),
+        isNull,
+      );
+      expect(
+        (await db.select(db.messages).get())
+            .singleWhere((m) => m.id == 'legacy-preserved-message')
+            .conversationId,
+        'somchai',
+      );
+      expect(
+        (await db.select(db.conversations).get())
+            .singleWhere((r) => r.id == 'somchai')
+            .updatedAt,
+        legacyTime,
+      );
+      expect(
+        (await deps.repositories.messages.listMessages(
+          guest.id,
+        )).any((m) => m.id == 'legacy-preserved-message'),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'local conversations and messages are partitioned by cloud account',
     () async {
       final database = AppDatabase.memory();
