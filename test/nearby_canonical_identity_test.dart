@@ -14,8 +14,12 @@ Future<void> firstPair(HandshakePair pair) async {
   await pair.serviceA.connect('endpoint-b');
   await waitFor(
     () =>
-        pair.serviceA.pendingConnectionRequests.isNotEmpty &&
-        pair.serviceB.pendingConnectionRequests.isNotEmpty,
+        pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+        pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
+        pair.serviceA.peerStates['endpoint-b'] ==
+            NearbyConnectionState.connected &&
+        pair.serviceB.peerStates['endpoint-a'] ==
+            NearbyConnectionState.connected,
   );
   await pair.serviceA.acceptConnectionRequest('endpoint-b');
   await pair.serviceB.acceptConnectionRequest('endpoint-a');
@@ -82,6 +86,10 @@ void main() {
       addTearDown(pair.close);
       await firstPair(pair);
       final original = pair.serviceA.currentPeers.single;
+      expect(
+        pair.serviceA.peerStates[original.endpointId],
+        NearbyConnectionState.connected,
+      );
       pair.serviceA.discoveredPeers.add(
         NearbyPeer(
           id: 'other-device-endpoint',

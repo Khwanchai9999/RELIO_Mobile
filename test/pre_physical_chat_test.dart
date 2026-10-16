@@ -99,9 +99,14 @@ void main() {
         if (!blocked) {
           await pair.serviceA.connect('endpoint-b');
           await waitFor(
-            () => pair.serviceB.pendingConnectionRequests.isNotEmpty,
+            () => pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
           );
-          expect(pair.serviceB.deviceIdForEndpoint('endpoint-a'), isNull);
+          expect(
+            (await pair.repositoriesB.nearbyDevices.getDevice(
+              'device-a',
+            ))?.isTrusted,
+            isTrue,
+          );
         }
       },
     );
@@ -309,10 +314,6 @@ Future<void> waitForReconnect(HandshakePair pair) async {
 
 Future<void> approve(HandshakePair pair) async {
   await pair.serviceA.connect('endpoint-b');
-  await waitFor(
-    () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-  );
-  await pair.serviceB.acceptConnectionRequest('endpoint-a');
   await identified(pair);
 }
 

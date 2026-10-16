@@ -77,7 +77,6 @@ class _AppDisconnectRequest {
 
 class _PendingVerifiedIdentity {
   const _PendingVerifiedIdentity({
-    required this.request,
     required this.packet,
     required this.publicKey,
     required this.fingerprint,
@@ -86,7 +85,6 @@ class _PendingVerifiedIdentity {
     required this.previousFingerprint,
   });
 
-  final NearbyConnectionEvent request;
   final RelioPacket packet;
   final String publicKey;
   final String fingerprint;
@@ -335,10 +333,6 @@ class NearbyService extends ChangeNotifier {
     screenRoute = route;
   }
 
-  bool identityApprovalChangesPinnedKey(String endpointId) =>
-      _pendingVerifiedIdentityApprovals[endpointId]?.wasPinned == true &&
-      _pendingVerifiedIdentityApprovals[endpointId]?.pinnedMatches == false;
-
   String get statusLabel {
     if (readiness case final current? when !current.ready) {
       return current.summary;
@@ -396,9 +390,6 @@ class NearbyService extends ChangeNotifier {
   final Set<String> _approvedConnectionEndpoints = {};
   final Set<String> _provisionalConnectionEndpoints = {};
   final Map<String, NearbyConnectionEvent> _provisionalIncomingRequests = {};
-  final Map<String, _PendingVerifiedIdentity>
-  _pendingVerifiedIdentityApprovals = {};
-  final Map<String, String> _pendingIdentityApprovalReasons = {};
   final Set<String> _userInitiatedEndpoints = {};
   final Map<String, String> peerErrors = {};
   final Map<String, Timer> _identityHandshakeTimeouts = {};
@@ -1797,8 +1788,6 @@ class NearbyService extends ChangeNotifier {
     _approvedConnectionEndpoints.remove(endpointId);
     _provisionalConnectionEndpoints.remove(endpointId);
     _provisionalIncomingRequests.remove(endpointId);
-    _pendingVerifiedIdentityApprovals.remove(endpointId);
-    _pendingIdentityApprovalReasons.remove(endpointId);
     _userInitiatedEndpoints.remove(endpointId);
     _identityChallenges.remove(endpointId);
     _remotePrincipals.remove(endpointId);
@@ -1841,7 +1830,6 @@ class NearbyService extends ChangeNotifier {
     'hardWatchdogs': _connectionHardWatchdogs.length,
     'handshakeTimeouts': _identityHandshakeTimeouts.length,
     'nativeAccepts': _nativeAcceptInFlight.length,
-    'verifiedApprovals': _pendingVerifiedIdentityApprovals.length,
     'provisionalRequests': _provisionalIncomingRequests.length,
     'approvedEndpoints': _approvedConnectionEndpoints.length,
     'userInitiatedEndpoints': _userInitiatedEndpoints.length,
@@ -1998,26 +1986,8 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> acceptConnectionRequest(String endpointId) async {
+    if (_completedIdentityHandshakes.contains(endpointId)) return;
     final traceId = _connectionTraces[endpointId];
-    final pendingIdentity = _pendingVerifiedIdentityApprovals.remove(
-      endpointId,
-    );
-    if (pendingIdentity != null) {
-      pendingConnectionRequests.remove(endpointId);
-      _pendingIdentityApprovalReasons.remove(endpointId);
-      _approvedConnectionEndpoints.add(endpointId);
-      _recordIdentityStage(
-        endpointId,
-        'identity_approval_accepted',
-        fields: {
-          'identityChanged':
-              pendingIdentity.wasPinned && !pendingIdentity.pinnedMatches,
-        },
-      );
-      await _finalizeVerifiedIdentity(endpointId, pendingIdentity);
-      notifyListeners();
-      return;
-    }
     final isAutomaticTrustedReconnect =
         !pendingConnectionRequests.containsKey(endpointId) &&
         _approvedConnectionEndpoints.contains(endpointId);
@@ -3572,9 +3542,7 @@ class NearbyService extends ChangeNotifier {
           'resolvedHintAvailable': fingerprint != null,
         },
       );
-      // Both Nearby endpoints receive the same authentication code. Keep the
-      // initiating side in the shared approval queue so both phones can show
-      // and compare it before either endpoint accepts the native connection.
+      // Both endpoints accept Native to exchange the signed identity proof.
       final initiatorAttemptIsConnecting =
           peerStates[endpointId] == NearbyConnectionState.connecting;
       // manual connect อาจชน trusted auto reconnect ของอีกฝั่งบน endpoint เดียวกัน
@@ -3612,7 +3580,7 @@ class NearbyService extends ChangeNotifier {
                 resolvedEvent.authenticationToken != null,
           },
         );
-        _queueIncomingRequest(resolvedEvent);
+        _track(_acceptNativeForIdentityProof(endpointId));
         return;
       }
       if (fingerprint != null) {
@@ -4053,8 +4021,12 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _acceptProvisionalIncoming(NearbyConnectionEvent event) async {
-    // Unknown fingerprints still require visible approval before native accept.
-    _queueIncomingRequest(event);
+    await _acceptNativeForIdentityProof(event.peer.endpointId);
+  }
+
+  Future<void> _acceptNativeForIdentityProof(String endpointId) async {
+    _approvedConnectionEndpoints.add(endpointId);
+    await acceptConnectionRequest(endpointId);
   }
 
   Future<void> _handshakeAndShareCurrentSos(String endpointId) async {
@@ -4170,31 +4142,6 @@ class NearbyService extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _queueManualConnectionRequest(NearbyConnectionEvent event) {
-    if (!event.isIncomingRequest) {
-      final endpointId = event.peer.endpointId;
-      diagnostics?.record(
-        'connection',
-        'initiator_verification_prompt_queued',
-        connectionTraceId: _connectionTraces[endpointId],
-        operation: 'queueIncomingRequest',
-        stateFrom: 'connecting',
-        stateTo: 'incomingRequest',
-        peerIdentifier: endpointId,
-        fields: {
-          'qaRole': _diagnosticRole.name,
-          'userInitiatedEndpointTracked': _userInitiatedEndpoints.contains(
-            endpointId,
-          ),
-          'connectingAtCallback':
-              peerStates[endpointId] == NearbyConnectionState.connecting,
-          'authenticationCodeAvailable': event.authenticationToken != null,
-        },
-      );
-    }
-    _queueIncomingRequest(event);
-  }
-
   Future<void> _rejectEndpoint(String endpointId) => transport.rejectConnection(
     endpointId,
     connectionTraceId: _connectionTraces[endpointId],
@@ -4241,7 +4188,7 @@ class NearbyService extends ChangeNotifier {
         peerIdentifier: endpointId,
         reason: 'fingerprint_not_uniquely_pinned',
       );
-      _queueManualConnectionRequest(event);
+      await _acceptNativeForIdentityProof(endpointId);
       return;
     }
     final device = matches.single;
@@ -4285,7 +4232,11 @@ class NearbyService extends ChangeNotifier {
           'publicKeyAvailable': device.publicIdentityKey != null,
         },
       );
-      _queueManualConnectionRequest(event);
+      if (identityCrypto is MockPeerIdentityCrypto) {
+        _queueIncomingRequest(event);
+        return;
+      }
+      await _acceptNativeForIdentityProof(endpointId);
       return;
     }
     diagnostics?.record(
@@ -4520,26 +4471,12 @@ class NearbyService extends ChangeNotifier {
         wasPinned &&
         saved!.publicIdentityFingerprint == fingerprint &&
         saved.publicIdentityKey == publicKey;
-    final consented =
-        _approvedConnectionEndpoints.contains(endpointId) ||
-        _userInitiatedEndpoints.contains(endpointId);
     _recordIdentityStage(
       endpointId,
       'identity_proof_verified',
       fields: {'pinnedIdentityMatched': pinnedMatches},
     );
     final pendingIdentity = _PendingVerifiedIdentity(
-      request:
-          _provisionalIncomingRequests[endpointId] ??
-          NearbyConnectionEvent(
-            peer: NearbyPeer(
-              id: endpointId,
-              name: payload['displayName']! as String,
-              identityFingerprintHint: fingerprint,
-            ),
-            state: NearbyConnectionState.incomingRequest,
-            isIncomingRequest: true,
-          ),
       packet: packet,
       publicKey: publicKey,
       fingerprint: fingerprint,
@@ -4549,65 +4486,26 @@ class NearbyService extends ChangeNotifier {
     );
     final trustedAutoReconnect =
         pinnedMatches && saved.isTrusted && saved.autoReconnectEnabled;
-    if (trustedAutoReconnect || (consented && (!wasPinned || pinnedMatches))) {
-      diagnostics?.record(
-        'trust',
-        'trusted_candidate_verified',
-        connectionTraceId: _connectionTraces[endpointId],
-        operation: 'identityProof',
-        peerIdentifier: endpointId,
-        fields: {'automaticTrustedReconnect': trustedAutoReconnect},
-      );
-      await _finalizeVerifiedIdentity(endpointId, pendingIdentity);
-      return;
-    }
-    _queueVerifiedIdentityApproval(endpointId, pendingIdentity);
-  }
-
-  void _queueVerifiedIdentityApproval(
-    String endpointId,
-    _PendingVerifiedIdentity pending,
-  ) {
-    if (_pendingVerifiedIdentityApprovals.containsKey(endpointId)) {
-      _recordIncomingPromptSuppressed(
+    if (wasPinned && !pinnedMatches) {
+      _recordIdentityStage(
         endpointId,
-        'existing_prompt',
-        traceId: _connectionTraces[endpointId]!,
+        'trusted_candidate_rejected_identity_mismatch',
+        severity: 'error',
+        reason: 'pinned_identity_mismatch',
       );
+      peerErrors[endpointId] = 'identity_proof_invalid';
+      await disconnect(endpointId, reason: 'pinned_identity_mismatch');
       return;
     }
-    final payload = pending.packet.payload;
-    final request = NearbyConnectionEvent(
-      peer: NearbyPeer(
-        id: endpointId,
-        name: payload['displayName']! as String,
-        identityFingerprintHint: pending.fingerprint,
-      ),
-      state: NearbyConnectionState.incomingRequest,
-      authenticationToken: pending.request.authenticationToken,
-      isIncomingRequest: true,
-    );
-    _pendingVerifiedIdentityApprovals[endpointId] = pending;
-    _pendingIdentityApprovalReasons[endpointId] =
-        pending.wasPinned && !pending.pinnedMatches
-        ? 'pinned_identity_changed'
-        : 'first_contact_consent_required';
-    pendingConnectionRequests[endpointId] = request;
     diagnostics?.record(
       'trust',
-      pending.wasPinned && !pending.pinnedMatches
-          ? 'trusted_candidate_rejected_identity_mismatch'
-          : 'identity_approval_pending',
+      'trusted_candidate_verified',
       connectionTraceId: _connectionTraces[endpointId],
       operation: 'identityProof',
       peerIdentifier: endpointId,
-      reason: _pendingIdentityApprovalReasons[endpointId],
-      fields: {
-        'pinnedIdentityMatched': pending.pinnedMatches,
-        'firstContactConsentRequired': !pending.wasPinned,
-      },
+      fields: {'automaticTrustedReconnect': trustedAutoReconnect},
     );
-    notifyListeners();
+    await _finalizeVerifiedIdentity(endpointId, pendingIdentity);
   }
 
   Future<void> _finalizeVerifiedIdentity(
@@ -4627,11 +4525,11 @@ class NearbyService extends ChangeNotifier {
     }
     final currentFingerprint = saved?.publicIdentityFingerprint;
     final pinUnchanged = currentFingerprint == pending.previousFingerprint;
-    final explicitIdentityApproval =
-        _approvedConnectionEndpoints.contains(endpointId) &&
-        _pendingVerifiedIdentityApprovals.containsKey(endpointId);
-    if (!pinUnchanged && !explicitIdentityApproval) {
-      peerErrors[endpointId] = 'identity_changed_during_approval';
+    if (!pinUnchanged ||
+        (pending.wasPinned &&
+            (saved?.publicIdentityFingerprint != pending.fingerprint ||
+                saved?.publicIdentityKey != pending.publicKey))) {
+      peerErrors[endpointId] = 'pinned_identity_changed';
       await disconnect(endpointId, reason: 'pinned_identity_changed');
       return;
     }
@@ -4675,8 +4573,6 @@ class NearbyService extends ChangeNotifier {
     _approvedConnectionEndpoints.add(endpointId);
     _provisionalConnectionEndpoints.remove(endpointId);
     _provisionalIncomingRequests.remove(endpointId);
-    _pendingVerifiedIdentityApprovals.remove(endpointId);
-    _pendingIdentityApprovalReasons.remove(endpointId);
     peerStates[endpointId] = NearbyConnectionState.connected;
     diagnostics?.record(
       'connection',

@@ -41,11 +41,6 @@ void main() {
         expect(pair.transportA.strategyName, mode.strategyName);
         expect(pair.transportB.strategyName, mode.strategyName);
         await pair.serviceA.connect('endpoint-b');
-        await waitFor(
-          () =>
-              pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-        );
-
         if (mode == NearbyTransportTestMode.clusterPauseDiscovery) {
           expect(pair.serviceA.isDiscovering, isFalse);
           expect(pair.serviceA.isAdvertising, isTrue);
@@ -53,7 +48,6 @@ void main() {
           expect(pair.serviceA.isDiscovering, isTrue);
         }
 
-        await pair.serviceB.acceptConnectionRequest('endpoint-a');
         await waitFor(
           () =>
               pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&

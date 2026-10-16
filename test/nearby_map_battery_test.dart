@@ -198,10 +198,6 @@ void main() {
       });
       await pair.serviceA.connect('endpoint-b');
       await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      await pair.serviceB.acceptConnectionRequest('endpoint-a');
-      await waitFor(
         () =>
             pair.serviceA.peerStates['endpoint-b'] ==
                 NearbyConnectionState.connected &&

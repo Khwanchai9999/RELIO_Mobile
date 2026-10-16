@@ -8,8 +8,8 @@ import 'support/nearby_pair.dart';
 
 Future<void> pending(HandshakePair pair) => waitFor(
   () =>
-      pair.serviceA.pendingConnectionRequests.isNotEmpty &&
-      pair.serviceB.pendingConnectionRequests.isNotEmpty,
+      pair.transportA.acceptCalls.contains('endpoint-b') &&
+      pair.transportB.acceptCalls.contains('endpoint-a'),
 );
 
 Future<void> connected(HandshakePair pair) => waitFor(
@@ -107,6 +107,8 @@ void main() {
       addTearDown(pair.close);
       await pair.serviceA.startSession();
       await pair.serviceB.startSession();
+      pair.transportA.holdConnectionResult = true;
+      pair.transportB.holdConnectionResult = true;
       pair.transportA.discoverPeer();
       await Future<void>.delayed(Duration.zero);
       await pair.serviceA.connect('endpoint-b');
@@ -256,7 +258,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expectClean(pair.serviceA);
       final reconnect = pair.serviceA.connect('endpoint-b');
-      await waitFor(() => pair.serviceA.pendingConnectionRequests.isNotEmpty);
+      await pending(pair);
       await pair.serviceA.acceptConnectionRequest('endpoint-b');
       await reconnect;
       await connected(pair);
@@ -271,6 +273,8 @@ void main() {
       pair.transportA.failNextRequest = true;
       await pair.serviceA.connect('endpoint-b');
       expectClean(pair.serviceA);
+      pair.transportA.holdConnectionResult = true;
+      pair.transportB.holdConnectionResult = true;
       await pair.serviceA.connect('endpoint-b');
       await pending(pair);
       pair.transportA.failConnection();
@@ -283,6 +287,8 @@ void main() {
       );
       expectClean(pair.serviceA);
       expectClean(pair.serviceB);
+      pair.transportA.holdConnectionResult = false;
+      pair.transportB.holdConnectionResult = false;
       await establish(pair);
     },
   );
@@ -311,7 +317,7 @@ void main() {
   );
 
   test(
-    'approval timeout releases pending state and permits a new request',
+    'automatic first contact does not wait for an approval timeout',
     () async {
       final pair = await HandshakePair.create(
         requireBothNativeAccepts: true,
@@ -319,14 +325,15 @@ void main() {
       );
       addTearDown(pair.close);
       await pair.serviceA.connect('endpoint-b');
-      await pending(pair);
       await waitFor(
         () =>
             pair.serviceA.peerStates['endpoint-b'] ==
-            NearbyConnectionState.disconnected,
+                NearbyConnectionState.connected &&
+            pair.serviceB.peerStates['endpoint-a'] ==
+                NearbyConnectionState.connected,
       );
-      await cleanBoth(pair);
-      await establish(pair);
+      expect(pair.serviceA.pendingConnectionRequests, isEmpty);
+      expect(pair.serviceB.pendingConnectionRequests, isEmpty);
     },
   );
 
@@ -356,6 +363,8 @@ void main() {
       pair.transportA.discoverPeer();
       pair.transportB.discoverPeer();
       await waitFor(() => pair.serviceA.isEndpointCurrent('endpoint-b'));
+      pair.transportA.holdConnectionResult = true;
+      pair.transportB.holdConnectionResult = true;
       await pair.serviceA.connect('endpoint-b');
       await pending(pair);
       expect(pair.serviceA.isDiscovering, isFalse);
@@ -471,8 +480,13 @@ void main() {
         hasLength(history.length),
       );
       await pair.serviceA.connect('endpoint-b');
-      await waitFor(() => pair.serviceA.pendingConnectionRequests.isNotEmpty);
-      expect(pair.serviceA.deviceToEndpointId, isEmpty);
+      await waitFor(
+        () => pair.serviceA.deviceToEndpointId['device-b'] == 'endpoint-b',
+      );
+      final repinned = await pair.repositoriesA.nearbyDevices.getDevice(
+        'device-b',
+      );
+      expect(repinned?.isTrusted, isTrue);
     },
   );
 

@@ -9,7 +9,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'first contact enrolls both identities after consent and survives',
+    'first contact automatically enrolls verified identities and survives',
     () async {
       final pair = await HandshakePair.create(displayNameA: 'RELIO H QA');
       addTearDown(pair.close);
@@ -17,10 +17,6 @@ void main() {
       expect(defaultNameB, matches(RegExp(r'^ผู้ใช้ RELIO \d{4}$')));
 
       await pair.serviceA.connect('endpoint-b');
-      await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      await pair.serviceB.acceptConnectionRequest('endpoint-a');
       await waitFor(
         () =>
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -175,6 +171,9 @@ void main() {
       expect(stage['elapsedMs'], isA<int>());
       expect(stage['connectionTraceId'], isNotEmpty);
       expect(stage['peerAlias'], DiagnosticsLogService.peerAlias('endpoint-b'));
+      expect(pair.serviceA.pendingConnectionRequests, isEmpty);
+      expect(pair.serviceB.pendingConnectionRequests, isEmpty);
+      expect(pair.transportB.acceptCalls, contains('endpoint-a'));
     },
   );
 
@@ -183,10 +182,6 @@ void main() {
     addTearDown(pair.close);
 
     await pair.serviceA.connect('endpoint-b');
-    await waitFor(
-      () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-    );
-    await pair.serviceB.acceptConnectionRequest('endpoint-a');
     await waitFor(
       () => pair.serviceA.peerErrors['endpoint-b'] == 'identity_proof_invalid',
     );
@@ -216,7 +211,7 @@ void main() {
   });
 
   test(
-    'unhinted incoming requests require one visible consent prompt',
+    'unhinted incoming requests are accepted only to verify signed identity',
     () async {
       final pair = await HandshakePair.create();
       addTearDown(pair.close);
@@ -234,70 +229,48 @@ void main() {
           fingerprint: null,
         );
       }
-      await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      expect(pair.transportB.acceptCalls, isEmpty);
-      expect(pair.serviceB.pendingConnectionRequests, hasLength(1));
-      expect(
-        pair.serviceB.identityApprovalChangesPinnedKey('endpoint-a'),
-        isFalse,
-      );
+      await waitFor(() => pair.transportB.acceptCalls.contains('endpoint-a'));
+      expect(pair.serviceB.pendingConnectionRequests, isEmpty);
       final events = await readEvents(pair.logsB);
       expect(
         events.map((event) => event['event']),
-        contains('incoming_prompt_suppressed_existing_prompt'),
+        contains('identity_challenge_sent'),
       );
     },
   );
 
-  test('changed pinned identity requires a second explicit approval', () async {
-    final pair = await HandshakePair.create();
-    addTearDown(pair.close);
+  test(
+    'changed pinned identity is rejected without replacing the stored pin',
+    () async {
+      final pair = await HandshakePair.create();
+      addTearDown(pair.close);
 
-    await pair.serviceA.connect('endpoint-b');
-    await waitFor(
-      () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-    );
-    await pair.serviceB.acceptConnectionRequest('endpoint-a');
-    await waitFor(
-      () => pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b',
-    );
-    final previous = await pair.repositoriesA.nearbyDevices.getDevice(
-      'device-b',
-    );
-    expect(previous?.publicIdentityKey, 'test-public-key:device-b');
-
-    await pair.serviceA.disconnect('endpoint-b', reason: 'rotate_test_key');
-    pair.cryptoB.rotateIdentity();
-    await pair.serviceB.connect('endpoint-a');
-    await waitFor(
-      () => pair.serviceA.pendingConnectionRequests.containsKey('endpoint-b'),
-    );
-    await pair.serviceA.acceptConnectionRequest('endpoint-b');
-    await waitFor(
-      () => pair.serviceA.identityApprovalChangesPinnedKey('endpoint-b'),
-    );
-
-    expect(
-      (await pair.repositoriesA.nearbyDevices.getDevice(
+      await pair.serviceA.connect('endpoint-b');
+      await waitFor(
+        () => pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b',
+      );
+      final previous = await pair.repositoriesA.nearbyDevices.getDevice(
         'device-b',
-      ))?.publicIdentityKey,
-      'test-public-key:device-b',
-    );
-    expect(pair.serviceA.deviceIdForEndpoint('endpoint-b'), isNull);
+      );
+      expect(previous?.publicIdentityKey, 'test-public-key:device-b');
 
-    await pair.serviceA.acceptConnectionRequest('endpoint-b');
-    await waitFor(
-      () => pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b',
-    );
-    expect(
-      (await pair.repositoriesA.nearbyDevices.getDevice(
-        'device-b',
-      ))?.publicIdentityKey,
-      'test-public-key:device-b-rotated',
-    );
-  });
+      await pair.serviceA.disconnect('endpoint-b', reason: 'rotate_test_key');
+      pair.cryptoB.rotateIdentity();
+      await pair.serviceB.connect('endpoint-a');
+      await waitFor(
+        () =>
+            pair.serviceA.peerErrors['endpoint-b'] == 'identity_proof_invalid',
+      );
+
+      expect(
+        (await pair.repositoriesA.nearbyDevices.getDevice(
+          'device-b',
+        ))?.publicIdentityKey,
+        'test-public-key:device-b',
+      );
+      expect(pair.serviceA.deviceIdForEndpoint('endpoint-b'), isNull);
+    },
+  );
 
   test(
     'trusted reconnect proves identity without another approval prompt',
@@ -306,10 +279,6 @@ void main() {
       addTearDown(pair.close);
 
       await pair.serviceA.connect('endpoint-b');
-      await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      await pair.serviceB.acceptConnectionRequest('endpoint-a');
       await waitFor(
         () =>
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
@@ -320,13 +289,7 @@ void main() {
       );
       expect(savedA?.isTrusted, isTrue);
       expect(savedA?.autoReconnectEnabled, isTrue);
-      if (pair.serviceB.pendingConnectionRequests.isNotEmpty) {
-        fail(
-          'initial B pending=${pair.serviceB.pendingConnectionRequests.keys} '
-          'identityChanged=${pair.serviceB.identityApprovalChangesPinnedKey('endpoint-b')} '
-          'name=${pair.serviceB.pendingConnectionRequests['endpoint-b']?.peer.name}',
-        );
-      }
+      expect(pair.serviceB.pendingConnectionRequests, isEmpty);
 
       await pair.serviceA.disconnect('endpoint-b', reason: 'test_reconnect');
       await waitFor(
@@ -402,10 +365,6 @@ void main() {
 
       await pair.serviceA.connect('endpoint-b');
       await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      await pair.serviceB.acceptConnectionRequest('endpoint-a');
-      await waitFor(
         () =>
             pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
             pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
@@ -434,10 +393,6 @@ void main() {
       addTearDown(pair.close);
 
       await pair.serviceA.connect('endpoint-b');
-      await waitFor(
-        () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-      );
-      await pair.serviceB.acceptConnectionRequest('endpoint-a');
       await Future<void>.delayed(const Duration(seconds: 2));
       expect(
         pair.serviceA.peerStates['endpoint-b'],

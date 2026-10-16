@@ -379,25 +379,6 @@ class _IncomingConnectionPromptHostState
                       ? '${request.peer.name} ต้องการเชื่อมต่อกับคุณ'
                       : 'กำลังเชื่อมต่อกับ ${request.peer.name}',
                 ),
-                if (service.identityApprovalChangesPinnedKey(entry.key)) ...[
-                  const SizedBox(height: 12),
-                  const Text(
-                    'คำเตือน: กุญแจอุปกรณ์นี้ไม่ตรงกับ RELIO ที่บันทึกไว้ '
-                    'การยอมรับจะเปลี่ยนกุญแจที่เชื่อถือ โปรดยืนยันตัวตนผ่านรหัส Nearby ก่อน',
-                  ),
-                ],
-                if (request.authenticationToken case final token?) ...[
-                  const SizedBox(height: 16),
-                  const Text('รหัสยืนยัน Nearby'),
-                  SelectableText(
-                    token,
-                    style: Theme.of(dialogContext).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'ตรวจสอบว่ารหัสตรงกันบนโทรศัพท์ทั้งสองเครื่องก่อนยืนยัน',
-                  ),
-                ],
               ],
             ),
             actions: [
@@ -407,13 +388,7 @@ class _IncomingConnectionPromptHostState
               ),
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: Text(
-                  service.identityApprovalChangesPinnedKey(entry.key)
-                      ? 'ยอมรับและเปลี่ยนกุญแจ'
-                      : request.isIncomingRequest
-                      ? 'ยอมรับ'
-                      : 'ยืนยันรหัส',
-                ),
+                child: Text(request.isIncomingRequest ? 'ยอมรับ' : 'เชื่อมต่อ'),
               ),
             ],
           ),

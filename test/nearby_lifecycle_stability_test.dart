@@ -9,19 +9,6 @@ import 'support/nearby_pair.dart';
 
 Future<void> _firstPair(HandshakePair pair) async {
   await pair.serviceA.connect('endpoint-b');
-  await waitFor(
-    () =>
-        pair.serviceA.pendingConnectionRequests.containsKey('endpoint-b') &&
-        pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-  );
-  expect(pair.transportA.acceptCalls, isEmpty);
-  expect(pair.transportB.acceptCalls, isEmpty);
-  await pair.serviceA.acceptConnectionRequest('endpoint-b');
-  expect(
-    pair.serviceA.peerStates['endpoint-b'],
-    isNot(NearbyConnectionState.connected),
-  );
-  await pair.serviceB.acceptConnectionRequest('endpoint-a');
   await _waitConnected(pair);
 }
 
@@ -39,7 +26,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'both native accepts are required; trusted reconnect survives 10 cycles',
+    'automatic native accepts preserve trust through 10 reconnect cycles',
     () async {
       final pair = await HandshakePair.create(requireBothNativeAccepts: true);
       addTearDown(pair.close);
@@ -85,14 +72,16 @@ void main() {
     },
   );
 
-  test('native failure clears approvals and permits retry', () async {
+  test('native failure clears negotiation state and permits retry', () async {
     final pair = await HandshakePair.create(requireBothNativeAccepts: true);
     addTearDown(pair.close);
+    pair.transportA.holdConnectionResult = true;
+    pair.transportB.holdConnectionResult = true;
     await pair.serviceA.connect('endpoint-b');
     await waitFor(
       () =>
-          pair.serviceA.pendingConnectionRequests.containsKey('endpoint-b') &&
-          pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
+          pair.transportA.acceptCalls.contains('endpoint-b') &&
+          pair.transportB.acceptCalls.contains('endpoint-a'),
     );
     pair.transportA.failConnection();
     await waitFor(
@@ -104,6 +93,8 @@ void main() {
     );
     expect(pair.serviceA.pendingConnectionRequests, isEmpty);
     expect(pair.serviceB.pendingConnectionRequests, isEmpty);
+    pair.transportA.holdConnectionResult = false;
+    pair.transportB.holdConnectionResult = false;
     await _firstPair(pair);
   });
 
@@ -210,7 +201,7 @@ void main() {
   });
 
   test(
-    'one-sided trust removal disconnects and requires consent again',
+    'one-sided trust removal clears the pin and fresh proof enrolls again',
     () async {
       final pair = await HandshakePair.create(requireBothNativeAccepts: true);
       addTearDown(pair.close);
@@ -236,13 +227,12 @@ void main() {
         hasLength(conversationsBefore.length),
       );
       await pair.serviceA.connect('endpoint-b');
-      await waitFor(
-        () => pair.serviceA.pendingConnectionRequests.containsKey('endpoint-b'),
+      await _waitConnected(pair);
+      final repinned = await pair.repositoriesA.nearbyDevices.getDevice(
+        'device-b',
       );
-      expect(
-        pair.serviceA.peerStates['endpoint-b'],
-        isNot(NearbyConnectionState.connected),
-      );
+      expect(repinned?.isTrusted, isTrue);
+      expect(repinned?.publicIdentityFingerprint, isNotNull);
     },
   );
 

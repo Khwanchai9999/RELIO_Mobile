@@ -329,8 +329,12 @@ void main() {
       await pair.serviceA.connect('endpoint-b');
       await waitFor(
         () =>
-            pair.serviceA.pendingConnectionRequests.isNotEmpty &&
-            pair.serviceB.pendingConnectionRequests.isNotEmpty,
+            pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+            pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
+            pair.serviceA.peerStates['endpoint-b'] ==
+                NearbyConnectionState.connected &&
+            pair.serviceB.peerStates['endpoint-a'] ==
+                NearbyConnectionState.connected,
       );
       await pair.serviceA.acceptConnectionRequest('endpoint-b');
       await pair.serviceB.acceptConnectionRequest('endpoint-a');
@@ -348,6 +352,11 @@ void main() {
           .length;
       active = 'minnie';
       changes.add(null);
+      await waitFor(
+        () async =>
+            (await pair.repositoriesA.profiles.current()).principalId ==
+            'account:minnie',
+      );
       await pair.identityA.setDisplayName('Minnie');
       await waitFor(
         () async => (await pair.repositoriesB.conversations.listConversations())
@@ -448,8 +457,12 @@ void main() {
       await pair.serviceA.connect('endpoint-b');
       await waitFor(
         () =>
-            pair.serviceA.pendingConnectionRequests.isNotEmpty &&
-            pair.serviceB.pendingConnectionRequests.isNotEmpty,
+            pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
+            pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a' &&
+            pair.serviceA.peerStates['endpoint-b'] ==
+                NearbyConnectionState.connected &&
+            pair.serviceB.peerStates['endpoint-a'] ==
+                NearbyConnectionState.connected,
       );
       await pair.serviceA.acceptConnectionRequest('endpoint-b');
       await pair.serviceB.acceptConnectionRequest('endpoint-a');

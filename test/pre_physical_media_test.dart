@@ -377,10 +377,6 @@ Future<HandshakePair> connectedPair({
   final pair = await HandshakePair.create(notificationsB: notifications);
   await pair.serviceA.connect('endpoint-b');
   await waitFor(
-    () => pair.serviceB.pendingConnectionRequests.containsKey('endpoint-a'),
-  );
-  await pair.serviceB.acceptConnectionRequest('endpoint-a');
-  await waitFor(
     () =>
         pair.serviceA.deviceIdForEndpoint('endpoint-b') == 'device-b' &&
         pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',

@@ -91,7 +91,7 @@ void main() {
   );
 
   test(
-    'manual initiator shows the auth code and waits for local approval',
+    'initiator accepts transport without an auth-code approval prompt',
     () async {
       final fingerprint = List.filled(64, 'c').join();
       rig.transport.holdConnectionRequests = true;
@@ -121,31 +121,13 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       expect(rig.transport.connectionRequestCount, 1);
-      expect(rig.transport.acceptConnectionCount, 0);
-      expect(
-        rig
-            .service
-            .pendingConnectionRequests['initiated-peer']
-            ?.authenticationToken,
-        '543210',
-      );
-      expect(
-        rig
-            .service
-            .pendingConnectionRequests['initiated-peer']
-            ?.isIncomingRequest,
-        isFalse,
-      );
-      await rig.service.acceptConnectionRequest('initiated-peer');
       expect(rig.transport.acceptConnectionCount, 1);
       expect(
         rig.service.pendingConnectionRequests,
         isNot(contains('initiated-peer')),
       );
       final logs = await rig.logText();
-      expect(logs, contains('initiator_verification_prompt_queued'));
-      expect(logs, contains('"authenticationCodeAvailable":true'));
-      expect(logs, contains('"connectingAtCallback":true'));
+      expect(logs, isNot(contains('initiator_verification_prompt_queued')));
     },
   );
 
