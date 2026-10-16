@@ -5,9 +5,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/cloud/cloud_models.dart';
 import 'package:relio_mobile/core/connectivity/qa_internet_simulator.dart';
+import 'package:relio_mobile/core/connectivity/runtime_connectivity.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
+
+class _FixedRuntimeConnectivitySource implements RuntimeConnectivitySource {
+  const _FixedRuntimeConnectivitySource(this.snapshot);
+
+  final RuntimeConnectivitySnapshot snapshot;
+
+  @override
+  Future<RuntimeConnectivitySnapshot> read() async => snapshot;
+
+  @override
+  Stream<RuntimeConnectivitySnapshot> get changes => const Stream.empty();
+}
+
+class _OfflineProbe implements InternetReachabilityProbe {
+  @override
+  Future<int> reachableEndpointCount() async => 0;
+}
 
 void main() {
   late Directory directory;
@@ -31,15 +49,24 @@ void main() {
   RelioDependencies createDependencies({
     required bool offline,
     required FakeCloudDataSource cloud,
-  }) => RelioDependencies(
-    database: AppDatabase.withExecutor(
-      NativeDatabase(File('${directory.path}/relio.sqlite')),
-    ),
-    cloudDataSource: cloud,
-    internetSimulator: QaInternetSimulator.forTesting(),
-    useMockTransport: true,
-    androidPlatformOverride: false,
-  )..internetSimulator.setSimulatedOffline(offline);
+    RuntimeConnectivitySource? runtimeConnectivitySource,
+  }) {
+    final internetSimulator = QaInternetSimulator.forTesting();
+    return RelioDependencies(
+      database: AppDatabase.withExecutor(
+        NativeDatabase(File('${directory.path}/relio.sqlite')),
+      ),
+      cloudDataSource: cloud,
+      connectivityStatusService: ConnectivityStatusService(
+        source: runtimeConnectivitySource,
+        probe: _OfflineProbe(),
+        internetSimulator: internetSimulator,
+      ),
+      internetSimulator: internetSimulator,
+      useMockTransport: true,
+      androidPlatformOverride: false,
+    )..internetSimulator.setSimulatedOffline(offline);
+  }
 
   Future<void> setOfflinePreference(RelioDependencies dependencies) async {
     await dependencies.repositories.settings.setBool(
@@ -128,6 +155,43 @@ void main() {
         List.filled(64, 'a').join(),
       );
       await offline.dispose();
+    },
+  );
+
+  test(
+    'restores cached principal when Internet is actually offline and QA simulator is off',
+    () async {
+      final online = createDependencies(
+        offline: false,
+        cloud: FakeCloudDataSource(backend: backend),
+      );
+      await online.initializeAuth();
+      await online.authService.register(
+        email: 'jane@example.test',
+        password: 'valid-password',
+        displayName: 'Jane',
+      );
+      await online.dispose();
+
+      final offlineCloud = FakeCloudDataSource(backend: backend);
+      final restarted = createDependencies(
+        offline: false,
+        cloud: offlineCloud,
+        runtimeConnectivitySource: _FixedRuntimeConnectivitySource(
+          const RuntimeConnectivitySnapshot(
+            hasInternetRoute: false,
+            internetValidated: false,
+          ),
+        ),
+      );
+      await restarted.initializeAuth().timeout(const Duration(seconds: 1));
+
+      expect(restarted.internetSimulator.internetAvailable, isTrue);
+      expect(restarted.hasOfflineAuthenticatedPrincipal, isTrue);
+      expect(restarted.hasAuthenticatedPrincipal, isTrue);
+      expect(offlineCloud.initializeCalls, 0);
+      expect(offlineCloud.restoreSessionCalls, 0);
+      await restarted.dispose();
     },
   );
 

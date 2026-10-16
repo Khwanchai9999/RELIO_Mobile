@@ -332,7 +332,12 @@ class RelioDependencies {
     try {
       await featureFlags.initialize();
       await _restoreInternetSimulator();
-      if (!internetSimulator.internetAvailable) {
+      final runtime = await connectivityStatus.readRuntimeSnapshot().timeout(
+        const Duration(seconds: 2),
+      );
+      if (!internetSimulator.internetAvailable ||
+          runtime.hasInternetRoute == false ||
+          runtime.internetValidated == false) {
         final seedReady = _localSeedReady;
         if (seedReady != null) await seedReady.future;
         await _restoreOfflineAuthenticatedPrincipal();
