@@ -5648,7 +5648,6 @@ class NearbyService extends ChangeNotifier {
         peerIdentifier: deviceToEndpointId[packet.senderDeviceId],
         fields: {'reportedStatus': reportedStatus.name},
       );
-      await _persistPeerMetadata(packet);
       return;
     }
     if (updatedAt != null) {

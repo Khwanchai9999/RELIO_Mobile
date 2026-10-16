@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/device/battery_info_service.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
@@ -263,6 +265,105 @@ void main() {
       expect(peer?.status, DeviceStatus.normal);
       expect(peer?.peerDeviceModel, isNull);
       expect(peer?.peerLocationAccuracy, 12);
+    },
+  );
+
+  test(
+    'stale verified deviceStatus cannot regress peer display name or location',
+    () async {
+      final pair = await HandshakePair.create();
+      addTearDown(pair.close);
+      await pair.serviceA.connect('endpoint-b');
+      await waitFor(
+        () => pair.serviceB.deviceIdForEndpoint('endpoint-a') == 'device-a',
+      );
+
+      Future<void> deliver(RelioPacket packet) async {
+        final handled = Completer<void>();
+        void listener() {
+          if (pair.serviceB.lastReceivedPacket?.contains(packet.packetId) ==
+                  true &&
+              !handled.isCompleted) {
+            pair.serviceB.removeListener(listener);
+            handled.complete();
+          }
+        }
+
+        pair.serviceB.addListener(listener);
+        pair.transportB.receivePacket(await pair.packetFromA(packet));
+        await handled.future.timeout(const Duration(seconds: 2));
+      }
+
+      final t0 = DateTime.now().toUtc().add(const Duration(minutes: 1));
+      final t1 = t0.add(const Duration(minutes: 1));
+      final t2 = t0.add(const Duration(minutes: 2));
+      final t3 = t0.add(const Duration(minutes: 3));
+
+      final fresh = RelioPacket.deviceStatus(
+        senderDeviceId: 'device-a',
+        senderUserId: 'user-a',
+        displayName: 'New Bob',
+        status: DeviceStatus.normal,
+        updatedAt: t2,
+        batteryLevel: 80,
+        isCharging: false,
+        batteryUpdatedAt: t2,
+        latitude: 10.25,
+        longitude: 101.5,
+        locationAccuracy: 12,
+        locationCapturedAt: t2,
+      );
+      await deliver(fresh);
+      var peer = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
+      expect(peer?.displayName, 'New Bob');
+      expect(peer?.peerLatitude, 10.25);
+      expect(peer?.peerLongitude, 101.5);
+
+      await deliver(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-a',
+          senderUserId: 'user-a',
+          displayName: 'Old Bob',
+          status: DeviceStatus.normal,
+          updatedAt: t1,
+          batteryLevel: 20,
+          isCharging: true,
+          batteryUpdatedAt: t1,
+          latitude: 1,
+          longitude: 2,
+          locationAccuracy: 50,
+          locationCapturedAt: t1,
+        ),
+      );
+      peer = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
+      expect(peer?.displayName, 'New Bob');
+      expect(peer?.peerLatitude, 10.25);
+      expect(peer?.peerLongitude, 101.5);
+      expect(peer?.batteryLevel, 80);
+      expect(peer?.isCharging, isFalse);
+
+      await deliver(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-a',
+          senderUserId: 'user-a',
+          displayName: 'Newest Bob',
+          status: DeviceStatus.normal,
+          updatedAt: t3,
+          batteryLevel: 90,
+          isCharging: true,
+          batteryUpdatedAt: t3,
+          latitude: 30,
+          longitude: 120,
+          locationAccuracy: 5,
+          locationCapturedAt: t3,
+        ),
+      );
+      peer = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
+      expect(peer?.displayName, 'Newest Bob');
+      expect(peer?.peerLatitude, 30);
+      expect(peer?.peerLongitude, 120);
+      expect(peer?.batteryLevel, 90);
+      expect(peer?.isCharging, isTrue);
     },
   );
 }
