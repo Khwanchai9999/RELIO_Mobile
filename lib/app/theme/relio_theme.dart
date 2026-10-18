@@ -74,15 +74,34 @@ abstract final class RelioTheme {
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
+        height: 76,
         backgroundColor: dark
-            ? RelioColors.darkSurface
+            ? RelioColors.darkRaised
             : RelioColors.lightSurface,
+        elevation: 8,
+        shadowColor: (dark ? Colors.black : RelioColors.brandNavy).withValues(
+          alpha: dark ? 0.22 : 0.08,
+        ),
+        surfaceTintColor: Colors.transparent,
         indicatorColor: dark
             ? RelioColors.primary.withValues(alpha: 0.18)
             : RelioColors.primary.withValues(alpha: 0.12),
+        indicatorShape: const StadiumBorder(),
         labelTextStyle: WidgetStatePropertyAll(
           textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
         ),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return IconThemeData(
+            color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            size: selected ? 25 : 23,
+          );
+        }),
+      ),
+      badgeTheme: const BadgeThemeData(
+        backgroundColor: RelioColors.sos,
+        textColor: Colors.white,
+        padding: EdgeInsets.symmetric(horizontal: 5),
       ),
       dividerColor: dark ? RelioColors.darkBorder : RelioColors.border,
       dialogTheme: DialogThemeData(

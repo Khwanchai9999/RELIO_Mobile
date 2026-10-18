@@ -13,6 +13,26 @@ abstract final class RelioColors {
 
   static const lightBackground = Color(0xFFF8FAFC);
   static const lightSurface = Color(0xFFFFFFFF);
+  static const homeSoftBorder = Color(0xFFDCEBFA);
+  static const lightGreetingEnd = Color(0xFFEAF7FF);
+  static const darkGreetingEnd = Color(0xFF0D1C33);
+  static const peerChip = Color(0xFFF1F8FF);
+  static const lightTagline = Color(0xFF24618F);
+  static const darkTagline = Color(0xFF9CEBFA);
+  static const brandNavy = Color(0xFF10254D);
+  static const brandWhite = Color(0xFFF5FAFF);
+  static const avatarBlue = Color(0xFF45B8F5);
+  static const connectivityBlue = Color(0xFF2878E8);
+  static const connectivityCyan = Color(0xFF0897B2);
+  static const offline = Color(0xFFEF6B52);
+  static const sosStart = Color(0xFFFF7A24);
+  static const sosEnd = Color(0xFFE81750);
+  static const rescueStart = Color(0xFF05BCEB);
+  static const rescueEnd = Color(0xFF0757DD);
+  static const quickCyan = Color(0xFF08B8B7);
+  static const quickBlue = Color(0xFF247BE9);
+  static const quickPurple = Color(0xFF8B45E8);
+  static const quickGreen = Color(0xFF13A96B);
   static const primaryText = Color(0xFF0F172A);
   static const secondaryText = Color(0xFF64748B);
   static const muted = Color(0xFF94A3B8);
