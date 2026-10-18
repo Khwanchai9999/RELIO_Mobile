@@ -293,6 +293,23 @@ void main() {
       }
     }
   });
+
+  testWidgets('Stacked emergency cards keep their content compact', (
+    tester,
+  ) async {
+    await pumpHome(tester, size: const Size(360, 900));
+    for (final width in [360.0, 393.0]) {
+      tester.view.physicalSize = Size(width, 900);
+      await tester.pumpAndSettle();
+
+      for (final key in ['home-sos-card', 'home-rescue-card']) {
+        final card = find.byKey(ValueKey(key));
+        expect(card, findsOneWidget);
+        expect(tester.getSize(card).height, lessThan(150));
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
 }
 
 class _DestinationScreen extends StatelessWidget {

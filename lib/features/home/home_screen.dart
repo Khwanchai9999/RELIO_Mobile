@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final stackEmergencyCards = width < 380 || textScale >= 1.45;
+    final stackEmergencyCards = width < 420 || textScale >= 1.3;
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -686,6 +686,7 @@ class _EmergencyCards extends StatelessWidget {
   Widget build(BuildContext context) {
     final sos = _EmergencyCard(
       key: const ValueKey('home-sos-card'),
+      compact: stack,
       title: 'SOS',
       detail: 'ขอความช่วยเหลือ',
       support: 'แจ้งเหตุไปยังเพื่อนร่วมทีม',
@@ -695,6 +696,7 @@ class _EmergencyCards extends StatelessWidget {
     );
     final rescue = _EmergencyCard(
       key: const ValueKey('home-rescue-card'),
+      compact: stack,
       title: 'Rescue',
       detail: 'โหมดหน่วยกู้ภัย',
       support: 'ค้นหาและช่วยเหลือในพื้นที่',
@@ -721,6 +723,7 @@ class _EmergencyCards extends StatelessWidget {
 class _EmergencyCard extends StatelessWidget {
   const _EmergencyCard({
     super.key,
+    required this.compact,
     required this.title,
     required this.detail,
     required this.support,
@@ -730,6 +733,7 @@ class _EmergencyCard extends StatelessWidget {
   });
 
   final String title;
+  final bool compact;
   final String detail;
   final String support;
   final IconData icon;
@@ -761,89 +765,40 @@ class _EmergencyCard extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(24),
           child: Padding(
-            padding: const EdgeInsets.all(15),
+            padding: EdgeInsets.all(compact ? 8 : 15),
             child: Stack(
               children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 34),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 54,
-                        height: 54,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.65),
-                          ),
-                        ),
-                        child: Icon(icon, color: Colors.white, size: 31),
-                      ),
-                      const SizedBox(height: 9),
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              height: 1,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        detail,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: Row(
+                  child: compact
+                      ? Row(
                           children: [
-                            Icon(
-                              title == 'SOS'
-                                  ? Icons.call_rounded
-                                  : Icons.groups_rounded,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 7),
+                            _EmergencyIcon(icon: icon, compact: true),
+                            const SizedBox(width: 12),
                             Expanded(
-                              child: Text(
-                                support,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelMedium
-                                    ?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                              child: _EmergencyCopy(
+                                title: title,
+                                detail: detail,
+                                support: support,
+                                compact: true,
                               ),
                             ),
                           ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _EmergencyIcon(icon: icon),
+                            const SizedBox(height: 9),
+                            _EmergencyCopy(
+                              title: title,
+                              detail: detail,
+                              support: support,
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ),
                 ),
-                Positioned(
+                const Positioned(
                   top: 2,
                   right: 0,
                   child: Icon(
@@ -859,6 +814,98 @@ class _EmergencyCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _EmergencyIcon extends StatelessWidget {
+  const _EmergencyIcon({required this.icon, this.compact = false});
+
+  final IconData icon;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: compact ? 46 : 54,
+    height: compact ? 46 : 54,
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.2),
+      shape: BoxShape.circle,
+      border: Border.all(color: Colors.white.withValues(alpha: 0.65)),
+    ),
+    child: Icon(icon, color: Colors.white, size: compact ? 27 : 31),
+  );
+}
+
+class _EmergencyCopy extends StatelessWidget {
+  const _EmergencyCopy({
+    required this.title,
+    required this.detail,
+    required this.support,
+    this.compact = false,
+  });
+
+  final String title;
+  final String detail;
+  final String support;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          height: 1,
+        ),
+      ),
+      const SizedBox(height: 2),
+      Text(
+        detail,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      SizedBox(height: compact ? 6 : 8),
+      Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: 10,
+          vertical: compact ? 6 : 8,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              title == 'SOS' ? Icons.call_rounded : Icons.groups_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                support,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _NearbyPreview extends StatelessWidget {
