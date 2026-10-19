@@ -35,6 +35,8 @@ void main() {
   Future<void> tapText(WidgetTester tester, String text) async {
     final finder = find.text(text);
     await tester.ensureVisible(finder);
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pumpAndSettle();
     await tester.tap(finder);
     await tester.pumpAndSettle();
   }
@@ -42,6 +44,8 @@ void main() {
   Future<void> tapLastText(WidgetTester tester, String text) async {
     final finder = find.text(text).last;
     await tester.ensureVisible(finder);
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
+    await tester.pumpAndSettle();
     await tester.tap(finder);
     await tester.pumpAndSettle();
   }
@@ -258,7 +262,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
-    await tapText(tester, 'Nearby Diagnostics');
+    await tapText(tester, 'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)');
 
     expect(find.text('MOCK transport — developer diagnostics'), findsOneWidget);
     expect(find.text('MockNearbyTransport'), findsOneWidget);
@@ -276,7 +280,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -600));
     await tester.pumpAndSettle();
-    await tapText(tester, 'Cloud Diagnostics');
+    await tapText(tester, 'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)');
 
     expect(find.text('ยังไม่ได้ตั้งค่า Cloud'), findsOneWidget);
     expect(find.text('Guest / local-only'), findsOneWidget);
@@ -291,7 +295,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('ตั้งค่า'));
     await tester.pumpAndSettle();
-    await tapText(tester, 'ธีม');
+    await tapText(tester, 'ธีมแอป');
 
     await tapText(tester, 'โหมดมืด');
     expect(
@@ -305,7 +309,7 @@ void main() {
       ThemeMode.light,
     );
 
-    await tapText(tester, 'ตามระบบ');
+    await tapText(tester, 'ตามการตั้งค่าเครื่อง');
     expect(
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
       ThemeMode.system,

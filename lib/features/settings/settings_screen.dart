@@ -24,7 +24,6 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool notifications = true;
   bool notificationPreview = false;
-  bool rescue = false;
   bool _settingsLoaded = false;
   bool _updateCheckInProgress = false;
   late AppUpdateService _appUpdateService;
@@ -180,10 +179,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final dependencies = RelioDependencyScope.of(context);
     final values = await Future.wait([
       dependencies.repositories.settings.getBool(
-        'rescue_mode',
-        defaultValue: false,
-      ),
-      dependencies.repositories.settings.getBool(
         'notifications_enabled',
         defaultValue: true,
       ),
@@ -194,9 +189,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ]);
     if (mounted) {
       setState(() {
-        rescue = values[0];
-        notifications = values[1];
-        notificationPreview = values[2];
+        notifications = values[0];
+        notificationPreview = values[1];
       });
     }
   }
@@ -239,26 +233,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           24,
         ),
         children: [
-          RelioSettingTile(
-            icon: Icons.shield_outlined,
-            title: 'โหมดหน่วยกู้ภัย',
-            subtitle: rescue ? 'เปิดใช้งาน' : 'ปิดใช้งาน',
-            trailing: Switch(
-              value: rescue,
-              onChanged: (value) {
-                setState(() => rescue = value);
-                final dependencies = RelioDependencyScope.of(context);
-                unawaited(() async {
-                  await dependencies.repositories.settings.setBool(
-                    'rescue_mode',
-                    value,
-                  );
-                  await dependencies.nearbyService.propagateCurrentStatus();
-                }());
-              },
-            ),
-          ),
-          const SizedBox(height: 18),
           Text(
             'การแสดงผล',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -268,13 +242,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.dark_mode_outlined,
-            title: 'ธีม',
+            title: 'ธีมแอป',
             subtitle: _themeLabel(RelioThemeScope.of(context).mode),
             onTap: () => context.push('/settings/theme'),
           ),
           const SizedBox(height: 18),
           Text(
-            'การแจ้งเตือนและข้อมูล',
+            'การแจ้งเตือน',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -292,7 +266,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.visibility_outlined,
-            title: 'แสดงตัวอย่างข้อความในการแจ้งเตือน',
+            title: 'แสดงเนื้อหาข้อความในการแจ้งเตือน',
             subtitle: notificationPreview
                 ? 'แสดงเนื้อหาข้อความ'
                 : 'แสดงข้อความทั่วไป',
@@ -311,13 +285,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 18),
           Text(
-            'การเชื่อมต่อ',
+            'สถานะการเชื่อมต่อ',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 8),
           const ConnectivityDiagnosticsCard(),
+          const SizedBox(height: 18),
+          Text(
+            'ข้อมูลและความเป็นส่วนตัว',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 8),
+          RelioSettingTile(
+            icon: Icons.lock_outline,
+            title: 'หลักการจัดการข้อมูล',
+            subtitle: 'อ่านวิธีจัดเก็บและใช้งานข้อมูล',
+            onTap: () => _showPrivacy(context),
+          ),
           if (RelioBuildInfo.isTest) ...[
             const SizedBox(height: 8),
             AnimatedBuilder(
@@ -355,7 +343,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
           RelioSettingTile(
             icon: Icons.sync_rounded,
-            title: 'สถานะการซิงก์',
+            title: 'สถานะการซิงก์ข้อมูลออนไลน์',
             subtitle: 'ดูคิวข้อมูลในเครื่อง',
             onTap: () => context.push('/sync'),
           ),
@@ -386,22 +374,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 8),
             RelioSettingTile(
               icon: Icons.developer_mode_outlined,
-              title: 'Nearby Diagnostics',
-              subtitle: 'Developer technical spike',
+              title: 'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)',
+              subtitle: 'เครื่องมือตรวจสอบการเชื่อมต่อ',
               onTap: () => context.push('/developer/nearby'),
             ),
             const SizedBox(height: 8),
             RelioSettingTile(
               icon: Icons.cloud_outlined,
-              title: 'Cloud Diagnostics',
-              subtitle: 'Supabase foundation / developer only',
+              title: 'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)',
+              subtitle: 'เครื่องมือตรวจสอบ Cloud',
               onTap: () => context.push('/developer/cloud'),
             ),
             const SizedBox(height: 8),
             RelioSettingTile(
               icon: Icons.route_outlined,
-              title: 'Relay Diagnostics',
-              subtitle: 'relay-v1 / Developer only',
+              title: 'ตรวจสอบ Relay (สำหรับทีมพัฒนา)',
+              subtitle: 'เครื่องมือตรวจสอบ Relay',
               onTap: () => context.push('/developer/relay'),
             ),
           ],
@@ -419,8 +407,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _themeLabel(ThemeMode mode) => switch (mode) {
     ThemeMode.light => 'โหมดสว่าง',
     ThemeMode.dark => 'โหมดมืด',
-    ThemeMode.system => 'ตามระบบ',
+    ThemeMode.system => 'ตามการตั้งค่าเครื่อง',
   };
+
+  void _showPrivacy(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('ข้อมูลและความเป็นส่วนตัว'),
+      content: const SingleChildScrollView(
+        child: Text(
+          'RELIO บันทึกข้อมูลหลักในเครื่องก่อน การซิงก์ Cloud ใช้กับข้อมูลของบัญชีที่ลงชื่อเข้าใช้เมื่อเชื่อมต่อได้ '
+          'ตำแหน่งใช้เมื่อคุณสั่งแชร์ตำแหน่ง เปิด SOS หรือแชร์ตำแหน่งบน Nearby Map เท่านั้น '
+          'ผู้ติดต่อฉุกเฉินเก็บไว้ในเครื่อง ไม่ส่งให้ผู้อื่นหรือ Cloud อัตโนมัติ',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('ปิด'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ExperimentalFeaturesCard extends StatelessWidget {
@@ -439,7 +447,7 @@ class _ExperimentalFeaturesCard extends StatelessWidget {
           children: [
             const ListTile(
               leading: Icon(Icons.tune_rounded),
-              title: Text('Experimental Features'),
+              title: Text('ฟีเจอร์ทดลอง (QA)'),
               subtitle: Text('ใช้สำหรับ QA เท่านั้น'),
             ),
             for (final flag in RelioFeatureFlag.values)
@@ -459,7 +467,7 @@ class _ExperimentalFeaturesCard extends StatelessWidget {
               child: TextButton.icon(
                 onPressed: () => unawaited(controller.resetOverrides()),
                 icon: const Icon(Icons.restart_alt_rounded),
-                label: const Text('Reset Experimental Flags'),
+                label: const Text('คืนค่าฟีเจอร์ทดลอง'),
               ),
             ),
           ],
@@ -476,7 +484,7 @@ class ThemeSettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = RelioThemeScope.of(context);
     return Scaffold(
-      appBar: RelioAppBar(title: 'ธีม', onBack: () => context.pop()),
+      appBar: RelioAppBar(title: 'ธีมแอป', onBack: () => context.pop()),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(
           RelioSpacing.lg,
@@ -515,7 +523,7 @@ class ThemeSettingsScreen extends StatelessWidget {
                 const SizedBox(height: 10),
                 _ThemeOption(
                   mode: ThemeMode.system,
-                  title: 'ตามระบบ',
+                  title: 'ตามการตั้งค่าเครื่อง',
                   subtitle: 'ใช้การตั้งค่าของ Android',
                   icon: Icons.brightness_auto_outlined,
                   selected: controller.mode,

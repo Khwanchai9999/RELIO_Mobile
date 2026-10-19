@@ -134,7 +134,7 @@ class _InactiveRescue extends StatelessWidget {
               ),
               const _RescueInfo(
                 icon: Icons.location_on_outlined,
-                text: 'ตำแหน่งของคุณจะถูกแชร์กับผู้ที่ส่ง SOS ในระยะ',
+                text: 'คุณเลือกแชร์ตำแหน่งได้เมื่อจำเป็น',
               ),
               const _RescueInfo(
                 icon: Icons.warning_amber_rounded,

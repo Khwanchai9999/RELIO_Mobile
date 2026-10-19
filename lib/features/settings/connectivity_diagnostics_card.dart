@@ -75,24 +75,24 @@ class _ConnectivityDiagnosticsCardState
                   FutureBuilder<String>(
                     future: _deviceId,
                     builder: (context, snapshot) => _StatusRow(
-                      label: 'Device ID',
+                      label: 'รหัสอุปกรณ์',
                       value: snapshot.data == null
                           ? 'กำลังโหลด'
                           : 'RELIO-${snapshot.data!.replaceAll('-', '').substring(snapshot.data!.replaceAll('-', '').length - 4).toUpperCase()}',
                     ),
                   ),
                   _StatusRow(
-                    label: 'App version',
+                    label: 'เวอร์ชันแอป',
                     value:
                         '${RelioBuildInfo.versionName}+${RelioBuildInfo.buildNumber}',
                   ),
                   _StatusRow(
-                    label: 'Internet',
+                    label: 'อินเทอร์เน็ต',
                     value: _internetLabel(status.reachability),
                     color: _internetColor(status.reachability),
                   ),
                   _StatusRow(
-                    label: 'Wi-Fi radio',
+                    label: 'Wi-Fi',
                     value: _radioLabel(runtime.wifiEnabled),
                   ),
                   _StatusRow(
@@ -100,15 +100,18 @@ class _ConnectivityDiagnosticsCardState
                     value: _radioLabel(runtime.bluetoothEnabled),
                   ),
                   _StatusRow(
-                    label: 'Nearby readiness',
+                    label: 'ความพร้อม Nearby',
                     value: nearby.statusLabel,
                     color: RelioColors.primary,
                   ),
                   _StatusRow(
-                    label: 'Connected peers',
+                    label: 'อุปกรณ์ที่เชื่อมต่อ',
                     value: '${nearby.connectedPeerCount}',
                   ),
-                  _StatusRow(label: 'Cloud', value: _cloudLabel(cloud)),
+                  _StatusRow(
+                    label: 'การซิงก์ข้อมูลออนไลน์',
+                    value: _cloudLabel(cloud),
+                  ),
                   if (runtime.androidSdk != null)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -169,11 +172,15 @@ class _StatusRow extends StatelessWidget {
     child: Row(
       children: [
         Expanded(child: Text(label)),
-        Text(
-          value,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: color,
-            fontWeight: FontWeight.w600,
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
       ],
