@@ -31,6 +31,7 @@ class MainActivity : FlutterActivity() {
     private val identityChannel = "relio/device_identity"
     private val diagnosticsChannel = "relio/diagnostics"
     private val mediaChannel = "relio/media"
+    private val emergencyDialerChannel = "relio/emergency_dialer"
     private val identityKeyStore = RelioIdentityKeyStore()
     private val identityExecutor = Executors.newSingleThreadExecutor()
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
@@ -79,6 +80,22 @@ class MainActivity : FlutterActivity() {
                         "วิดีโอไม่มีอยู่หรือไม่สามารถเปิดได้",
                         null,
                     )
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, emergencyDialerChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "openDialer") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                try {
+                    val phone = call.argument<String>("phone")?.trim().orEmpty()
+                    require(phone.matches(Regex("^\\+?[0-9() .-]{3,40}$")))
+                    val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", phone, null))
+                    startActivity(intent)
+                    result.success(null)
+                } catch (_: Throwable) {
+                    result.error("dialer_unavailable", "ไม่สามารถเปิดแอปโทรศัพท์ได้", null)
                 }
             }
         if (packageName != PROD_APPLICATION_ID) {

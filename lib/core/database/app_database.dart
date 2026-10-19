@@ -190,6 +190,20 @@ class RelayForwardHistory extends Table {
   Set<Column<Object>> get primaryKey => {packetId, targetDeviceId};
 }
 
+class EmergencyContacts extends Table {
+  TextColumn get id => text()();
+  TextColumn get principalId => text()();
+  TextColumn get name => text()();
+  TextColumn get phone => text()();
+  TextColumn get relationship => text().nullable()();
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
 @DriftDatabase(
   tables: [
     Conversations,
@@ -202,6 +216,7 @@ class RelayForwardHistory extends Table {
     Attachments,
     RelayPackets,
     RelayForwardHistory,
+    EmergencyContacts,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -212,7 +227,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -220,6 +235,10 @@ class AppDatabase extends _$AppDatabase {
       await migrator.createAll();
       await _createConversationScopes();
       await _createPrincipalSchema();
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS emergency_contacts_principal_idx '
+        'ON emergency_contacts(principal_id)',
+      );
     },
     onUpgrade: (Migrator migrator, int from, int to) async {
       if (from < 2) {
@@ -342,6 +361,13 @@ class AppDatabase extends _$AppDatabase {
             1, (SELECT value FROM app_settings WHERE key = 'profile_avatar_path'), 0, 0
           WHERE EXISTS (SELECT 1 FROM app_settings WHERE key IN ('display_name', 'profile_avatar_path'))
         ''');
+      }
+      if (from < 11) {
+        await migrator.createTable(emergencyContacts);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS emergency_contacts_principal_idx '
+          'ON emergency_contacts(principal_id)',
+        );
       }
     },
     beforeOpen: (OpeningDetails details) async {

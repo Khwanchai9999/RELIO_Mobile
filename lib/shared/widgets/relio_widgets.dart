@@ -187,6 +187,61 @@ class RelioUserAvatar extends StatelessWidget {
   }
 }
 
+class RelioPrincipalAvatar extends StatelessWidget {
+  const RelioPrincipalAvatar({
+    required this.name,
+    required this.imagePath,
+    this.size = 68,
+    super.key,
+  });
+
+  final String name;
+  final String? imagePath;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final cleaned = name.trim();
+    final initial = cleaned.isEmpty
+        ? null
+        : String.fromCharCode(cleaned.runes.first);
+    final fallback = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: RelioColors.primary.withValues(alpha: 0.14),
+        border: Border.all(color: RelioColors.primary, width: 1.5),
+      ),
+      child: initial == null
+          ? Icon(
+              Icons.person_rounded,
+              size: size * 0.58,
+              color: RelioColors.primary,
+            )
+          : Text(
+              initial,
+              style: TextStyle(
+                fontSize: size * 0.48,
+                fontWeight: FontWeight.w700,
+                color: RelioColors.primary,
+              ),
+            ),
+    );
+    if (imagePath == null || imagePath!.isEmpty) return fallback;
+    return ClipOval(
+      child: Image.file(
+        File(imagePath!),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback,
+      ),
+    );
+  }
+}
+
 class RelioConnectivityBanner extends StatelessWidget {
   const RelioConnectivityBanner({required this.internetOnline, super.key});
 

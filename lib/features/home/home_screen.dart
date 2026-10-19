@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -265,37 +263,20 @@ class _GreetingCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
-                FutureBuilder<String?>(
-                  future: avatarPath,
-                  builder: (context, snapshot) {
-                    final path = snapshot.data;
-                    if (path == null) {
-                      return FutureBuilder<String>(
-                        future: displayName,
-                        builder: (context, nameSnapshot) => _AvatarFrame(
-                          child: RelioUserAvatar(
-                            name: nameSnapshot.data ?? 'ผู้ใช้ RELIO',
-                            size: 68,
-                          ),
-                        ),
-                      );
-                    }
-                    return _AvatarFrame(
-                      child: ClipOval(
-                        child: Image.file(
-                          File(path),
-                          width: 68,
-                          height: 68,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const Icon(
-                            Icons.person_rounded,
-                            size: 42,
-                            color: RelioColors.primary,
-                          ),
-                        ),
+                FutureBuilder<String>(
+                  key: ObjectKey(displayName),
+                  future: displayName,
+                  builder: (context, nameSnapshot) => FutureBuilder<String?>(
+                    key: ObjectKey(avatarPath),
+                    future: avatarPath,
+                    builder: (context, avatarSnapshot) => _AvatarFrame(
+                      child: RelioPrincipalAvatar(
+                        name: nameSnapshot.data ?? '',
+                        imagePath: avatarSnapshot.data,
+                        size: 68,
                       ),
-                    );
-                  },
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(

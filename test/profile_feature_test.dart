@@ -56,7 +56,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.byTooltip('แก้ไขโปรไฟล์'));
+      await tester.tap(find.byTooltip('แก้ไขชื่อ'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), '  RELIO QA ชื่อ  ');
       await tester.tap(find.text('บันทึก'));
@@ -97,7 +97,7 @@ void main() {
     await tester.pumpAndSettle();
     final originalName = await dependencies.identity.getDisplayName();
 
-    await tester.tap(find.byTooltip('แก้ไขโปรไฟล์'));
+    await tester.tap(find.byTooltip('แก้ไขชื่อ'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '   ');
     await tester.tap(find.text('บันทึก'));
@@ -109,7 +109,7 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.tap(find.byTooltip('แก้ไขโปรไฟล์'));
+    await tester.tap(find.byTooltip('แก้ไขชื่อ'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'Another Name');
     await tester.tap(find.text('ยกเลิก'));

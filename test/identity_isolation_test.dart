@@ -685,7 +685,7 @@ void main() {
           .getSingle();
       expect(legacy.read<String>('display_name'), 'Legacy Jane');
       expect(legacy.read<String>('avatar_path'), '/keep/avatar.png');
-      expect(db.schemaVersion, 10);
+      expect(db.schemaVersion, 11);
     },
   );
 }

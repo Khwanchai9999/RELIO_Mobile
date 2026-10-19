@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -102,36 +100,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: FutureBuilder<String?>(
-                              key: ValueKey('avatar:$_profileRevision'),
-                              future: _avatarPathFuture,
-                              builder: (context, snapshot) {
-                                final imagePath = snapshot.data;
-                                return imagePath == null
-                                    ? Image.asset(
-                                        'assets/branding/relio-logo-master.png',
-                                        width: 72,
-                                        height: 72,
-                                        fit: BoxFit.cover,
-                                        semanticLabel: 'โลโก้ RELIO',
-                                      )
-                                    : Image.file(
-                                        File(imagePath),
-                                        width: 72,
-                                        height: 72,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (_, _, _) => Image.asset(
-                                          'assets/branding/relio-logo-master.png',
-                                          width: 72,
-                                          height: 72,
-                                          fit: BoxFit.cover,
-                                          semanticLabel: 'โลโก้ RELIO',
-                                        ),
-                                      );
-                              },
-                            ),
+                          FutureBuilder<String>(
+                            key: ValueKey('avatar-name:$_profileRevision'),
+                            future: _localDisplayNameFuture,
+                            builder: (context, nameSnapshot) =>
+                                FutureBuilder<String?>(
+                                  key: ValueKey('avatar:$_profileRevision'),
+                                  future: _avatarPathFuture,
+                                  builder: (context, avatarSnapshot) =>
+                                      RelioPrincipalAvatar(
+                                        name: nameSnapshot.data ?? '',
+                                        imagePath: avatarSnapshot.data,
+                                        size: 72,
+                                      ),
+                                ),
                           ),
                           if (_avatarBusy)
                             const SizedBox(
@@ -171,7 +153,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          identity?.email ?? 'ใช้งานแบบออฟไลน์',
+                          identity?.email ??
+                              (dependencies.hasOfflineAuthenticatedPrincipal
+                                  ? 'บัญชีที่เข้าสู่ระบบไว้ • ออฟไลน์'
+                                  : 'ใช้งานแบบออฟไลน์'),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -179,7 +164,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   IconButton(
                     onPressed: () => _editDisplayName(context),
-                    tooltip: 'แก้ไขโปรไฟล์',
+                    tooltip: 'แก้ไขชื่อ',
                     icon: const Icon(Icons.edit_outlined),
                   ),
                 ],
@@ -187,39 +172,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          RelioSettingTile(
-            icon: Icons.shield_outlined,
-            title: 'โหมดหน่วยกู้ภัย (Rescue)',
-            subtitle: 'ดูสถานะและเปลี่ยนโหมดจริง',
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => context.push('/rescue'),
-          ),
-          const SizedBox(height: 8),
-          if (identity != null) ...[
-            RelioSettingTile(
-              icon: Icons.content_copy_rounded,
-              title: 'Cloud Account ID',
-              subtitle: 'แตะเพื่อคัดลอกและแชร์กับผู้ติดต่อที่เชื่อถือได้',
-              onTap: () async {
-                await Clipboard.setData(ClipboardData(text: identity.userId));
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('คัดลอก Cloud Account ID แล้ว'),
-                    ),
-                  );
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-          RelioSettingTile(
-            icon: Icons.dark_mode_outlined,
-            title: 'ธีม',
-            subtitle: 'จัดการในตั้งค่า',
-            onTap: () => context.push('/settings/theme'),
-          ),
-          const SizedBox(height: 18),
           Text(
             'บัญชีและแอป',
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -228,43 +180,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 8),
           RelioSettingTile(
-            icon: Icons.person_outline,
-            title: 'แก้ไขข้อมูลสมาชิก',
-            onTap: () => _editDisplayName(context),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
             icon: Icons.medical_information_outlined,
             title: 'ข้อมูลฉุกเฉิน',
-            subtitle: 'ยังไม่มีข้อมูลที่บันทึกไว้',
+            subtitle: 'บันทึกผู้ติดต่อฉุกเฉินไว้ในเครื่อง',
+            onTap: () => context.push('/profile/emergency'),
           ),
           const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.notifications_none_rounded,
-            title: 'การแจ้งเตือน',
-            subtitle: 'ยังไม่รองรับการแจ้งเตือนจากระบบ',
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.link_rounded,
-            title: 'การเชื่อมต่อ',
-            subtitle: 'ตรวจดูสถานะ Internet, Bluetooth และ Nearby จริง',
-            onTap: () => context.push('/settings'),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.sync_rounded,
-            title: 'สถานะการซิงก์',
-            subtitle: 'ดูสถานะคิว Cloud จริง',
-            onTap: () => context.push('/sync'),
-          ),
-          const SizedBox(height: 8),
-          RelioSettingTile(
-            icon: Icons.lock_outline,
-            title: 'ความเป็นส่วนตัว',
-            onTap: () => _showPrivacy(context),
-          ),
-          const SizedBox(height: 8),
+          if (identity != null) ...[
+            ExpansionTile(
+              title: const Text('รายละเอียดบัญชี'),
+              children: [
+                RelioSettingTile(
+                  icon: Icons.content_copy_rounded,
+                  title: 'Cloud Account ID',
+                  subtitle: 'แตะเพื่อคัดลอกและแชร์กับผู้ติดต่อที่เชื่อถือได้',
+                  onTap: () async {
+                    if (dependencies.repositories.ownerContext
+                            .capture()
+                            .userId !=
+                        identity.userId) {
+                      return;
+                    }
+                    await Clipboard.setData(
+                      ClipboardData(text: identity.userId),
+                    );
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('คัดลอก Cloud Account ID แล้ว'),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
           RelioSettingTile(
             icon: Icons.info_outline,
             title: 'เกี่ยวกับ RELIO',
@@ -515,22 +467,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       SizedBox(height: 8),
       Text('ข้อมูลหลักจัดเก็บในเครื่อง; Cloud เป็นทางเลือก'),
     ],
-  );
-
-  void _showPrivacy(BuildContext context) => showDialog<void>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('ความเป็นส่วนตัว'),
-      content: const Text(
-        'RELIO เก็บข้อมูลการสื่อสารไว้ในเครื่องก่อนเสมอ และใช้ Cloud เฉพาะเมื่อกำหนดค่าบัญชีไว้ ข้อมูลตำแหน่งจะขอเมื่อคุณสั่งแชร์ตำแหน่งหรือเปิด SOS เท่านั้น',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('ปิด'),
-        ),
-      ],
-    ),
   );
 }
 

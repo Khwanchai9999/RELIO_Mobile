@@ -285,6 +285,11 @@ this define and remain OFF on a clean install; DEV and PROD cannot activate it.
 
 ## Identity isolation candidate (schema 10)
 
+Schema 11 adds principal-owned emergency contacts in local SQLite only. Contact
+CRUD must check OwnerContext before and inside transactions; contacts never enter
+SOS, Nearby, Cloud, FCM, or sync_queue. The emergency dialer opens ACTION_DIAL
+without calling directly. Schema 10 identity and trust behavior remains intact.
+
 - Keep device identity/trust separate from `account:<raw UUID>` and the persisted
   installation Guest principal. Account switches must not reset Nearby radio,
   Keystore keys, device_id or trusted pins.

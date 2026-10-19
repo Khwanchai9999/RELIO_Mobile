@@ -1154,7 +1154,7 @@ void main() {
         await upgradedRepositories.cloudLinks.listForOwner('account-a'),
         isEmpty,
       );
-      expect(upgraded.schemaVersion, 10);
+      expect(upgraded.schemaVersion, 11);
       await upgraded.close();
     },
   );

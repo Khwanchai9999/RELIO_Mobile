@@ -12,6 +12,7 @@ import '../features/home/home_screen.dart';
 import '../features/nearby/nearby_screen.dart';
 import '../features/onboarding/welcome_screen.dart';
 import '../features/profile/profile_screen.dart';
+import '../features/emergency/emergency_contact_screen.dart';
 import '../features/rescue/rescue_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/sos/sos_screens.dart';
@@ -85,6 +86,10 @@ GoRouter createRelioRouter({
           ),
           GoRoute(path: '/rescue', builder: (_, _) => const RescueScreen()),
           GoRoute(path: '/profile', builder: (_, _) => const ProfileScreen()),
+          GoRoute(
+            path: '/profile/emergency',
+            builder: (_, _) => const EmergencyContactScreen(),
+          ),
           GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
           GoRoute(
             path: '/settings/theme',

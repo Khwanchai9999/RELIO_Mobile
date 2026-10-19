@@ -7633,6 +7633,523 @@ class RelayForwardHistoryCompanion
   }
 }
 
+class $EmergencyContactsTable extends EmergencyContacts
+    with TableInfo<$EmergencyContactsTable, EmergencyContact> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EmergencyContactsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _principalIdMeta = const VerificationMeta(
+    'principalId',
+  );
+  @override
+  late final GeneratedColumn<String> principalId = GeneratedColumn<String>(
+    'principal_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _phoneMeta = const VerificationMeta('phone');
+  @override
+  late final GeneratedColumn<String> phone = GeneratedColumn<String>(
+    'phone',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _relationshipMeta = const VerificationMeta(
+    'relationship',
+  );
+  @override
+  late final GeneratedColumn<String> relationship = GeneratedColumn<String>(
+    'relationship',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _noteMeta = const VerificationMeta('note');
+  @override
+  late final GeneratedColumn<String> note = GeneratedColumn<String>(
+    'note',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    principalId,
+    name,
+    phone,
+    relationship,
+    note,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'emergency_contacts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EmergencyContact> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('principal_id')) {
+      context.handle(
+        _principalIdMeta,
+        principalId.isAcceptableOrUnknown(
+          data['principal_id']!,
+          _principalIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_principalIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('phone')) {
+      context.handle(
+        _phoneMeta,
+        phone.isAcceptableOrUnknown(data['phone']!, _phoneMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_phoneMeta);
+    }
+    if (data.containsKey('relationship')) {
+      context.handle(
+        _relationshipMeta,
+        relationship.isAcceptableOrUnknown(
+          data['relationship']!,
+          _relationshipMeta,
+        ),
+      );
+    }
+    if (data.containsKey('note')) {
+      context.handle(
+        _noteMeta,
+        note.isAcceptableOrUnknown(data['note']!, _noteMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  EmergencyContact map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EmergencyContact(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      principalId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}principal_id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      phone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}phone'],
+      )!,
+      relationship: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}relationship'],
+      ),
+      note: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}note'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $EmergencyContactsTable createAlias(String alias) {
+    return $EmergencyContactsTable(attachedDatabase, alias);
+  }
+}
+
+class EmergencyContact extends DataClass
+    implements Insertable<EmergencyContact> {
+  final String id;
+  final String principalId;
+  final String name;
+  final String phone;
+  final String? relationship;
+  final String? note;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const EmergencyContact({
+    required this.id,
+    required this.principalId,
+    required this.name,
+    required this.phone,
+    this.relationship,
+    this.note,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['principal_id'] = Variable<String>(principalId);
+    map['name'] = Variable<String>(name);
+    map['phone'] = Variable<String>(phone);
+    if (!nullToAbsent || relationship != null) {
+      map['relationship'] = Variable<String>(relationship);
+    }
+    if (!nullToAbsent || note != null) {
+      map['note'] = Variable<String>(note);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  EmergencyContactsCompanion toCompanion(bool nullToAbsent) {
+    return EmergencyContactsCompanion(
+      id: Value(id),
+      principalId: Value(principalId),
+      name: Value(name),
+      phone: Value(phone),
+      relationship: relationship == null && nullToAbsent
+          ? const Value.absent()
+          : Value(relationship),
+      note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory EmergencyContact.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EmergencyContact(
+      id: serializer.fromJson<String>(json['id']),
+      principalId: serializer.fromJson<String>(json['principalId']),
+      name: serializer.fromJson<String>(json['name']),
+      phone: serializer.fromJson<String>(json['phone']),
+      relationship: serializer.fromJson<String?>(json['relationship']),
+      note: serializer.fromJson<String?>(json['note']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'principalId': serializer.toJson<String>(principalId),
+      'name': serializer.toJson<String>(name),
+      'phone': serializer.toJson<String>(phone),
+      'relationship': serializer.toJson<String?>(relationship),
+      'note': serializer.toJson<String?>(note),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  EmergencyContact copyWith({
+    String? id,
+    String? principalId,
+    String? name,
+    String? phone,
+    Value<String?> relationship = const Value.absent(),
+    Value<String?> note = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => EmergencyContact(
+    id: id ?? this.id,
+    principalId: principalId ?? this.principalId,
+    name: name ?? this.name,
+    phone: phone ?? this.phone,
+    relationship: relationship.present ? relationship.value : this.relationship,
+    note: note.present ? note.value : this.note,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  EmergencyContact copyWithCompanion(EmergencyContactsCompanion data) {
+    return EmergencyContact(
+      id: data.id.present ? data.id.value : this.id,
+      principalId: data.principalId.present
+          ? data.principalId.value
+          : this.principalId,
+      name: data.name.present ? data.name.value : this.name,
+      phone: data.phone.present ? data.phone.value : this.phone,
+      relationship: data.relationship.present
+          ? data.relationship.value
+          : this.relationship,
+      note: data.note.present ? data.note.value : this.note,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmergencyContact(')
+          ..write('id: $id, ')
+          ..write('principalId: $principalId, ')
+          ..write('name: $name, ')
+          ..write('phone: $phone, ')
+          ..write('relationship: $relationship, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    principalId,
+    name,
+    phone,
+    relationship,
+    note,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EmergencyContact &&
+          other.id == this.id &&
+          other.principalId == this.principalId &&
+          other.name == this.name &&
+          other.phone == this.phone &&
+          other.relationship == this.relationship &&
+          other.note == this.note &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class EmergencyContactsCompanion extends UpdateCompanion<EmergencyContact> {
+  final Value<String> id;
+  final Value<String> principalId;
+  final Value<String> name;
+  final Value<String> phone;
+  final Value<String?> relationship;
+  final Value<String?> note;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const EmergencyContactsCompanion({
+    this.id = const Value.absent(),
+    this.principalId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.phone = const Value.absent(),
+    this.relationship = const Value.absent(),
+    this.note = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EmergencyContactsCompanion.insert({
+    required String id,
+    required String principalId,
+    required String name,
+    required String phone,
+    this.relationship = const Value.absent(),
+    this.note = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       principalId = Value(principalId),
+       name = Value(name),
+       phone = Value(phone),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<EmergencyContact> custom({
+    Expression<String>? id,
+    Expression<String>? principalId,
+    Expression<String>? name,
+    Expression<String>? phone,
+    Expression<String>? relationship,
+    Expression<String>? note,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (principalId != null) 'principal_id': principalId,
+      if (name != null) 'name': name,
+      if (phone != null) 'phone': phone,
+      if (relationship != null) 'relationship': relationship,
+      if (note != null) 'note': note,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EmergencyContactsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? principalId,
+    Value<String>? name,
+    Value<String>? phone,
+    Value<String?>? relationship,
+    Value<String?>? note,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return EmergencyContactsCompanion(
+      id: id ?? this.id,
+      principalId: principalId ?? this.principalId,
+      name: name ?? this.name,
+      phone: phone ?? this.phone,
+      relationship: relationship ?? this.relationship,
+      note: note ?? this.note,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (principalId.present) {
+      map['principal_id'] = Variable<String>(principalId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (phone.present) {
+      map['phone'] = Variable<String>(phone.value);
+    }
+    if (relationship.present) {
+      map['relationship'] = Variable<String>(relationship.value);
+    }
+    if (note.present) {
+      map['note'] = Variable<String>(note.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmergencyContactsCompanion(')
+          ..write('id: $id, ')
+          ..write('principalId: $principalId, ')
+          ..write('name: $name, ')
+          ..write('phone: $phone, ')
+          ..write('relationship: $relationship, ')
+          ..write('note: $note, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -7648,6 +8165,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $RelayPacketsTable relayPackets = $RelayPacketsTable(this);
   late final $RelayForwardHistoryTable relayForwardHistory =
       $RelayForwardHistoryTable(this);
+  late final $EmergencyContactsTable emergencyContacts =
+      $EmergencyContactsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -7663,6 +8182,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     attachments,
     relayPackets,
     relayForwardHistory,
+    emergencyContacts,
   ];
 }
 
@@ -11281,6 +11801,289 @@ typedef $$RelayForwardHistoryTableProcessedTableManager =
       RelayForwardHistoryData,
       PrefetchHooks Function()
     >;
+typedef $$EmergencyContactsTableCreateCompanionBuilder =
+    EmergencyContactsCompanion Function({
+      required String id,
+      required String principalId,
+      required String name,
+      required String phone,
+      Value<String?> relationship,
+      Value<String?> note,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$EmergencyContactsTableUpdateCompanionBuilder =
+    EmergencyContactsCompanion Function({
+      Value<String> id,
+      Value<String> principalId,
+      Value<String> name,
+      Value<String> phone,
+      Value<String?> relationship,
+      Value<String?> note,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$EmergencyContactsTableFilterComposer
+    extends Composer<_$AppDatabase, $EmergencyContactsTable> {
+  $$EmergencyContactsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get phone => $composableBuilder(
+    column: $table.phone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get relationship => $composableBuilder(
+    column: $table.relationship,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EmergencyContactsTableOrderingComposer
+    extends Composer<_$AppDatabase, $EmergencyContactsTable> {
+  $$EmergencyContactsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get phone => $composableBuilder(
+    column: $table.phone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get relationship => $composableBuilder(
+    column: $table.relationship,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EmergencyContactsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EmergencyContactsTable> {
+  $$EmergencyContactsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get phone =>
+      $composableBuilder(column: $table.phone, builder: (column) => column);
+
+  GeneratedColumn<String> get relationship => $composableBuilder(
+    column: $table.relationship,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get note =>
+      $composableBuilder(column: $table.note, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$EmergencyContactsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EmergencyContactsTable,
+          EmergencyContact,
+          $$EmergencyContactsTableFilterComposer,
+          $$EmergencyContactsTableOrderingComposer,
+          $$EmergencyContactsTableAnnotationComposer,
+          $$EmergencyContactsTableCreateCompanionBuilder,
+          $$EmergencyContactsTableUpdateCompanionBuilder,
+          (
+            EmergencyContact,
+            BaseReferences<
+              _$AppDatabase,
+              $EmergencyContactsTable,
+              EmergencyContact
+            >,
+          ),
+          EmergencyContact,
+          PrefetchHooks Function()
+        > {
+  $$EmergencyContactsTableTableManager(
+    _$AppDatabase db,
+    $EmergencyContactsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EmergencyContactsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EmergencyContactsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EmergencyContactsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> principalId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> phone = const Value.absent(),
+                Value<String?> relationship = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmergencyContactsCompanion(
+                id: id,
+                principalId: principalId,
+                name: name,
+                phone: phone,
+                relationship: relationship,
+                note: note,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String principalId,
+                required String name,
+                required String phone,
+                Value<String?> relationship = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => EmergencyContactsCompanion.insert(
+                id: id,
+                principalId: principalId,
+                name: name,
+                phone: phone,
+                relationship: relationship,
+                note: note,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$EmergencyContactsTable, EmergencyContact>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $EmergencyContactsTable,
+                    EmergencyContact
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EmergencyContactsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EmergencyContactsTable,
+      EmergencyContact,
+      $$EmergencyContactsTableFilterComposer,
+      $$EmergencyContactsTableOrderingComposer,
+      $$EmergencyContactsTableAnnotationComposer,
+      $$EmergencyContactsTableCreateCompanionBuilder,
+      $$EmergencyContactsTableUpdateCompanionBuilder,
+      (
+        EmergencyContact,
+        BaseReferences<
+          _$AppDatabase,
+          $EmergencyContactsTable,
+          EmergencyContact
+        >,
+      ),
+      EmergencyContact,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -11308,4 +12111,6 @@ class $AppDatabaseManager {
       $$RelayPacketsTableTableManager(_db, _db.relayPackets);
   $$RelayForwardHistoryTableTableManager get relayForwardHistory =>
       $$RelayForwardHistoryTableTableManager(_db, _db.relayForwardHistory);
+  $$EmergencyContactsTableTableManager get emergencyContacts =>
+      $$EmergencyContactsTableTableManager(_db, _db.emergencyContacts);
 }
