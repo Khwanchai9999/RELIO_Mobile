@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$DeviceSerial = 'YDVNW19B23003867'
 )
