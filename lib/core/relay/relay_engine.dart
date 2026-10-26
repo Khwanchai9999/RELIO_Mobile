@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import '../../data/models/prototype_models.dart';
+import '../diagnostics/diagnostics_log_service.dart';
 import '../domain/relio_entities.dart';
 import '../nearby/nearby_transport.dart';
 import '../nearby/relio_packet.dart';
@@ -24,6 +25,7 @@ class RelayEngine {
     this.sos,
     this.connectedPeers,
     this.deviceIdForEndpoint,
+    this.diagnostics,
     RelayPolicy? policy,
   }) : policy = policy ?? const RelayPolicy();
 
@@ -35,6 +37,7 @@ class RelayEngine {
   final SOSRepository? sos;
   final RelayPeers? connectedPeers;
   final RelayEndpointDeviceId? deviceIdForEndpoint;
+  final DiagnosticsLogService? diagnostics;
   final RelayPolicy policy;
   final _subscriptions = <StreamSubscription<Object?>>[];
   Future<void>? _forwardOperation;
@@ -85,6 +88,7 @@ class RelayEngine {
     }
     final inserted = await repository.storePacket(envelope);
     if (!inserted) return RelayResult.duplicate;
+    _recordRelay('packet_enqueued', envelope, fields: {'state': 'stored'});
     await forwardPending();
     return RelayResult.stored;
   }
@@ -130,9 +134,20 @@ class RelayEngine {
         : envelope;
     final inserted = await repository.storePacket(storedEnvelope);
     if (!inserted) {
+      _recordRelay('duplicate_suppressed', storedEnvelope);
       await _sendRelayAck(endpointId, envelope.packetId, 'stored');
       return RelayResult.duplicate;
     }
+    _recordRelay(
+      'envelope_stored',
+      storedEnvelope,
+      fields: {
+        'nodeRole':
+            storedEnvelope.destinationDeviceId == await identity.getDeviceId()
+            ? 'destination'
+            : 'relay',
+      },
+    );
     final localDeviceId = await identity.getDeviceId();
     if (storedEnvelope.destinationDeviceId == localDeviceId) {
       try {
@@ -141,6 +156,7 @@ class RelayEngine {
           storedEnvelope.packetId,
           RelayPacketState.delivered,
         );
+        _recordRelay('payload_delivered', storedEnvelope);
         await _sendRelayAck(endpointId, storedEnvelope.packetId, 'delivered');
         return RelayResult.delivered;
       } on Object {
@@ -230,6 +246,13 @@ class RelayEngine {
         targetDeviceId: targetDeviceId,
         targetEndpointId: candidate.endpointId,
       );
+      _recordRelay(
+        'forward_attempt',
+        forwarded,
+        fields: {
+          'targetAlias': DiagnosticsLogService.peerAlias(targetDeviceId),
+        },
+      );
       try {
         // บันทึก SQLite และ forward history ก่อนส่ง Nearby เพื่อให้ crash แล้วกู้ต่อได้
         await transport.sendBytes(
@@ -245,11 +268,25 @@ class RelayEngine {
           envelope.packetId,
           RelayPacketState.forwarded,
         );
+        _recordRelay(
+          'forward_sent',
+          forwarded,
+          fields: {
+            'targetAlias': DiagnosticsLogService.peerAlias(targetDeviceId),
+          },
+        );
       } on Object {
         await repository.recordForwardResult(
           packetId: envelope.packetId,
           targetDeviceId: targetDeviceId,
           status: 'failed',
+        );
+        _recordRelay(
+          'forward_failed',
+          forwarded,
+          fields: {
+            'targetAlias': DiagnosticsLogService.peerAlias(targetDeviceId),
+          },
         );
       }
     }
@@ -283,6 +320,31 @@ class RelayEngine {
 
   String? _deviceId(NearbyPeer peer) =>
       peer.deviceId ?? deviceIdForEndpoint?.call(peer.endpointId);
+
+  void _recordRelay(
+    String event,
+    RelayEnvelope envelope, {
+    Map<String, Object?> fields = const {},
+  }) {
+    diagnostics?.record(
+      'relay',
+      event,
+      peerIdentifier: envelope.destinationDeviceId,
+      fields: {
+        'relayPacketAlias': DiagnosticsLogService.peerAlias(envelope.packetId),
+        'payloadAlias': DiagnosticsLogService.peerAlias(envelope.payloadId),
+        'originAlias': DiagnosticsLogService.peerAlias(envelope.originDeviceId),
+        'destinationAlias': DiagnosticsLogService.peerAlias(
+          envelope.destinationDeviceId,
+        ),
+        'hopCount': envelope.hopCount,
+        'maxHops': envelope.maxHops,
+        if (envelope.previousHopDeviceId case final previousHop?)
+          'previousHopAlias': DiagnosticsLogService.peerAlias(previousHop),
+        ...fields,
+      },
+    );
+  }
 
   Future<void> _materializeIfPresent(RelayPacketRecord record) async {
     try {
@@ -408,6 +470,7 @@ class RelayEngine {
         status: status == 'delivered' ? 'delivered' : 'sent',
       );
     }
+    await _recordRelayAck('ack_received', packetId, status, endpointId);
     if (local.isEmpty) return RelayResult.blocked;
     return status == 'delivered' ? RelayResult.delivered : RelayResult.stored;
   }
@@ -431,8 +494,33 @@ class RelayEngine {
             : 'stored',
       );
       await transport.sendBytes(packet.toBytes(), peerId: endpointId);
+      await _recordRelayAck('ack_sent', relayPacketId, status, endpointId);
     } on Object {
+      await _recordRelayAck('ack_failed', relayPacketId, status, endpointId);
       // A hop ACK is best effort; SQLite still contains the authoritative row.
+    }
+  }
+
+  Future<void> _recordRelayAck(
+    String event,
+    String packetId,
+    String status,
+    String endpointId,
+  ) async {
+    if (diagnostics == null) return;
+    try {
+      final record = await repository.getPacket(packetId);
+      if (record == null) return;
+      _recordRelay(
+        event,
+        record.envelope,
+        fields: {
+          'ackStatus': status,
+          'ackEndpointAlias': DiagnosticsLogService.peerAlias(endpointId),
+        },
+      );
+    } on Object {
+      // QA logging must not change relay acknowledgement behavior.
     }
   }
 

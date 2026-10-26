@@ -142,6 +142,7 @@ class RelioDependencies {
       connectedPeers: () => nearbyService.connectedPeers,
       deviceIdForEndpoint: (endpointId) =>
           nearbyService.deviceIdForEndpoint(endpointId),
+      diagnostics: diagnostics,
     );
     nearbyService = NearbyService(
       transport: this.transport,

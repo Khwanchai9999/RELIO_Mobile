@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:relio_mobile/core/database/app_database.dart';
+import 'package:relio_mobile/core/diagnostics/diagnostics_log_service.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
 import 'package:relio_mobile/core/relay/relay_engine.dart';
@@ -63,6 +64,9 @@ void main() {
             (await a.identity.profiles.current()).principalId,
             (await c.identity.profiles.current()).principalId,
           );
+      final relayLogsA = <String>[];
+      final relayLogsB = <String>[];
+      final relayLogsC = <String>[];
       final envelope = RelayEnvelope.fromPayloadPacket(
         packet: packet,
         destinationDeviceId: 'device-c',
@@ -73,6 +77,7 @@ void main() {
         transport: a.transport,
         identity: a.identity,
         repository: a.relay,
+        diagnostics: DiagnosticsLogService(qaLogcatSink: relayLogsA.add),
         connectedPeers: () => [
           const NearbyPeer(
             id: 'endpoint-b',
@@ -89,6 +94,7 @@ void main() {
         repository: b.relay,
         messages: b.repositories.messages,
         conversations: b.repositories.conversations,
+        diagnostics: DiagnosticsLogService(qaLogcatSink: relayLogsB.add),
         connectedPeers: () => [
           const NearbyPeer(
             id: 'endpoint-c',
@@ -105,6 +111,7 @@ void main() {
         repository: c.relay,
         messages: c.repositories.messages,
         conversations: c.repositories.conversations,
+        diagnostics: DiagnosticsLogService(qaLogcatSink: relayLogsC.add),
       );
       await engineA.initialize();
       await engineB.initialize();
@@ -134,6 +141,84 @@ void main() {
       expect(await c.relay.packetCount(), 1);
       expect(await c.repositories.syncQueue.listAll(), isEmpty);
 
+      final correlationAlias = DiagnosticsLogService.peerAlias(
+        envelope.payloadId,
+      );
+      expect(
+        relayLogsA.any(
+          (line) =>
+              line.contains('forward_sent') &&
+              line.contains('payloadAlias') &&
+              line.contains(correlationAlias) &&
+              line.contains('"hopCount":1'),
+        ),
+        isTrue,
+      );
+      expect(
+        relayLogsB.any(
+          (line) =>
+              line.contains('envelope_stored') &&
+              line.contains(correlationAlias) &&
+              line.contains('"hopCount":1') &&
+              line.contains(DiagnosticsLogService.peerAlias('device-a')),
+        ),
+        isTrue,
+      );
+      expect(
+        relayLogsB.any(
+          (line) =>
+              line.contains('forward_sent') &&
+              line.contains(correlationAlias) &&
+              line.contains('"hopCount":2') &&
+              line.contains(DiagnosticsLogService.peerAlias('device-c')),
+        ),
+        isTrue,
+      );
+      expect(
+        relayLogsC.any(
+          (line) =>
+              line.contains('payload_delivered') &&
+              line.contains(correlationAlias) &&
+              line.contains('"hopCount":2') &&
+              line.contains(DiagnosticsLogService.peerAlias('device-b')),
+        ),
+        isTrue,
+      );
+      expect(
+        [...relayLogsA, ...relayLogsB, ...relayLogsC].join('\n'),
+        isNot(contains('private text')),
+      );
+
+      final recipientAck = c.transport.sentPayloads
+          .map(RelioPacket.fromBytes)
+          .where((item) => item.type == RelioPacketType.relayAck)
+          .single;
+      expect(recipientAck.payload['relayPacketId'], envelope.packetId);
+      expect(recipientAck.payload['status'], 'delivered');
+      await engineB.handleIncomingPacket('endpoint-c', recipientAck);
+      expect(
+        (await b.relay.getForwardRecord(envelope.packetId, 'device-c'))?.status,
+        'delivered',
+      );
+      expect(
+        relayLogsC.any(
+          (line) =>
+              line.contains('ack_sent') &&
+              line.contains('"ackStatus":"delivered"') &&
+              line.contains(correlationAlias),
+        ),
+        isTrue,
+      );
+      expect(
+        relayLogsB.any(
+          (line) =>
+              line.contains('ack_received') &&
+              line.contains('"ackStatus":"delivered"') &&
+              line.contains(correlationAlias),
+        ),
+        isTrue,
+      );
+
       await engineB.handleIncomingBytes('endpoint-a', sentToB.single);
       expect(await b.relay.packetCount(), 1);
       expect(
@@ -142,6 +227,52 @@ void main() {
       );
     },
   );
+
+  test('enqueuePayload sends through the sole eligible relay peer', () async {
+    final a = await _node('device-a');
+    addTearDown(a.close);
+    final localProfile = await a.identity.profiles.current();
+    final packet = RelioPacket.textMessage(
+      senderDeviceId: 'device-a',
+      senderUserId: 'device-a',
+      messageId: 'relay-probe-message',
+      conversationId: 'conversation-c',
+      text: 'RELIO QA RELAY TEST relay-probe-message',
+      timestamp: DateTime.now().toUtc(),
+    ).withPrincipals(localProfile.principalId, 'guest:recipient-c');
+    final engine = RelayEngine(
+      transport: a.transport,
+      identity: a.identity,
+      repository: a.relay,
+      connectedPeers: () => [
+        const NearbyPeer(
+          id: 'endpoint-b',
+          name: 'B',
+          connected: true,
+          deviceId: 'device-b',
+          capabilities: ['relay-v1'],
+        ),
+      ],
+    );
+    await engine.initialize();
+
+    expect(
+      await engine.enqueuePayload(packet, destinationDeviceId: 'device-c'),
+      RelayResult.stored,
+    );
+    final sent = _relayBytes(a.transport);
+    expect(sent, hasLength(1));
+    final forwarded = RelayEnvelope.fromJson(
+      RelioPacket.fromBytes(sent.single).payload.cast<String, dynamic>(),
+    );
+    expect(forwarded.destinationDeviceId, 'device-c');
+    expect(forwarded.hopCount, 1);
+    expect(forwarded.previousHopDeviceId, 'device-a');
+    expect(
+      (await a.relay.getPacket(forwarded.packetId))?.state,
+      RelayPacketState.forwarded,
+    );
+  });
 
   test('expired relay data stays local and is not forwarded', () async {
     final node = await _node('device-b');

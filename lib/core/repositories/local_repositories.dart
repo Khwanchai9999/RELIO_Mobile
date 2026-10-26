@@ -16,6 +16,7 @@ abstract interface class ConversationRepository {
   Stream<List<RelioConversation>> watchConversations();
   Future<List<RelioConversation>> listConversations();
   Future<RelioConversation?> getConversation(String id);
+  Future<String?> remotePrincipalForConversation(String id);
   Future<RelioConversation> resolveRouteTarget(String routeId);
   Future<RelioConversation> ensureConversation({
     required String id,
@@ -494,6 +495,7 @@ class DriftConversationRepository implements ConversationRepository {
     return row?.read<String>('principal_id');
   }
 
+  @override
   Future<String?> remotePrincipalForConversation(
     String id,
   ) => ownerContext.run(() async {
