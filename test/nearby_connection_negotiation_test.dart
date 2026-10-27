@@ -91,6 +91,39 @@ void main() {
   );
 
   test(
+    'already-connected task exception resumes identity handshake instead of failing',
+    () async {
+      rig.transport.requestConnectionFailure = const NearbyTransportException(
+        'Endpoint is already connected.',
+        apiStatusCode: 8003,
+        apiStatusName: 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
+      );
+      rig.transport.simulatePeer(
+        id: 'already-connected-task-peer',
+        name: 'Peer',
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      await rig.service.connect('already-connected-task-peer');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        rig.service.peerStates['already-connected-task-peer'],
+        NearbyConnectionState.connected,
+      );
+      expect(
+        rig.service.connectionPhaseForEndpoint('already-connected-task-peer'),
+        NearbyConnectionPhase.identityHandshake,
+      );
+      expect(rig.transport.disconnectCount, 0);
+      expect(
+        await rig.logText(),
+        contains('already_connected_task_exception_reconciled'),
+      );
+    },
+  );
+
+  test(
     'initiator accepts transport without an auth-code approval prompt',
     () async {
       final fingerprint = List.filled(64, 'c').join();

@@ -149,6 +149,11 @@ class NearbyService extends ChangeNotifier {
         middleDeviceId == destinationDeviceId) {
       return false;
     }
+    final sourceDeviceId = await identity.getDeviceId();
+    if (sourceDeviceId == middleDeviceId ||
+        sourceDeviceId == destinationDeviceId) {
+      return false;
+    }
     final peers = connectedPeers
         .where(
           (peer) =>
@@ -157,9 +162,7 @@ class NearbyService extends ChangeNotifier {
               _completedIdentityHandshakes.contains(peer.endpointId),
         )
         .toList();
-    if (peers.length != 1 || isDeviceConnected(destinationDeviceId)) {
-      return false;
-    }
+    if (peers.length != 1) return false;
     final endpointId = peers.single.endpointId;
     final hash = sha256.convert(utf8.encode(destinationDeviceId)).toString();
     final checkId = const Uuid().v4();
@@ -187,8 +190,7 @@ class NearbyService extends ChangeNotifier {
             (peer) =>
                 peer.endpointId == endpointId &&
                 peer.deviceId == middleDeviceId,
-          ) &&
-          !isDeviceConnected(destinationDeviceId);
+          );
     } on Object {
       return false;
     } finally {
@@ -1613,6 +1615,38 @@ class NearbyService extends ChangeNotifier {
       _log('ส่งคำขอเชื่อมต่อไปยัง ${DiagnosticsLogService.peerAlias(peerId)}');
     } on Object catch (error) {
       if (!_isCurrentConnectionSession(peerId, traceId)) return;
+      if (_errorCode(error) == '8003') {
+        final discovered = discoveredPeers
+            .where((peer) => peer.endpointId == peerId)
+            .firstOrNull;
+        if (discovered != null && isEndpointCurrent(peerId)) {
+          diagnostics?.record(
+            'connection',
+            'already_connected_task_exception_reconciled',
+            connectionTraceId: traceId,
+            operation: 'requestConnection',
+            peerIdentifier: peerId,
+            nativeCode: 8003,
+            reason: 'native_endpoint_already_connected',
+          );
+          // Nearby SDK อาจส่ง 8003 เป็น task exception แทน connection callback
+          // แต่ native ยืนยันว่า endpoint ต่ออยู่แล้ว จึงทำ identity handshake ต่อ
+          _onConnection(
+            NearbyConnectionEvent(
+              peer: discovered,
+              state: NearbyConnectionState.failed,
+              rawStatusCode: 8003,
+              rawStatusName: 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
+              rawStatusMessage: error is NearbyTransportException
+                  ? error.platformMessage ?? error.message
+                  : null,
+              operation: 'requestConnection',
+              connectionTraceId: traceId,
+            ),
+          );
+          return;
+        }
+      }
       _activeTransportAttempts[peerId]?['requestTaskResult'] = 'failure';
       _markTransportPhase(peerId, 'requestConnectionTaskFailure');
       _finishTransportAttempt(

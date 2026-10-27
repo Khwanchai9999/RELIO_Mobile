@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:relio_mobile/app/environment.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/diagnostics/diagnostics_log_service.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
@@ -41,6 +42,33 @@ void main() {
   );
 
   test(
+    'relay policy rejects a first hop that is also source or destination',
+    () {
+      final packet = RelioPacket.textMessage(
+        senderDeviceId: 'device-a',
+        senderUserId: 'device-a',
+        messageId: 'invalid-first-hop',
+        conversationId: 'conversation-c',
+        text: 'synthetic',
+        timestamp: DateTime.now().toUtc(),
+      );
+      final sourceLoop = RelayEnvelope.fromPayloadPacket(
+        packet: packet,
+        destinationDeviceId: 'device-c',
+        firstHopDeviceId: 'device-a',
+      );
+      final destinationLoop = RelayEnvelope.fromPayloadPacket(
+        packet: packet,
+        destinationDeviceId: 'device-c',
+        firstHopDeviceId: 'device-c',
+      );
+
+      expect(const RelayPolicy().validate(sourceLoop), 'invalidFirstHop');
+      expect(const RelayPolicy().validate(destinationLoop), 'invalidFirstHop');
+    },
+  );
+
+  test(
     'A to B to C stores first, forwards once, and materializes only at C',
     () async {
       final a = await _node('device-a');
@@ -70,6 +98,7 @@ void main() {
       final envelope = RelayEnvelope.fromPayloadPacket(
         packet: packet,
         destinationDeviceId: 'device-c',
+        firstHopDeviceId: 'device-b',
         now: DateTime.now().toUtc(),
       );
 
@@ -124,6 +153,23 @@ void main() {
 
       await engineB.handleIncomingBytes('endpoint-a', sentToB.single);
       expect(await b.relay.packetCount(), 1);
+      expect(
+        (await b.relay.getPacket(envelope.packetId))!.envelope.firstHopDeviceId,
+        isNull,
+      );
+      final storedAck = b.transport.sentPayloads
+          .map(RelioPacket.fromBytes)
+          .where((item) => item.type == RelioPacketType.relayAck)
+          .single;
+      expect(storedAck.payload['status'], 'stored');
+      expect(
+        await engineA.handleIncomingPacket('endpoint-b', storedAck),
+        RelayResult.stored,
+      );
+      expect(
+        (await a.relay.getPacket(envelope.packetId))?.state,
+        isNot(RelayPacketState.delivered),
+      );
       expect(
         await b.repositories.messages.listMessages('conversation-a'),
         isEmpty,
@@ -273,6 +319,196 @@ void main() {
       RelayPacketState.forwarded,
     );
   });
+
+  test(
+    'packet-scoped first hop sends to B even when C is directly connected',
+    () async {
+      final a = await _node('device-a');
+      addTearDown(a.close);
+      final packet = RelioPacket.textMessage(
+        senderDeviceId: 'device-a',
+        senderUserId: 'device-a',
+        messageId: 'scoped-route-message',
+        conversationId: 'conversation-c',
+        text: 'synthetic scoped route',
+        timestamp: DateTime.now().toUtc(),
+      );
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: packet,
+        destinationDeviceId: 'device-c',
+        firstHopDeviceId: 'device-b',
+      );
+      final engine = RelayEngine(
+        transport: a.transport,
+        identity: a.identity,
+        repository: a.relay,
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-b',
+            name: 'B',
+            connected: true,
+            deviceId: 'device-b',
+            capabilities: ['relay-v1'],
+          ),
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'device-c',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      await engine.initialize();
+
+      await engine.enqueueEnvelope(envelope);
+      await engine.forwardPending();
+
+      expect(a.transport.sentPeerIds, ['endpoint-b']);
+      final firstHop = RelayEnvelope.fromJson(
+        RelioPacket.fromBytes(
+          _relayBytes(a.transport).single,
+        ).payload.cast<String, dynamic>(),
+      );
+      expect(firstHop.hopCount, 1);
+      expect(firstHop.previousHopDeviceId, 'device-a');
+      expect(firstHop.firstHopDeviceId, isNull);
+    },
+  );
+
+  test(
+    'packet-scoped first hop never falls back to direct destination',
+    () async {
+      final a = await _node('device-a');
+      addTearDown(a.close);
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: RelioPacket.textMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'device-a',
+          messageId: 'blocked-scoped-route',
+          conversationId: 'conversation-c',
+          text: 'synthetic scoped route',
+          timestamp: DateTime.now().toUtc(),
+        ),
+        destinationDeviceId: 'device-c',
+        firstHopDeviceId: 'device-b',
+      );
+      final engine = RelayEngine(
+        transport: a.transport,
+        identity: a.identity,
+        repository: a.relay,
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'device-c',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      await engine.initialize();
+
+      await engine.enqueueEnvelope(envelope);
+
+      expect(a.transport.sentPayloads, isEmpty);
+      expect(
+        (await a.relay.getPacket(envelope.packetId))?.state,
+        RelayPacketState.stored,
+      );
+    },
+  );
+
+  test(
+    'ordinary relay still prefers a directly connected destination',
+    () async {
+      final a = await _node('device-a');
+      addTearDown(a.close);
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: RelioPacket.textMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'device-a',
+          messageId: 'normal-route-message',
+          conversationId: 'conversation-c',
+          text: 'ordinary relay',
+          timestamp: DateTime.now().toUtc(),
+        ),
+        destinationDeviceId: 'device-c',
+      );
+      final engine = RelayEngine(
+        transport: a.transport,
+        identity: a.identity,
+        repository: a.relay,
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-b',
+            name: 'B',
+            connected: true,
+            deviceId: 'device-b',
+            capabilities: ['relay-v1'],
+          ),
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'device-c',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      await engine.initialize();
+
+      await engine.enqueueEnvelope(envelope);
+
+      expect(a.transport.sentPeerIds, ['endpoint-c']);
+    },
+  );
+
+  test(
+    'TEST-only route API pins the selected intermediate when direct C exists',
+    () async {
+      final a = await _node('device-a');
+      addTearDown(a.close);
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: RelioPacket.textMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'device-a',
+          messageId: 'qa-route-api-message',
+          conversationId: 'conversation-c',
+          text: 'synthetic QA route',
+          timestamp: DateTime.now().toUtc(),
+        ),
+        destinationDeviceId: 'device-c',
+      );
+      final engine = RelayEngine(
+        transport: a.transport,
+        identity: a.identity,
+        repository: a.relay,
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-b',
+            name: 'B',
+            connected: true,
+            deviceId: 'device-b',
+            capabilities: ['relay-v1'],
+          ),
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'device-c',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      await engine.initialize();
+
+      expect(RelioBuildInfo.isTest, isTrue);
+      await engine.enqueueQaEnvelopeVia(envelope, firstHopDeviceId: 'device-b');
+      expect(a.transport.sentPeerIds, ['endpoint-b']);
+    },
+    skip: !RelioBuildInfo.isTest,
+  );
 
   test('expired relay data stays local and is not forwarded', () async {
     final node = await _node('device-b');

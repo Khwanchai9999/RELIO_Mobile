@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../../app/environment.dart';
 import '../../data/models/prototype_models.dart';
 import '../diagnostics/diagnostics_log_service.dart';
 import '../domain/relio_entities.dart';
@@ -93,6 +94,26 @@ class RelayEngine {
     return RelayResult.stored;
   }
 
+  /// QA-only entry point for a probe that must begin through one selected hop.
+  /// The constraint belongs to this envelope and is cleared on its first send.
+  Future<RelayResult> enqueueQaEnvelopeVia(
+    RelayEnvelope envelope, {
+    required String firstHopDeviceId,
+  }) {
+    if (!RelioBuildInfo.isTest) {
+      throw StateError('Packet-scoped QA relay is available only in TEST.');
+    }
+    if (firstHopDeviceId == envelope.originDeviceId ||
+        firstHopDeviceId == envelope.destinationDeviceId ||
+        firstHopDeviceId.isEmpty ||
+        firstHopDeviceId.length > 128) {
+      throw ArgumentError.value(firstHopDeviceId, 'firstHopDeviceId');
+    }
+    return enqueueEnvelope(
+      envelope.copyWith(firstHopDeviceId: firstHopDeviceId),
+    );
+  }
+
   Future<RelayResult> handleIncomingBytes(
     String endpointId,
     Uint8List bytes,
@@ -129,9 +150,11 @@ class RelayEngine {
 
     // ใช้ sender จาก transport เป็น previous hop สำหรับ routing เท่านั้น
     // ไม่เปลี่ยน origin หรือ identity ของ payload เดิม
-    final storedEnvelope = envelope.previousHopDeviceId == null
-        ? envelope.copyWith(previousHopDeviceId: packet.senderDeviceId)
-        : envelope;
+    final storedEnvelope = envelope.copyWith(
+      previousHopDeviceId:
+          envelope.previousHopDeviceId ?? packet.senderDeviceId,
+      clearFirstHopDeviceId: true,
+    );
     final inserted = await repository.storePacket(storedEnvelope);
     if (!inserted) {
       _recordRelay('duplicate_suppressed', storedEnvelope);
@@ -234,6 +257,7 @@ class RelayEngine {
       final forwarded = envelope.copyWith(
         hopCount: envelope.hopCount + 1,
         previousHopDeviceId: self,
+        clearFirstHopDeviceId: true,
       );
       final packet = RelioPacket.relayEnvelope(
         senderDeviceId: self,
@@ -312,6 +336,14 @@ class RelayEngine {
           return true;
         })
         .toList(growable: false);
+    if (envelope.originDeviceId == self && envelope.hopCount == 0) {
+      final firstHop = envelope.firstHopDeviceId;
+      if (firstHop != null) {
+        return eligible
+            .where((peer) => _deviceId(peer) == firstHop)
+            .firstOrNull;
+      }
+    }
     for (final peer in eligible) {
       if (_deviceId(peer) == envelope.destinationDeviceId) return peer;
     }
