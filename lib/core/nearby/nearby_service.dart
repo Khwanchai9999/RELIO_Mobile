@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/environment.dart';
@@ -93,6 +94,13 @@ class _PendingVerifiedIdentity {
   final String? previousFingerprint;
 }
 
+class _QaRelayRouteCheck {
+  _QaRelayRouteCheck(this.endpointId, this.destinationHash);
+  final String endpointId;
+  final String destinationHash;
+  final Completer<bool> result = Completer<bool>();
+}
+
 class NearbyService extends ChangeNotifier {
   static final Stopwatch _diagnosticClock = Stopwatch()..start();
   NearbyService({
@@ -129,6 +137,65 @@ class NearbyService extends ChangeNotifier {
       ? (conversations as DriftConversationRepository).ownerContext
       : identity.profiles.owners;
   final Map<String, String> _remotePrincipals = {};
+  final Map<String, _QaRelayRouteCheck> _qaRelayRouteChecks = {};
+
+  /// ผลยืนยันสดจาก B ใช้ได้เฉพาะคำขอครั้งนี้ ไม่เก็บเป็น topology ถาวร
+  Future<bool> checkQaRelayRoute({
+    required String middleDeviceId,
+    required String destinationDeviceId,
+  }) async {
+    if (!RelioBuildInfo.isTest ||
+        _closed ||
+        middleDeviceId == destinationDeviceId) {
+      return false;
+    }
+    final peers = connectedPeers
+        .where(
+          (peer) =>
+              peer.deviceId == middleDeviceId &&
+              peer.capabilities.contains('relay-v1') &&
+              _completedIdentityHandshakes.contains(peer.endpointId),
+        )
+        .toList();
+    if (peers.length != 1 || isDeviceConnected(destinationDeviceId)) {
+      return false;
+    }
+    final endpointId = peers.single.endpointId;
+    final hash = sha256.convert(utf8.encode(destinationDeviceId)).toString();
+    final checkId = const Uuid().v4();
+    final pending = _QaRelayRouteCheck(endpointId, hash);
+    _qaRelayRouteChecks[checkId] = pending;
+    try {
+      await _sendApplicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: await identity.getDeviceId(),
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: await currentStatus(),
+          qaRelayCheckId: checkId,
+          qaRelayDestinationHash: hash,
+        ),
+        peerId: endpointId,
+      );
+      final confirmed = await pending.result.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => false,
+      );
+      return confirmed &&
+          !_closed &&
+          connectedPeers.any(
+            (peer) =>
+                peer.endpointId == endpointId &&
+                peer.deviceId == middleDeviceId,
+          ) &&
+          !isDeviceConnected(destinationDeviceId);
+    } on Object {
+      return false;
+    } finally {
+      _qaRelayRouteChecks.remove(checkId);
+    }
+  }
+
   final Map<String, int> _remotePrincipalEpochs = {};
   final Map<String, int> _remoteProfileRevisions = {};
   static const _privateTypes = {
@@ -4816,6 +4883,7 @@ class NearbyService extends ChangeNotifier {
         case RelioPacketType.textMessage:
           await _handleText(event.peerId, packet);
         case RelioPacketType.deviceStatus:
+          await _handleQaRelayRouteCheck(event.peerId, packet);
           await _handleDeviceStatus(packet);
         case RelioPacketType.ack:
           await _handleAck(event.peerId, packet);
@@ -5667,6 +5735,56 @@ class NearbyService extends ChangeNotifier {
       packet.senderDeviceId,
       displayName: displayName,
     );
+  }
+
+  Future<void> _handleQaRelayRouteCheck(
+    String endpointId,
+    RelioPacket packet,
+  ) async {
+    if (!RelioBuildInfo.isTest ||
+        !_completedIdentityHandshakes.contains(endpointId)) {
+      return;
+    }
+    final checkId = packet.payload['qaRelayCheckId'];
+    final destinationHash = packet.payload['qaRelayDestinationHash'];
+    if (checkId is! String || destinationHash is! String) return;
+    final connected = packet.payload['qaRelayConnected'];
+    if (connected is bool) {
+      final pending = _qaRelayRouteChecks[checkId];
+      if (pending != null &&
+          !pending.result.isCompleted &&
+          pending.endpointId == endpointId &&
+          pending.destinationHash == destinationHash) {
+        pending.result.complete(connected);
+      }
+      return;
+    }
+    final matching = connectedPeers.where(
+      (peer) =>
+          peer.endpointId != endpointId &&
+          peer.deviceId != null &&
+          sha256.convert(utf8.encode(peer.deviceId!)).toString() ==
+              destinationHash &&
+          peer.capabilities.contains('relay-v1') &&
+          _completedIdentityHandshakes.contains(peer.endpointId),
+    );
+    final isConnected = matching.length == 1;
+    try {
+      await _sendApplicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: await identity.getDeviceId(),
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: await currentStatus(),
+          qaRelayCheckId: checkId,
+          qaRelayDestinationHash: destinationHash,
+          qaRelayConnected: isConnected,
+        ),
+        peerId: endpointId,
+      );
+    } on Object {
+      // QA route check fails closed at the requesting device.
+    }
   }
 
   Future<void> _handleAck(String endpointId, RelioPacket packet) async {

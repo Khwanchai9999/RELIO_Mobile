@@ -22,6 +22,11 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
   Future<int>? _packetCount;
   Future<List<_RelayRecipient>>? _recipients;
   String? _selectedConversationId;
+  String? _selectedMiddleId;
+  String? _readyRoute;
+  String _routeStatus = 'เลือกเครื่องกลางและปลายทาง';
+  int _routeGeneration = 0;
+  String _connectedSignature = '';
   String? _relayTestResult;
   bool _sendingRelayTest = false;
   bool _loaded = false;
@@ -32,7 +37,36 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
     if (_loaded) return;
     _loaded = true;
     _dependencies = RelioDependencyScope.of(context);
+    _connectedSignature = _currentConnectedSignature();
+    _dependencies.nearbyService.addListener(_onNearbyChanged);
     _refresh();
+  }
+
+  @override
+  void dispose() {
+    _dependencies.nearbyService.removeListener(_onNearbyChanged);
+    super.dispose();
+  }
+
+  void _onNearbyChanged() {
+    if (!mounted) return;
+    final current = _currentConnectedSignature();
+    if (current == _connectedSignature) return;
+    _connectedSignature = current;
+    setState(() {
+      _routeGeneration++;
+      _readyRoute = null;
+      _routeStatus = 'เส้นทางเปลี่ยน กรุณาตรวจสอบอีกครั้ง';
+    });
+  }
+
+  String _currentConnectedSignature() {
+    final peers =
+        _dependencies.nearbyService.connectedPeers
+            .map((peer) => '${peer.endpointId}:${peer.deviceId}')
+            .toList()
+          ..sort();
+    return peers.join('|');
   }
 
   Future<List<_RelayRecipient>> _loadRecipients() async {
@@ -42,7 +76,10 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
     for (final conversation in conversations) {
       final principal = await _dependencies.repositories.conversations
           .remotePrincipalForConversation(conversation.id);
-      if (RelioPacket.validPrincipal(principal)) {
+      final known = await _dependencies.repositories.nearbyDevices.getDevice(
+        conversation.participantId,
+      );
+      if (RelioPacket.validPrincipal(principal) && known?.isTrusted == true) {
         recipients.add(
           _RelayRecipient(conversation: conversation, principalId: principal!),
         );
@@ -55,21 +92,55 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
     setState(() {
       _packetCount = _dependencies.relayRepository.packetCount();
       _recipients = _loadRecipients();
+      _routeGeneration++;
+      _readyRoute = null;
+    });
+  }
+
+  String _routeKey(_RelayRecipient recipient, String middleId) =>
+      '$middleId:${recipient.conversation.participantId}';
+
+  Future<void> _checkRoute(_RelayRecipient recipient) async {
+    final middleId = _selectedMiddleId;
+    if (middleId == null) return;
+    final generation = ++_routeGeneration;
+    setState(() {
+      _readyRoute = null;
+      _routeStatus = 'กำลังถามเครื่องกลางว่าเชื่อมปลายทางอยู่หรือไม่…';
+    });
+    final ready = await _dependencies.nearbyService.checkQaRelayRoute(
+      middleDeviceId: middleId,
+      destinationDeviceId: recipient.conversation.participantId,
+    );
+    if (!mounted || generation != _routeGeneration) return;
+    setState(() {
+      _readyRoute = ready ? _routeKey(recipient, middleId) : null;
+      _routeStatus = ready
+          ? 'พร้อมทดสอบ: เครื่องกลางยืนยันว่าต่อปลายทางอยู่'
+          : 'เส้นทางยังไม่พร้อม: เครื่องกลางไม่ยืนยันการเชื่อมต่อ';
     });
   }
 
   String? _routeBlock(_RelayRecipient? recipient) {
     if (recipient == null) return 'เลือกผู้รับที่มี principal mapping ก่อน';
-    final peers = _dependencies.nearbyService.connectedPeers;
-    if (peers.length != 1) {
-      return 'ต้องเชื่อมต่อ next-hop ที่ยืนยัน identity เพียงหนึ่งเครื่อง';
+    final matches = _dependencies.nearbyService.connectedPeers
+        .where((peer) => peer.deviceId == _selectedMiddleId)
+        .toList();
+    if (_dependencies.nearbyService.connectedPeers.length != 1) {
+      return 'ต้นทางต้องเชื่อมต่อเครื่องกลางเพียงเครื่องเดียว เพื่อกำหนด next hop แน่นอน';
     }
-    final peer = peers.single;
+    if (matches.length != 1) return 'เลือกเครื่องกลางที่เชื่อมต่ออยู่';
+    final peer = matches.single;
     if (peer.deviceId == recipient.conversation.participantId) {
       return 'ผู้รับเชื่อมต่อโดยตรงอยู่ จึงไม่ส่ง relay test';
     }
     if (peer.deviceId == null || !peer.capabilities.contains('relay-v1')) {
       return 'next-hop ไม่มี verified device identity หรือ relay-v1';
+    }
+    if (_dependencies.nearbyService.isDeviceConnected(
+      recipient.conversation.participantId,
+    )) {
+      return 'ปลายทางเชื่อมต่อโดยตรงอยู่';
     }
     return null;
   }
@@ -83,8 +154,18 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
     setState(() {
       _sendingRelayTest = true;
       _relayTestResult = null;
+      _readyRoute = null;
     });
     try {
+      final middleId = _selectedMiddleId;
+      if (middleId == null ||
+          !await _dependencies.nearbyService.checkQaRelayRoute(
+            middleDeviceId: middleId,
+            destinationDeviceId: recipient.conversation.participantId,
+          ) ||
+          _routeBlock(recipient) != null) {
+        throw StateError('เครื่องกลางไม่ยืนยันเส้นทางล่าสุด');
+      }
       final identity = _dependencies.identity;
       final profile = await identity.profiles.current();
       final senderDeviceId = await identity.getDeviceId();
@@ -116,12 +197,13 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
       if (!mounted) return;
       setState(() {
         _relayTestResult =
-            'result=${result.name} state=${record?.state.name ?? 'missing'} '
-            'packetId=${envelope.packetId} payloadId=$messageId';
+            'บันทึก probe แล้ว: ${result.name} / '
+            '${record?.state.name ?? 'ไม่พบข้อมูล'} • '
+            'รหัส ${envelope.packetId.substring(0, 8)}';
         _packetCount = _dependencies.relayRepository.packetCount();
       });
     } on Object catch (error) {
-      if (mounted) setState(() => _relayTestResult = 'BLOCKED: $error');
+      if (mounted) setState(() => _relayTestResult = 'ส่งไม่ได้: $error');
     } finally {
       if (mounted) setState(() => _sendingRelayTest = false);
     }
@@ -131,8 +213,8 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: RelioAppBar(
-        title: 'Relay Diagnostics',
-        subtitle: 'DEV / QA only • relay-v1',
+        title: 'ทดสอบ Relay',
+        subtitle: 'QA • relay-v1',
         onBack: () => context.pop(),
       ),
       body: ListView(
@@ -158,6 +240,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
             ),
           ),
           _buildQaRelayProbe(),
+          _buildRelayLog(),
           const SizedBox(height: 12),
           RelioSettingTile(
             icon: Icons.sync_outlined,
@@ -191,13 +274,11 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'QA-only relay probe',
+              'ทดสอบส่งผ่านเครื่องกลาง',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            const Text(
-              'ส่งข้อความสังเคราะห์ relay-v1 เท่านั้น ต้องมี next-hop ที่ยืนยันแล้วหนึ่งเครื่อง และผู้รับต้องไม่เชื่อมต่อโดยตรง',
-            ),
+            const Text('ส่งข้อความทดสอบผ่าน Nearby จริง โดยไม่ส่ง SOS'),
             const SizedBox(height: 12),
             FutureBuilder<List<_RelayRecipient>>(
               future: _recipients,
@@ -209,15 +290,57 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                     )
                     .firstOrNull;
                 final block = _routeBlock(selected);
+                final middlePeers = _dependencies.nearbyService.connectedPeers
+                    .where(
+                      (peer) =>
+                          peer.deviceId != null &&
+                          peer.capabilities.contains('relay-v1'),
+                    )
+                    .toList();
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    FutureBuilder<String>(
+                      future: _dependencies.identity.getDisplayName(),
+                      builder: (context, snapshot) => Text(
+                        'เครื่องต้นทาง: ${snapshot.data ?? 'กำลังโหลด…'}',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('middle-$_selectedMiddleId'),
+                      initialValue:
+                          middlePeers.any(
+                            (peer) => peer.deviceId == _selectedMiddleId,
+                          )
+                          ? _selectedMiddleId
+                          : null,
+                      decoration: const InputDecoration(
+                        labelText: 'เครื่องกลาง',
+                      ),
+                      items: middlePeers
+                          .map(
+                            (peer) => DropdownMenuItem(
+                              value: peer.deviceId!,
+                              child: Text(
+                                '${peer.name} • ${peer.deviceId!.substring(0, peer.deviceId!.length.clamp(0, 8))}',
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: _sendingRelayTest
+                          ? null
+                          : (id) => setState(() {
+                              _selectedMiddleId = id;
+                              _readyRoute = null;
+                              _routeGeneration++;
+                            }),
+                    ),
+                    const SizedBox(height: 8),
                     DropdownButtonFormField<String>(
                       key: ValueKey(_selectedConversationId),
                       initialValue: selected?.conversation.id,
-                      decoration: const InputDecoration(
-                        labelText: 'Verified recipient',
-                      ),
+                      decoration: const InputDecoration(labelText: 'ปลายทาง'),
                       items: recipients
                           .map(
                             (item) => DropdownMenuItem(
@@ -228,16 +351,25 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                           .toList(growable: false),
                       onChanged: _sendingRelayTest
                           ? null
-                          : (id) =>
-                                setState(() => _selectedConversationId = id),
+                          : (id) => setState(() {
+                              _selectedConversationId = id;
+                              _readyRoute = null;
+                              _routeGeneration++;
+                            }),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       snapshot.connectionState == ConnectionState.waiting
                           ? 'กำลังตรวจสอบ principal mapping…'
-                          : block ??
-                                'Route guard ผ่าน: ไม่มี direct recipient connection',
+                          : block ?? _routeStatus,
                     ),
+                    if (selected != null && block == null)
+                      OutlinedButton(
+                        onPressed: _sendingRelayTest
+                            ? null
+                            : () => _checkRoute(selected),
+                        child: const Text('ตรวจสอบเส้นทางสด'),
+                      ),
                     if (_relayTestResult != null) ...[
                       const SizedBox(height: 8),
                       SelectableText(_relayTestResult!),
@@ -245,14 +377,17 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                     const SizedBox(height: 8),
                     FilledButton.icon(
                       onPressed:
-                          selected == null || block != null || _sendingRelayTest
+                          selected == null ||
+                              block != null ||
+                              _sendingRelayTest ||
+                              _selectedMiddleId == null ||
+                              _readyRoute !=
+                                  _routeKey(selected, _selectedMiddleId!)
                           ? null
                           : () => _sendSyntheticRelay(selected),
                       icon: const Icon(Icons.route_outlined),
                       label: Text(
-                        _sendingRelayTest
-                            ? 'กำลังส่ง…'
-                            : 'Send synthetic relay text',
+                        _sendingRelayTest ? 'กำลังส่ง…' : 'ส่งข้อมูลทดสอบ',
                       ),
                     ),
                   ],
@@ -264,6 +399,63 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
       ),
     );
   }
+
+  Widget _buildRelayLog() {
+    if (!RelioBuildInfo.isTest) return const SizedBox.shrink();
+    return ValueListenableBuilder<List<Map<String, Object?>>>(
+      valueListenable: _dependencies.diagnostics.qaRelayEvents,
+      builder: (context, entries, _) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'เหตุการณ์ Relay จริงในเครื่องนี้',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              if (entries.isEmpty) const Text('ยังไม่มีเหตุการณ์ Relay'),
+              for (final entry in entries.take(30))
+                ListTile(
+                  dense: true,
+                  title: Text(_relayEventThai(entry)),
+                  subtitle: Text(
+                    '${entry['timestamp']} • '
+                    'ซอง ${entry['relayPacketAlias'] ?? '-'} • '
+                    'ต้นทาง ${entry['originAlias'] ?? '-'} • '
+                    'ปลายทาง ${entry['destinationAlias'] ?? '-'}',
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _relayEventThai(Map<String, Object?> entry) =>
+      switch (entry['event'] as String?) {
+        'packet_enqueued' => 'บันทึกข้อมูลทดสอบแล้ว',
+        'envelope_stored' => 'เครื่องนี้รับและบันทึกซองแล้ว',
+        'forward_sent' => 'เครื่องนี้ส่งต่อแล้ว',
+        'payload_delivered' => 'เครื่องนี้บันทึกถึงปลายทางแล้ว',
+        'ack_received' =>
+          entry['ackStatus'] == 'stored'
+              ? 'เพื่อนบ้านยืนยันว่ารับฝากซองแล้ว'
+              : entry['ackStatus'] == 'delivered'
+              ? 'ปลายทางยืนยันการรับกับเครื่องนี้แล้ว'
+              : 'เครื่องนี้ได้รับ ACK จากเพื่อนบ้าน',
+        'ack_sent' =>
+          entry['ackStatus'] == 'stored'
+              ? 'เครื่องนี้ยืนยันการรับฝากกับต้นทางแล้ว'
+              : entry['ackStatus'] == 'delivered'
+              ? 'เครื่องนี้ยืนยันการรับกับเครื่องกลางแล้ว'
+              : 'เครื่องนี้ส่ง ACK ไปยังเพื่อนบ้าน',
+        'duplicate_suppressed' => 'พบซองซ้ำและระงับแล้ว',
+        'forward_failed' => 'ส่งต่อไม่สำเร็จ',
+        _ => 'Relay: ${entry['event'] ?? 'ไม่ทราบเหตุการณ์'}',
+      };
 }
 
 class _RelayRecipient {
