@@ -57,6 +57,13 @@ android/app/google-services.json
 
 # Local test evidence and temporary workspace files
 /artifacts/
+/.tmp-*/
+/.tmp-*.log
+/adb-*.xml
+/adb-*.json
+/device-*.log
+/installed-apk-*/
+/qa-diagnostics-*/
 *.tmp
 *.bak
 Thumbs.db
