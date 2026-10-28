@@ -401,6 +401,7 @@ String _cloudLabel(CloudState state) => switch (state) {
 
 String _authLabel(AuthState state) => switch (state) {
   AuthState.authenticated => 'เข้าสู่ระบบแล้ว',
+  AuthState.passwordRecovery => 'กำลังตั้งรหัสผ่านใหม่',
   AuthState.guest => 'Guest / ในเครื่องเท่านั้น',
   AuthState.expired => 'เซสชันหมดอายุ',
   AuthState.loading => 'กำลังตรวจสอบ',

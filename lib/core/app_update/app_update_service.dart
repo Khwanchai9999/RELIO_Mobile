@@ -293,6 +293,7 @@ class AppUpdateService extends ChangeNotifier {
   DateTime? _lastAttemptAt;
   Future<AppUpdateSnapshot>? _operation;
   bool _cancelDownload = false;
+  bool _disposed = false;
 
   AppUpdateSnapshot get snapshot => _snapshot;
 
@@ -307,6 +308,7 @@ class AppUpdateService extends ChangeNotifier {
   Stream<AppUpdateSnapshot> watchState() => _changes.stream;
 
   Future<AppUpdateSnapshot> checkForUpdate({bool manual = false}) {
+    if (_disposed) return Future.value(_snapshot);
     if (!_internetAvailable()) {
       return Future.value(_setUnavailable('simulatedOffline'));
     }
@@ -561,6 +563,8 @@ class AppUpdateService extends ChangeNotifier {
       value.replaceAll(':', '').toLowerCase();
 
   void _setSnapshot(AppUpdateSnapshot next) {
+    // ผลตรวจเครือข่ายอาจกลับมาหลังเจ้าของ service ปิดไปแล้ว
+    if (_disposed) return;
     _snapshot = next;
     if (!_changes.isClosed) _changes.add(next);
     notifyListeners();
@@ -568,6 +572,8 @@ class AppUpdateService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _cancelDownload = true;
     unawaited(_changes.close());
     super.dispose();
   }

@@ -126,6 +126,13 @@ void main() {
         diagnostics: DiagnosticsLogService(qaLogcatSink: relayLogsB.add),
         connectedPeers: () => [
           const NearbyPeer(
+            id: 'endpoint-a',
+            name: 'A',
+            connected: true,
+            deviceId: 'device-a',
+            capabilities: ['relay-v1'],
+          ),
+          const NearbyPeer(
             id: 'endpoint-c',
             name: 'C',
             connected: true,
@@ -264,6 +271,34 @@ void main() {
         ),
         isTrue,
       );
+
+      if (RelioBuildInfo.isTest) {
+        final propagatedAck = b.transport.sentPayloads
+            .map(RelioPacket.fromBytes)
+            .where(
+              (item) =>
+                  item.type == RelioPacketType.relayAck &&
+                  item.payload['status'] == 'delivered',
+            )
+            .single;
+        expect(
+          await engineA.handleIncomingPacket('endpoint-b', propagatedAck),
+          RelayResult.delivered,
+        );
+        expect(
+          (await a.relay.getPacket(envelope.packetId))?.state,
+          RelayPacketState.delivered,
+        );
+        await engineA.handleIncomingPacket('endpoint-b', storedAck);
+        expect(
+          (await a.relay.getPacket(envelope.packetId))?.state,
+          RelayPacketState.delivered,
+        );
+        expect(
+          await engineA.handleIncomingPacket('unknown-endpoint', propagatedAck),
+          RelayResult.blocked,
+        );
+      }
 
       await engineB.handleIncomingBytes('endpoint-a', sentToB.single);
       expect(await b.relay.packetCount(), 1);
@@ -641,6 +676,175 @@ void main() {
     expect(storedLocation?.latitude, 13.71);
     expect(storedLocation?.longitude, 100.51);
   });
+
+  test(
+    'QA middle hold survives engine restart and forwards the stored envelope once',
+    () async {
+      final node = await _node('device-b');
+      addTearDown(node.close);
+      var paused = true;
+      RelayEngine createEngine() => RelayEngine(
+        transport: node.transport,
+        identity: node.identity,
+        repository: node.relay,
+        qaTextForwardingPaused: () => paused,
+        deviceIdForEndpoint: (endpoint) =>
+            endpoint == 'endpoint-a' ? 'device-a' : 'device-c',
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'device-c',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      var engine = createEngine();
+      await engine.initialize();
+      final payload = RelioPacket.textMessage(
+        senderDeviceId: 'device-a',
+        senderUserId: 'relay',
+        messageId: 'held-text',
+        conversationId: 'synthetic',
+        text: 'synthetic',
+        timestamp: DateTime.now().toUtc(),
+      );
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: payload,
+        destinationDeviceId: 'device-c',
+        maxHops: 2,
+      ).copyWith(hopCount: 1, previousHopDeviceId: 'device-a');
+      final wire = RelioPacket.relayEnvelope(
+        senderDeviceId: 'device-a',
+        senderUserId: 'relay',
+        relayPacketId: envelope.packetId,
+        relayPayload: envelope.toJson(),
+      );
+      await engine.handleIncomingPacket('endpoint-a', wire);
+      expect(
+        (await node.relay.getPacket(envelope.packetId))?.state,
+        RelayPacketState.stored,
+      );
+      expect(_relayBytes(node.transport), isEmpty);
+      expect(
+        node.transport.sentPayloads
+            .map(RelioPacket.fromBytes)
+            .where((p) => p.type == RelioPacketType.relayAck)
+            .single
+            .payload['status'],
+        'stored',
+      );
+      await engine.dispose();
+      engine = createEngine();
+      await engine.initialize();
+      expect(_relayBytes(node.transport), isEmpty);
+      paused = false;
+      await engine.forwardPending();
+      await engine.forwardPending();
+      expect(_relayBytes(node.transport), hasLength(1));
+      expect(
+        RelioPacket.fromBytes(
+          _relayBytes(node.transport).single,
+        ).payload['hopCount'],
+        2,
+      );
+      await engine.handleIncomingPacket('endpoint-a', wire);
+      expect(_relayBytes(node.transport), hasLength(1));
+      expect(await node.relay.packetCount(), 1);
+      await engine.dispose();
+    },
+    skip: !RelioBuildInfo.isTest ? 'QA-only controlled forwarding hold' : false,
+  );
+
+  test(
+    'QA delivered receipt survives absent upstream and middle restart',
+    () async {
+      final node = await _node('device-b');
+      addTearDown(node.close);
+      var upstream = false;
+      var authenticated = false;
+      var endpoint = 'endpoint-a';
+      RelayEngine createEngine() => RelayEngine(
+        transport: node.transport,
+        identity: node.identity,
+        repository: node.relay,
+        receiptPeers: () => upstream && authenticated
+            ? [
+                NearbyPeer(
+                  id: endpoint,
+                  name: 'A',
+                  connected: true,
+                  deviceId: 'device-a',
+                ),
+              ]
+            : [],
+        connectedPeers: () => upstream
+            ? [
+                NearbyPeer(
+                  id: endpoint,
+                  name: 'A',
+                  connected: true,
+                  deviceId: 'device-a',
+                ),
+              ]
+            : [],
+      );
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: RelioPacket.textMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'relay',
+          messageId: 'receipt-after-restart',
+          conversationId: 'synthetic',
+          text: 'synthetic',
+          timestamp: DateTime.now().toUtc(),
+        ),
+        destinationDeviceId: 'device-c',
+        maxHops: 2,
+      ).copyWith(hopCount: 1, previousHopDeviceId: 'device-a');
+      await node.relay.storePacket(envelope);
+      var engine = createEngine();
+      await engine.initialize();
+      await engine.forwardPending();
+      expect(node.transport.sentPayloads, isEmpty); // stored is not delivered
+      await node.relay.updatePacketState(
+        envelope.packetId,
+        RelayPacketState.delivered,
+      );
+      await engine.forwardPending();
+      expect(node.transport.sentPayloads, isEmpty);
+      await engine.dispose();
+      engine = createEngine();
+      await engine.initialize();
+      upstream = true;
+      await engine.forwardPending();
+      expect(node.transport.sentPayloads, isEmpty);
+      authenticated = true;
+      node.transport.failSends = true;
+      await engine.forwardPending();
+      node.transport.failSends = false;
+      await engine.forwardPending();
+      await engine.forwardPending();
+      expect(node.transport.sentPayloads, hasLength(1));
+      final ack = RelioPacket.fromBytes(node.transport.sentPayloads.single);
+      expect(ack.type, RelioPacketType.relayAck);
+      expect(ack.payload['status'], 'delivered');
+      expect(ack.payload['relayPacketId'], envelope.packetId);
+      expect(_relayBytes(node.transport), isEmpty);
+      endpoint = 'fresh-endpoint-a';
+      await engine.forwardPending();
+      expect(node.transport.sentPayloads, hasLength(2));
+      expect(
+        await node.relay.listDeliveredTextReceipts(
+          envelope.expiresAt.add(const Duration(seconds: 1)),
+        ),
+        isEmpty,
+      );
+      expect(await node.relay.packetCount(), 1);
+      await engine.dispose();
+    },
+    skip: !RelioBuildInfo.isTest ? 'QA-only receipt recovery' : false,
+  );
 
   test('failed forwarding can retry from persistent history', () async {
     final node = await _node('device-a');

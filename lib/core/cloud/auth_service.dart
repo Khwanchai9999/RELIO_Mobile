@@ -16,6 +16,8 @@ abstract interface class AuthService {
     required String password,
   });
   Future<void> signOut();
+  Future<void> requestPasswordReset({required String email});
+  Future<void> completePasswordReset({required String password});
   Future<CloudIdentity?> restoreSession();
   Future<void> deleteAccount();
 }
@@ -96,4 +98,15 @@ class CloudAuthService implements AuthService {
 
   @override
   Future<void> deleteAccount() => source.deleteMyAccount();
+
+  @override
+  Future<void> requestPasswordReset({required String email}) =>
+      source.requestPasswordReset(email: email.trim());
+
+  @override
+  Future<void> completePasswordReset({required String password}) async {
+    final result = await source.completePasswordReset(password: password);
+    await onAuthenticated?.call(result.userId);
+    await _rebind(result.userId);
+  }
 }

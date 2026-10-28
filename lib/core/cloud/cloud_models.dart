@@ -2,7 +2,14 @@ import '../../data/models/prototype_models.dart';
 
 enum CloudState { notConfigured, signedOut, ready, offline, error }
 
-enum AuthState { guest, authenticated, expired, loading, error }
+enum AuthState {
+  guest,
+  authenticated,
+  passwordRecovery,
+  expired,
+  loading,
+  error,
+}
 
 class CloudIdentity {
   const CloudIdentity({

@@ -55,6 +55,7 @@ void main() {
         find.text('แนะนำให้ใช้ชื่อจริงหรือชื่อที่คนใกล้ตัวรู้จัก'),
         findsOneWidget,
       );
+      expect(find.text('เข้าสู่ระบบ'), findsNothing);
 
       await tester.tap(find.byTooltip('แก้ไขชื่อ'));
       await tester.pumpAndSettle();
@@ -96,6 +97,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     final originalName = await dependencies.identity.getDisplayName();
+    expect(find.text('เข้าสู่ระบบ'), findsOneWidget);
 
     await tester.tap(find.byTooltip('แก้ไขชื่อ'));
     await tester.pumpAndSettle();

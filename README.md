@@ -30,9 +30,17 @@ RELIO เป็นแอป Flutter สำหรับสื่อสารก�
 
 Relay ใช้แนวคิด store-and-forward เช่น A → B → C โดย B รับและเก็บ envelope ก่อนส่งต่อให้ C แต่ละ hop มี ACK ของตัวเอง พร้อมจำกัด TTL, จำนวน hop และการส่งซ้ำ สื่อไบนารีอย่างรูปหรือวิดีโอยังไม่ถูกส่งต่อผ่าน Relay
 
-QA Relay Tester สามารถ pin เครื่องกลางสำหรับ synthetic probe ได้ แม้ A และ C จะมีลิงก์ตรงอยู่ probe นั้นจะส่งไปยัง B เป็น first hop โดยไม่เปลี่ยน routing ของแชทหรือ SOS ปกติ
+Build 38 QA Relay Tester สามารถ pin เครื่องกลางสำหรับ synthetic probe ได้ แม้ A และ C จะมีลิงก์ตรงอยู่ probe นั้นจะส่งไปยัง B เป็น first hop โดยไม่เปลี่ยน routing ของแชทหรือ SOS ปกติ
+
+Build 39 เป็น QA candidate สำหรับ Text routing สามโหมด: อัตโนมัติ (Direct ก่อน แล้วตรวจเครื่องกลางหนึ่งเครื่อง), ส่งตรงเท่านั้น และ QA บังคับเครื่องกลาง โหมดนี้มีผลกับ Text ใน QA Chat ขณะเปิดแอปเท่านั้น โดยเก็บข้อความใน SQLite ก่อนส่ง จำกัด 2 hops และใช้ envelope เดิมเมื่อ retry ข้อความที่เริ่มผ่าน Relay แล้วจะไม่เปลี่ยนตัวกลางตามการเปลี่ยนโหมดของข้อความถัดไป Media/SOS และ DEV/PROD ยังคงเส้นทางเดิม
+
+QA Text สามารถส่งผล `delivered` ย้อนจาก C ผ่าน B ถึง A ได้เมื่อทั้งสองลิงก์พร้อม ผลนี้เป็น receipt ที่ส่งต่อโดย peer ที่ยืนยันตัวตนแล้ว ไม่ใช่ลายเซ็น end-to-end ของ C และต้องใช้ QA build ที่รองรับบนทุก hop หาก ACK ขาด ระบบ retry ซองเดิมแบบจำกัดจำนวนครั้ง และอาจคงสถานะรอได้จนกว่า receipt หรือ expiry จะได้รับการประมวลผล Physical acceptance ของ Build 39 ต้องแยกจากหลักฐาน Build 38 เดิม
 
 ## เทคโนโลยีที่ใช้
+
+Build 40 เพิ่มปุ่มลืมรหัสผ่านที่ใช้งานผ่าน AuthService และ Supabase recovery callback แยกตาม flavor โดย SDK ต้องยืนยัน recovery session ก่อนตั้งรหัสใหม่ ระหว่าง recovery ยังไม่เปิด account sync จนกว่าจะสำเร็จ ต้องใช้อีเมลที่รับลิงก์ได้จริงในการตรวจ end-to-end บัญชี QA `example.invalid` ใช้ยืนยัน email delivery ไม่ได้
+
+Build 41–43 แก้ QA Text receipt เมื่อ upstream ขาดการเชื่อมต่อขณะปลายทางรับแล้ว: อ่าน delivered state ที่ยังอยู่ใน TTL จาก SQLite และส่ง ACK กลับเมื่อ peer เดิม handshake สำเร็จ ไม่ส่ง payload ใหม่ ไม่ย้ายเครื่องกลาง ไม่เปลี่ยน schema หรือ PROD routing Build 43 จำ recovery guard ข้ามการเปิดแอปใหม่ ส่วน QA-only Text forwarding hold ใช้ควบคุมการทดสอบรับฝากก่อน restart และต้องปิดหลังทดสอบ ดูหลักฐานและข้อจำกัดใน [รายงาน Build 40–43](docs/BUILD43_ONLINE_AUTH_RELAY_ACCEPTANCE_20261028.md): Build 43 ติดตั้งแบบรักษาข้อมูลครบสามเครื่องแล้ว และ probe แบบรับฝากก่อนเครื่องกลางเปิดแอปใหม่ผ่านจริงหนึ่งกรณี พร้อม ACK กลับต้นทาง; การรับลิงก์รีเซ็ตรหัสผ่านจากอีเมลจริงและการเดินห่างยังไม่ได้ยืนยัน
 
 - **Flutter / Dart** — UI และ application logic โดยเน้น Android เป็นหลัก
 - **Drift + SQLite** — เก็บข้อความ โปรไฟล์ อุปกรณ์ที่เชื่อถือ คิว sync และ relay state ในเครื่อง
@@ -95,6 +103,6 @@ flutter build apk --flavor dev --debug --dart-define=RELIO_ENV=development
 
 ## สถานะโปรเจกต์
 
-RELIO อยู่ในสถานะ Android QA ของเวอร์ชัน `0.9.0+38` ฟังก์ชันหลักและ Relay core มี automated coverage และผ่านการทดสอบบนอุปกรณ์จริงชุดหนึ่งแล้ว ยังไม่ควรสรุปว่ารองรับโทรศัพท์ Android ทุกรุ่นหรือพร้อมใช้งาน production โดยไม่ผ่าน release gate และ physical acceptance ของรุ่นเป้าหมาย
+RELIO มี QA candidate `0.9.0+39` สำหรับ Automatic Text Relay โดย QA tests 452 ผ่าน และตรวจการส่งจริง Samsung → Realme → Huawei พร้อม delivered ACK กลับต้นทางบน topology ที่ถอดลิงก์ตรง ปัจจุบันทั้งสามเครื่องติดตั้ง Build 39 และตรวจ installed APK hash แล้ว โดย Huawei อัปเดตเพิ่มเติมหลัง relay run การเดินทดสอบระยะจริงยัง UNVERIFIED ดู [หลักฐานและข้อจำกัด Build 39](docs/AUTOMATIC_TEXT_RELAY_BUILD39_ACCEPTANCE.md) ยังไม่ควรสรุปว่ารองรับโทรศัพท์ Android ทุกรุ่นหรือพร้อม production
 
 Repository นี้ไม่มี license สำหรับการเผยแพร่ซ้ำโดยอัตโนมัติ หากต้องการนำไปใช้ต่อควรติดต่อเจ้าของ repository ก่อน

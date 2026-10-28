@@ -25,8 +25,11 @@ class RelayEngine {
     this.conversations,
     this.sos,
     this.connectedPeers,
+    this.receiptPeers,
     this.deviceIdForEndpoint,
     this.diagnostics,
+    this.forwardingAllowed,
+    this.qaTextForwardingPaused,
     RelayPolicy? policy,
   }) : policy = policy ?? const RelayPolicy();
 
@@ -37,19 +40,28 @@ class RelayEngine {
   final ConversationRepository? conversations;
   final SOSRepository? sos;
   final RelayPeers? connectedPeers;
+  final RelayPeers? receiptPeers;
   final RelayEndpointDeviceId? deviceIdForEndpoint;
   final DiagnosticsLogService? diagnostics;
+  final bool Function()? forwardingAllowed;
+  final bool Function()? qaTextForwardingPaused;
   final RelayPolicy policy;
   final _subscriptions = <StreamSubscription<Object?>>[];
   Future<void>? _forwardOperation;
   bool _initialized = false;
   bool _disposed = false;
+  final _receiptEndpoints = <String, String>{};
 
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
     _subscriptions.add(
       transport.connectionEvents.listen((event) {
+        if (event.state != NearbyConnectionState.connected) {
+          _receiptEndpoints.removeWhere(
+            (_, endpoint) => endpoint == event.peer.endpointId,
+          );
+        }
         if (event.state == NearbyConnectionState.connected) {
           unawaited(forwardPending());
         }
@@ -158,7 +170,18 @@ class RelayEngine {
     final inserted = await repository.storePacket(storedEnvelope);
     if (!inserted) {
       _recordRelay('duplicate_suppressed', storedEnvelope);
-      await _sendRelayAck(endpointId, envelope.packetId, 'stored');
+      final existing = await repository.getPacket(envelope.packetId);
+      final reply =
+          RelioBuildInfo.isTest && envelope.payloadType == 'textMessage'
+          ? existing?.state.name ?? 'stored'
+          : 'stored';
+      await _sendRelayAck(
+        endpointId,
+        envelope.packetId,
+        const {'delivered', 'blocked', 'expired'}.contains(reply)
+            ? reply
+            : 'stored',
+      );
       return RelayResult.duplicate;
     }
     _recordRelay(
@@ -223,14 +246,47 @@ class RelayEngine {
   }
 
   Future<void> _forwardAll() async {
+    if (forwardingAllowed?.call() == false) return;
+    final forwardingOwner = identity.profiles.owners.capture();
     await repository.expirePackets(DateTime.now().toUtc());
     final self = await identity.getDeviceId();
     final peers = connectedPeers?.call().toList(growable: false) ?? const [];
     if (peers.isEmpty) return;
+    // ACK ที่ปลายทางยืนยันแล้วต้องกู้จาก SQLite ได้ เมื่อ upstream กลับมา
+    if (RelioBuildInfo.isTest) {
+      final receipts = await repository.listDeliveredTextReceipts(
+        DateTime.now().toUtc(),
+      );
+      final retained = receipts
+          .map((record) => record.envelope.packetId)
+          .toSet();
+      _receiptEndpoints.removeWhere(
+        (packetId, _) => !retained.contains(packetId),
+      );
+      for (final record in receipts) {
+        if (record.envelope.originDeviceId != self) {
+          await _propagateFinalAck(record.envelope, 'delivered');
+        }
+      }
+    }
     for (final record in await repository.listForwardable(
       DateTime.now().toUtc(),
     )) {
       final envelope = record.envelope;
+      // QA พักเฉพาะ Text ที่รับฝาก ไม่พัก SOS และไม่เปลี่ยน policy ของ PROD
+      if (RelioBuildInfo.isTest &&
+          qaTextForwardingPaused?.call() == true &&
+          envelope.originDeviceId != self &&
+          envelope.payloadType == RelioPacketType.textMessage.name) {
+        continue;
+      }
+      if (RelioBuildInfo.isTest &&
+          envelope.originDeviceId == self &&
+          envelope.payloadType == 'textMessage') {
+        final localPrincipal = (await identity.profiles.current()).principalId;
+        final sender = envelope.toPayloadPacket().senderPrincipal;
+        if (sender != null && sender != localPrincipal) continue;
+      }
       if (envelope.destinationDeviceId == self) {
         await _materializeIfPresent(record);
         continue;
@@ -251,8 +307,17 @@ class RelayEngine {
         targetDeviceId,
       );
       if (existing != null &&
-          (existing.status == 'sent' || existing.status == 'delivered')) {
-        continue;
+          (existing.status == 'sent' ||
+              existing.status == 'stored' ||
+              existing.status == 'delivered')) {
+        final retryReceipt =
+            RelioBuildInfo.isTest &&
+            envelope.payloadType == 'textMessage' &&
+            existing.status != 'delivered' &&
+            existing.attemptCount < 3 &&
+            DateTime.now().toUtc().difference(existing.updatedAt) >=
+                const Duration(seconds: 30);
+        if (!retryReceipt) continue;
       }
       final forwarded = envelope.copyWith(
         hopCount: envelope.hopCount + 1,
@@ -278,20 +343,34 @@ class RelayEngine {
         },
       );
       try {
+        if (RelioBuildInfo.isTest &&
+            envelope.originDeviceId == self &&
+            envelope.payloadType == 'textMessage') {
+          identity.profiles.owners.requireCurrent(forwardingOwner);
+        }
         // บันทึก SQLite และ forward history ก่อนส่ง Nearby เพื่อให้ crash แล้วกู้ต่อได้
         await transport.sendBytes(
           packet.toBytes(),
           peerId: candidate.endpointId,
         );
-        await repository.recordForwardResult(
-          packetId: envelope.packetId,
-          targetDeviceId: targetDeviceId,
-          status: 'sent',
-        );
-        await repository.updatePacketState(
+        final latestForward = await repository.getForwardRecord(
           envelope.packetId,
-          RelayPacketState.forwarded,
+          targetDeviceId,
         );
+        if (latestForward?.status == 'attempting') {
+          await repository.recordForwardResult(
+            packetId: envelope.packetId,
+            targetDeviceId: targetDeviceId,
+            status: 'sent',
+          );
+        }
+        final latestPacket = await repository.getPacket(envelope.packetId);
+        if (latestPacket?.state == RelayPacketState.stored) {
+          await repository.updatePacketState(
+            envelope.packetId,
+            RelayPacketState.forwarded,
+          );
+        }
         _recordRelay(
           'forward_sent',
           forwarded,
@@ -347,6 +426,7 @@ class RelayEngine {
     for (final peer in eligible) {
       if (_deviceId(peer) == envelope.destinationDeviceId) return peer;
     }
+    if (envelope.hopCount + 1 >= envelope.maxHops) return null;
     return eligible.isEmpty ? null : eligible.first;
   }
 
@@ -489,25 +569,113 @@ class RelayEngine {
   ) async {
     final packetId = packet.payload['relayPacketId']! as String;
     final status = packet.payload['status']! as String;
+    final record = await repository.getPacket(packetId);
+    if (record == null) return RelayResult.blocked;
     final local = await identity.getDeviceId();
     final peers = connectedPeers?.call() ?? const <NearbyPeer>[];
     final target = peers.where((peer) => peer.endpointId == endpointId);
     final targetDeviceId = target.isEmpty
         ? deviceIdForEndpoint?.call(endpointId)
         : _deviceId(target.first);
-    if (targetDeviceId != null) {
+    if (targetDeviceId == null) return RelayResult.blocked;
+    final expectedForward = await repository.getForwardRecord(
+      packetId,
+      targetDeviceId,
+    );
+    if (expectedForward == null) {
+      _recordRelay('unexpected_ack_blocked', record.envelope);
+      return RelayResult.blocked;
+    }
+    final extendedReceipt =
+        RelioBuildInfo.isTest && record.envelope.payloadType == 'textMessage';
+    if (!extendedReceipt) {
       await repository.recordForwardResult(
         packetId: packetId,
         targetDeviceId: targetDeviceId,
         status: status == 'delivered' ? 'delivered' : 'sent',
       );
+      await _recordRelayAck('ack_received', packetId, status, endpointId);
+      return status == 'delivered' ? RelayResult.delivered : RelayResult.stored;
     }
+    if (record.state == RelayPacketState.delivered && status != 'delivered') {
+      return RelayResult.delivered;
+    }
+    await repository.recordForwardResult(
+      packetId: packetId,
+      targetDeviceId: targetDeviceId,
+      status: status,
+    );
     await _recordRelayAck('ack_received', packetId, status, endpointId);
-    if (local.isEmpty) return RelayResult.blocked;
-    return status == 'delivered' ? RelayResult.delivered : RelayResult.stored;
+    if (status == 'delivered') {
+      await repository.updatePacketState(packetId, RelayPacketState.delivered);
+      if (record.envelope.originDeviceId == local) {
+        await _updateOriginText(record.envelope, DeliveryStatus.delivered);
+      } else {
+        await _propagateFinalAck(record.envelope, status);
+      }
+      return RelayResult.delivered;
+    }
+    if (status == 'blocked' || status == 'expired') {
+      await repository.updatePacketState(
+        packetId,
+        status == 'expired'
+            ? RelayPacketState.expired
+            : RelayPacketState.blocked,
+      );
+      if (record.envelope.originDeviceId == local) {
+        await _updateOriginText(record.envelope, DeliveryStatus.failed);
+      } else {
+        await _propagateFinalAck(record.envelope, status);
+      }
+      return status == 'expired' ? RelayResult.expired : RelayResult.blocked;
+    }
+    if (record.envelope.originDeviceId == local) {
+      await _updateOriginText(record.envelope, DeliveryStatus.nearbySent);
+    }
+    return RelayResult.stored;
   }
 
-  Future<void> _sendRelayAck(
+  Future<void> _updateOriginText(
+    RelayEnvelope envelope,
+    DeliveryStatus status,
+  ) => identity.profiles.owners.run(() async {
+    final principal = (await identity.profiles.current()).principalId;
+    if (envelope.toPayloadPacket().senderPrincipal != principal) return;
+    final message = await messages?.getMessage(envelope.payloadId);
+    if (message == null ||
+        !message.outgoing ||
+        message.status == DeliveryStatus.delivered ||
+        message.status == DeliveryStatus.synced) {
+      return;
+    }
+    await messages?.advanceTextRouteStatus(envelope.payloadId, status);
+  });
+
+  Future<void> _propagateFinalAck(RelayEnvelope envelope, String status) async {
+    final previous = envelope.previousHopDeviceId;
+    if (previous == null) return;
+    final upstream =
+        ((receiptPeers ?? connectedPeers)?.call() ?? const <NearbyPeer>[])
+            .where((peer) => _deviceId(peer) == previous)
+            .toList(growable: false);
+    if (upstream.length != 1) return;
+    final endpoint = upstream.single.endpointId;
+    if (_receiptEndpoints[envelope.packetId] == endpoint) return;
+    final sent = await _sendRelayAck(
+      upstream.single.endpointId,
+      envelope.packetId,
+      status,
+    );
+    if (!sent) return;
+    _receiptEndpoints[envelope.packetId] = endpoint;
+    _recordRelay(
+      'final_ack_propagated',
+      envelope,
+      fields: {'ackStatus': status},
+    );
+  }
+
+  Future<bool> _sendRelayAck(
     String endpointId,
     String relayPacketId,
     String status,
@@ -527,9 +695,11 @@ class RelayEngine {
       );
       await transport.sendBytes(packet.toBytes(), peerId: endpointId);
       await _recordRelayAck('ack_sent', relayPacketId, status, endpointId);
+      return true;
     } on Object {
       await _recordRelayAck('ack_failed', relayPacketId, status, endpointId);
       // A hop ACK is best effort; SQLite still contains the authoritative row.
+      return false;
     }
   }
 

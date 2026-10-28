@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../media/media_storage_service.dart';
 import '../connectivity/qa_internet_simulator.dart';
@@ -9,6 +10,8 @@ import 'cloud_data_source.dart';
 import 'cloud_error_mapper.dart';
 import 'cloud_models.dart';
 import 'cloud_storage_policy.dart';
+import 'password_recovery_callback.dart';
+import 'password_recovery_guard.dart';
 
 class SupabaseCloudDataSource implements CloudDataSource {
   SupabaseCloudDataSource({
@@ -28,6 +31,9 @@ class SupabaseCloudDataSource implements CloudDataSource {
   CloudIdentity? _identity;
   Future<void>? _initialization;
   bool _initialized = false;
+  bool _passwordRecovery = false;
+  PasswordRecoveryGuard? _recoveryGuard;
+  int _authEventGeneration = 0;
   final _cloudStates = StreamController<CloudState>.broadcast();
   final _authStates = StreamController<AuthState>.broadcast();
 
@@ -62,23 +68,67 @@ class SupabaseCloudDataSource implements CloudDataSource {
       return;
     }
     try {
+      _recoveryGuard ??= PasswordRecoveryGuard(
+        await SharedPreferences.getInstance(),
+      );
       await Supabase.initialize(
         url: configuration.url.trim(),
         publishableKey: configuration.anonKey.trim(),
         debug: false,
+        authOptions: FlutterAuthClientOptions(
+          detectSessionInUriPredicate: PasswordRecoveryCallback.accepts,
+        ),
       );
       _client = Supabase.instance.client;
-      _authSubscription ??= _client!.auth.onAuthStateChange.listen((event) {
-        _identity = _mapUser(event.session?.user);
-        _authState = _identity == null
-            ? AuthState.guest
-            : AuthState.authenticated;
-        _state = _identity == null ? CloudState.signedOut : CloudState.ready;
-        _authStates.add(_authState);
-        _cloudStates.add(_state);
-      });
+      final initialAuth = await _client!.auth.onAuthStateChange.first;
+      _passwordRecovery =
+          initialAuth.event == AuthChangeEvent.passwordRecovery ||
+          _recoveryGuard!.pending;
+      if (_passwordRecovery) await _recoveryGuard!.setPending(true);
+      _authSubscription ??= _client!.auth.onAuthStateChange.listen(
+        (event) async {
+          final generation = ++_authEventGeneration;
+          try {
+            if (event.event == AuthChangeEvent.passwordRecovery) {
+              _passwordRecovery = true;
+              _authState = AuthState.passwordRecovery;
+              await _recoveryGuard!.setPending(true);
+            } else if (event.event == AuthChangeEvent.signedOut) {
+              _passwordRecovery = false;
+              _authState = AuthState.guest;
+              await _recoveryGuard!.setPending(false);
+            }
+            if (generation != _authEventGeneration) return;
+            _identity = _mapUser(event.session?.user);
+            _authState = _passwordRecovery && _identity != null
+                ? AuthState.passwordRecovery
+                : _identity == null
+                ? AuthState.guest
+                : AuthState.authenticated;
+            _state = _identity == null
+                ? CloudState.signedOut
+                : CloudState.ready;
+            _authStates.add(_authState);
+            _cloudStates.add(_state);
+          } on Object {
+            _authState = AuthState.guest;
+            _state = CloudState.error;
+            _authStates.add(_authState);
+            _cloudStates.add(_state);
+          }
+        },
+        onError: (Object error) {
+          // SDK ตรวจ token/PKCE; ไม่ส่ง URL หรือ token ไป diagnostics
+          if (!_cloudStates.isClosed) {
+            _state = CloudState.error;
+            _cloudStates.add(_state);
+          }
+        },
+      );
       _identity = _mapUser(_client!.auth.currentUser);
-      _authState = _identity == null
+      _authState = _passwordRecovery && _identity != null
+          ? AuthState.passwordRecovery
+          : _identity == null
           ? AuthState.guest
           : AuthState.authenticated;
       _state = _identity == null ? CloudState.signedOut : CloudState.ready;
@@ -107,6 +157,12 @@ class SupabaseCloudDataSource implements CloudDataSource {
       );
     }
     return _client!;
+  }
+
+  Future<void> _clearRecoveryGuard() async {
+    ++_authEventGeneration;
+    await _recoveryGuard?.setPending(false);
+    _passwordRecovery = false;
   }
 
   bool get _isInternetUnavailable =>
@@ -190,6 +246,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
         );
       }
       _identity = identity;
+      await _clearRecoveryGuard();
       _authState = AuthState.authenticated;
       _state = CloudState.ready;
       _authStates.add(_authState);
@@ -218,6 +275,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
         throw const CloudException('เข้าสู่ระบบไม่สำเร็จ', code: 'auth');
       }
       _identity = identity;
+      await _clearRecoveryGuard();
       _authState = AuthState.authenticated;
       _state = CloudState.ready;
       _authStates.add(_authState);
@@ -233,6 +291,7 @@ class SupabaseCloudDataSource implements CloudDataSource {
   Future<void> signOut() async {
     if (!configuration.isConfigured || _identity == null) {
       _identity = null;
+      await _clearRecoveryGuard();
       _authState = AuthState.guest;
       _state = configuration.isConfigured
           ? CloudState.signedOut
@@ -248,10 +307,72 @@ class SupabaseCloudDataSource implements CloudDataSource {
       throw _failure(error, 'auth');
     }
     _identity = null;
+    await _clearRecoveryGuard();
     _authState = AuthState.guest;
     _state = CloudState.signedOut;
     _authStates.add(_authState);
     _cloudStates.add(_state);
+  }
+
+  @override
+  Future<void> requestPasswordReset({required String email}) async {
+    try {
+      await (await _ready()).auth.resetPasswordForEmail(
+        email.trim(),
+        redirectTo: PasswordRecoveryCallback.redirectUri.toString(),
+      );
+    } catch (error) {
+      throw _failure(error, 'passwordReset');
+    }
+  }
+
+  @override
+  Future<CloudIdentity> completePasswordReset({
+    required String password,
+  }) async {
+    final client = await _ready();
+    // การเปิด route เองหรือมี session ปกติไม่ใช่หลักฐาน recovery
+    if (!_passwordRecovery ||
+        _authState != AuthState.passwordRecovery ||
+        client.auth.currentSession == null ||
+        _identity == null) {
+      throw const CloudException(
+        'กรุณาเปิดลิงก์กู้รหัสผ่านที่ยังไม่หมดอายุจากอีเมล',
+        code: 'recoveryRequired',
+      );
+    }
+    if (password.length < 8 || password.length > 256) {
+      throw const CloudException(
+        'รหัสผ่านไม่ตรงตามเงื่อนไข',
+        code: 'weakPassword',
+      );
+    }
+    final expectedUserId = _identity!.userId;
+    try {
+      final response = await client.auth.updateUser(
+        UserAttributes(password: password),
+      );
+      final result = _mapUser(response.user);
+      if (result == null ||
+          result.userId != expectedUserId ||
+          !_passwordRecovery ||
+          _identity?.userId != expectedUserId ||
+          client.auth.currentUser?.id != expectedUserId) {
+        throw const CloudException(
+          'เซสชันกู้รหัสผ่านเปลี่ยนไป',
+          code: 'recoveryRequired',
+        );
+      }
+      await _clearRecoveryGuard();
+      _identity = result;
+      _authState = AuthState.authenticated;
+      _state = CloudState.ready;
+      _authStates.add(_authState);
+      _cloudStates.add(_state);
+      return result;
+    } catch (error) {
+      throw _failure(error, 'passwordReset');
+    }
   }
 
   @override

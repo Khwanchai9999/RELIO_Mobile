@@ -20,6 +20,8 @@ abstract interface class CloudDataSource {
     required String password,
   });
   Future<void> signOut();
+  Future<void> requestPasswordReset({required String email});
+  Future<CloudIdentity> completePasswordReset({required String password});
   Future<CloudIdentity?> restoreSession();
   Future<CloudProfile> fetchMyProfile();
   Future<void> upsertProfile({required String displayName});

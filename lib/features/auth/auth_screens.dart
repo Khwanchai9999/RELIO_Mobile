@@ -115,7 +115,9 @@ class _LoginScreenState extends State<LoginScreen> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                onPressed: () {},
+                onPressed: _busy
+                    ? null
+                    : () => context.push('/forgot-password'),
                 child: const Text('ลืมรหัสผ่าน?'),
               ),
             ),

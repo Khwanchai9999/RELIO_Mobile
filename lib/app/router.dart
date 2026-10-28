@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/auth/auth_screens.dart';
+import '../features/auth/password_recovery_screens.dart';
+import '../features/auth/reset_password_screen.dart';
 import '../features/chat/chat_screens.dart';
 import '../features/developer/nearby_diagnostics_screen.dart';
 import '../features/developer/nearby_transport_test_screen.dart';
@@ -25,7 +27,11 @@ String? authStartupRedirect({
   required String location,
   required bool authReady,
   required bool hasSession,
+  bool passwordRecovery = false,
 }) {
+  if (passwordRecovery && location != '/reset-password') {
+    return '/reset-password';
+  }
   if (location != '/startup' || !authReady) return null;
   return hasSession ? '/home' : '/welcome';
 }
@@ -33,6 +39,7 @@ String? authStartupRedirect({
 GoRouter createRelioRouter({
   bool Function()? authReady,
   bool Function()? hasSession,
+  bool Function()? passwordRecovery,
   Listenable? refreshListenable,
 }) {
   return GoRouter(
@@ -42,6 +49,7 @@ GoRouter createRelioRouter({
       location: state.matchedLocation,
       authReady: authReady?.call() ?? true,
       hasSession: hasSession?.call() ?? false,
+      passwordRecovery: passwordRecovery?.call() ?? false,
     ),
     routes: [
       GoRoute(
@@ -58,6 +66,14 @@ GoRouter createRelioRouter({
       GoRoute(path: '/', redirect: (_, _) => '/welcome'),
       GoRoute(path: '/welcome', builder: (_, _) => const WelcomeScreen()),
       GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (_, _) => const ForgotPasswordScreen(),
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (_, _) => const ResetPasswordScreen(),
+      ),
       GoRoute(path: '/register', builder: (_, _) => const RegisterScreen()),
       GoRoute(
         path: '/permissions',

@@ -1,0 +1,29 @@
+[
+  {
+    "timestamp": "2026-10-28T05:38:24.918566Z",
+    "event": "forward_attempt",
+    "payloadAlias": "7eb8cbec0631",
+    "relayPacketAlias": "85ac16232197",
+    "ackStatus": null,
+    "hopCount": 2,
+    "targetAlias": "a80ab9e75e3c"
+  },
+  {
+    "timestamp": "2026-10-28T05:38:24.939722Z",
+    "event": "forward_sent",
+    "payloadAlias": "7eb8cbec0631",
+    "relayPacketAlias": "85ac16232197",
+    "ackStatus": null,
+    "hopCount": 2,
+    "targetAlias": "a80ab9e75e3c"
+  },
+  {
+    "timestamp": "2026-10-28T05:38:28.229425Z",
+    "event": "ack_received",
+    "payloadAlias": "7eb8cbec0631",
+    "relayPacketAlias": "85ac16232197",
+    "ackStatus": "delivered",
+    "hopCount": 1,
+    "targetAlias": null
+  }
+]
