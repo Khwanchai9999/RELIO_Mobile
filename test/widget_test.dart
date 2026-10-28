@@ -260,8 +260,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('ตั้งค่า'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, -500));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('ตรวจสอบ Nearby (สำหรับทีมพัฒนา)'),
+      250,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tapText(tester, 'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)');
 
     expect(find.text('MOCK transport — developer diagnostics'), findsOneWidget);
@@ -278,8 +281,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('ตั้งค่า'));
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, -600));
-    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('ตรวจสอบ Cloud (สำหรับทีมพัฒนา)'),
+      250,
+      scrollable: find.byType(Scrollable).last,
+    );
     await tapText(tester, 'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)');
 
     expect(find.text('ยังไม่ได้ตั้งค่า Cloud'), findsOneWidget);

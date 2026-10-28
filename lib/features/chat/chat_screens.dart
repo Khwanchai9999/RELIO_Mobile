@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/theme/relio_spacing.dart';
+import '../../app/environment.dart';
+import '../../core/relay/relay_route_planner.dart';
 import '../../core/relio_dependencies.dart';
 import '../../core/cloud/cloud_models.dart';
 import '../../data/mock_data.dart';
@@ -363,12 +365,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           .run(() => _pickMediaOwned(type, source: source))
           .catchError((Object _) {});
 
+  // บีบอัดรูปภาพแชทล่วงหน้าในเครื่อง เพื่อความรวดเร็วในการส่งผ่าน Nearby/Bluetooth ขณะ Offline (1024px / 70%)
+  static const double _chatImageMaxDimension = 1024;
+  static const int _chatImageQuality = 70;
+
   Future<void> _pickMediaOwned(MessageType type, {ImageSource? source}) async {
     if (!_routeResolved) return;
     final dependencies = RelioDependencyScope.of(context);
     final picker = ImagePicker();
     final picked = type == MessageType.image
-        ? await picker.pickImage(source: source ?? ImageSource.gallery)
+        ? await picker.pickImage(
+            source: source ?? ImageSource.gallery,
+            maxWidth: _chatImageMaxDimension,
+            maxHeight: _chatImageMaxDimension,
+            imageQuality: _chatImageQuality,
+            requestFullMetadata: false,
+          )
         : await picker.pickVideo(source: source ?? ImageSource.gallery);
     if (picked == null) return;
     try {
@@ -553,6 +565,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               title: _persistedPeerName ?? _demoDevice?.name ?? 'อุปกรณ์ RELIO',
               subtitle: isDemo
                   ? 'ตัวอย่าง • ประวัติสนทนา DEMO'
+                  : RelioBuildInfo.isTest
+                  ? switch (nearby.textRouteMode) {
+                      RelayTextRouteMode.automatic =>
+                        connected
+                            ? 'Text อัตโนมัติ • ลิงก์ตรงพร้อม'
+                            : 'Text อัตโนมัติ • ตรวจ Relay ก่อนส่ง',
+                      RelayTextRouteMode.directOnly =>
+                        connected
+                            ? 'Text ส่งตรงเท่านั้น • พร้อม'
+                            : 'Text ส่งตรงเท่านั้น • เก็บรอในเครื่อง',
+                      RelayTextRouteMode.qaForcedRelay =>
+                        'Text QA • ผ่านเครื่องกลางที่เลือก',
+                    }
                   : connected
                   ? 'Nearby • เชื่อมต่อโดยตรงแล้ว'
                   : 'Nearby • ยังไม่เชื่อมต่อ — ข้อความจะค้างในเครื่อง',

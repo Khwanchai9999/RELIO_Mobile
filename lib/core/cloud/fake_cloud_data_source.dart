@@ -59,6 +59,7 @@ class FakeCloudDataSource implements CloudDataSource {
   FakeCloudFailure failureMode;
   int initializeCalls = 0;
   int restoreSessionCalls = 0;
+  int passwordResetRequests = 0;
   CloudState _state = CloudState.signedOut;
   AuthState _authState = AuthState.guest;
   CloudIdentity? _identity;
@@ -148,7 +149,7 @@ class FakeCloudDataSource implements CloudDataSource {
 
   void _requireAuth() {
     _check();
-    if (_identity == null) {
+    if (_identity == null || _authState != AuthState.authenticated) {
       throw const CloudException(
         'ต้องเข้าสู่ระบบก่อนใช้งานคลาวด์',
         code: 'signedOut',
@@ -224,6 +225,50 @@ class FakeCloudDataSource implements CloudDataSource {
     _state = configured ? CloudState.signedOut : CloudState.notConfigured;
     _authStates.add(_authState);
     _cloudStates.add(_state);
+  }
+
+  @override
+  Future<void> requestPasswordReset({required String email}) async {
+    _check();
+    // ไม่เปิดเผยว่ามีอีเมลนี้หรือไม่ เช่นเดียวกับ API จริง
+    passwordResetRequests++;
+  }
+
+  void simulatePasswordRecovery(String email) {
+    _check();
+    final user = _users[email];
+    if (user == null) throw StateError('Unknown recovery test identity');
+    _identity = user.identity;
+    _authState = AuthState.passwordRecovery;
+    _state = CloudState.signedOut;
+    _authStates.add(_authState);
+    _cloudStates.add(_state);
+  }
+
+  @override
+  Future<CloudIdentity> completePasswordReset({
+    required String password,
+  }) async {
+    _check();
+    if (_authState != AuthState.passwordRecovery || _identity == null) {
+      throw const CloudException(
+        'ต้องเปิดลิงก์กู้รหัสผ่านก่อน',
+        code: 'recoveryRequired',
+      );
+    }
+    if (password.length < 8 || password.length > 256) {
+      throw const CloudException(
+        'รหัสผ่านไม่ตรงตามเงื่อนไข',
+        code: 'weakPassword',
+      );
+    }
+    final identity = _identity!;
+    _users[identity.email] = (password: password, identity: identity);
+    _authState = AuthState.authenticated;
+    _state = CloudState.ready;
+    _authStates.add(_authState);
+    _cloudStates.add(_state);
+    return identity;
   }
 
   @override

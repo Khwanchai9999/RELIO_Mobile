@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app/environment.dart';
@@ -24,6 +25,8 @@ class DiagnosticsLogService {
   final void Function(String line)? qaLogcatSink;
   Future<void> _writeQueue = Future<void>.value();
   int _eventCount = 0;
+  final ValueNotifier<List<Map<String, Object?>>> qaRelayEvents =
+      ValueNotifier<List<Map<String, Object?>>>(const []);
   DateTime? _oldest;
   DateTime? _newest;
 
@@ -99,6 +102,12 @@ class DiagnosticsLogService {
         if (!_sensitiveKey(item.key)) item.key: _safeValue(item.value),
     };
     final line = '${jsonEncode(entry)}\n';
+    if (RelioBuildInfo.isTest && category == 'relay') {
+      qaRelayEvents.value = List.unmodifiable([
+        entry,
+        ...qaRelayEvents.value.take(39),
+      ]);
+    }
     _eventCount++;
     _oldest ??= now;
     _newest = now;
@@ -109,6 +118,7 @@ class DiagnosticsLogService {
       'sos',
       'native_nearby',
       'media',
+      'relay',
       'lifecycle',
       'trust',
     };

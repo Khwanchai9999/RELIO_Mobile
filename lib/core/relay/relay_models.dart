@@ -34,6 +34,14 @@ class RelayPolicy {
         envelope.destinationDeviceId.isEmpty) {
       return 'missingRoute';
     }
+    final firstHop = envelope.firstHopDeviceId;
+    if (firstHop != null &&
+        (firstHop.isEmpty ||
+            firstHop.length > 128 ||
+            firstHop == envelope.originDeviceId ||
+            firstHop == envelope.destinationDeviceId)) {
+      return 'invalidFirstHop';
+    }
     if (!isSupportedPayloadType(envelope.payloadType)) {
       return 'unsupportedPayload';
     }
@@ -69,6 +77,7 @@ class RelayEnvelope {
     required this.priority,
     required this.previousHopDeviceId,
     required this.payload,
+    this.firstHopDeviceId,
     this.protocol = 'relay-v1',
   });
 
@@ -84,6 +93,9 @@ class RelayEnvelope {
   final int priority;
   final String? previousHopDeviceId;
   final Map<String, Object?> payload;
+
+  /// บังคับ next hop เฉพาะซองนี้ และถูกล้างเมื่อส่งออก hop แรก
+  final String? firstHopDeviceId;
   final String protocol;
 
   factory RelayEnvelope.fromPayloadPacket({
@@ -93,6 +105,7 @@ class RelayEnvelope {
     Duration? ttl,
     int? maxHops,
     int priority = 0,
+    String? firstHopDeviceId,
   }) {
     final payloadId = _payloadId(packet);
     final createdAt = now?.toUtc() ?? DateTime.now().toUtc();
@@ -109,6 +122,7 @@ class RelayEnvelope {
       maxHops: maxHops ?? policy.defaultMaxHops,
       priority: priority,
       previousHopDeviceId: null,
+      firstHopDeviceId: firstHopDeviceId,
       payload: {
         'senderDeviceId': packet.senderDeviceId,
         'senderUserId': packet.senderUserId,
@@ -138,6 +152,11 @@ class RelayEnvelope {
     if (hopCount is! int || maxHops is! int || priority is! int) {
       throw const FormatException('Relay hop fields are invalid.');
     }
+    final firstHopDeviceId = json['firstHopDeviceId'];
+    if (firstHopDeviceId != null &&
+        (firstHopDeviceId is! String || firstHopDeviceId.length > 128)) {
+      throw const FormatException('Relay first-hop field is invalid.');
+    }
     return RelayEnvelope(
       packetId: _string(json, 'packetId'),
       originDeviceId: _string(json, 'originDeviceId'),
@@ -150,6 +169,7 @@ class RelayEnvelope {
       maxHops: maxHops,
       priority: priority,
       previousHopDeviceId: json['previousHopDeviceId'] as String?,
+      firstHopDeviceId: firstHopDeviceId as String?,
       payload: payload,
       protocol: _string(json, 'protocol'),
     );
@@ -170,27 +190,37 @@ class RelayEnvelope {
     ...?(previousHopDeviceId == null
         ? null
         : {'previousHopDeviceId': previousHopDeviceId}),
+    ...?(firstHopDeviceId == null
+        ? null
+        : {'firstHopDeviceId': firstHopDeviceId}),
     'payload': payload,
   };
 
   List<int> toBytes() => utf8.encode(jsonEncode(toJson()));
 
-  RelayEnvelope copyWith({int? hopCount, String? previousHopDeviceId}) =>
-      RelayEnvelope(
-        packetId: packetId,
-        originDeviceId: originDeviceId,
-        destinationDeviceId: destinationDeviceId,
-        payloadType: payloadType,
-        payloadId: payloadId,
-        createdAt: createdAt,
-        expiresAt: expiresAt,
-        hopCount: hopCount ?? this.hopCount,
-        maxHops: maxHops,
-        priority: priority,
-        previousHopDeviceId: previousHopDeviceId ?? this.previousHopDeviceId,
-        payload: payload,
-        protocol: protocol,
-      );
+  RelayEnvelope copyWith({
+    int? hopCount,
+    String? previousHopDeviceId,
+    String? firstHopDeviceId,
+    bool clearFirstHopDeviceId = false,
+  }) => RelayEnvelope(
+    packetId: packetId,
+    originDeviceId: originDeviceId,
+    destinationDeviceId: destinationDeviceId,
+    payloadType: payloadType,
+    payloadId: payloadId,
+    createdAt: createdAt,
+    expiresAt: expiresAt,
+    hopCount: hopCount ?? this.hopCount,
+    maxHops: maxHops,
+    priority: priority,
+    previousHopDeviceId: previousHopDeviceId ?? this.previousHopDeviceId,
+    firstHopDeviceId: clearFirstHopDeviceId
+        ? null
+        : firstHopDeviceId ?? this.firstHopDeviceId,
+    payload: payload,
+    protocol: protocol,
+  );
 
   RelioPacket toPayloadPacket() {
     final nested = payload['payload'];

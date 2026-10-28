@@ -16,6 +16,7 @@ abstract interface class ConversationRepository {
   Stream<List<RelioConversation>> watchConversations();
   Future<List<RelioConversation>> listConversations();
   Future<RelioConversation?> getConversation(String id);
+  Future<String?> remotePrincipalForConversation(String id);
   Future<RelioConversation> resolveRouteTarget(String routeId);
   Future<RelioConversation> ensureConversation({
     required String id,
@@ -86,6 +87,7 @@ abstract interface class MessageRepository {
     required String localPath,
   });
   Future<void> updateDeliveryStatus(String messageId, DeliveryStatus status);
+  Future<void> advanceTextRouteStatus(String messageId, DeliveryStatus status);
   Future<List<String>> markConversationRead(String conversationId);
   Future<void> markMessageRead(String messageId);
   Future<void> mergeCloudReadReceipt({
@@ -494,6 +496,7 @@ class DriftConversationRepository implements ConversationRepository {
     return row?.read<String>('principal_id');
   }
 
+  @override
   Future<String?> remotePrincipalForConversation(
     String id,
   ) => ownerContext.run(() async {
@@ -1232,6 +1235,30 @@ class DriftMessageRepository implements MessageRepository {
       });
     });
   }
+
+  @override
+  Future<void> advanceTextRouteStatus(
+    String messageId,
+    DeliveryStatus status,
+  ) => _owned(() async {
+    if (await _visibleMessage(messageId) == null) return;
+    await (db.update(db.messages)..where(
+          (row) =>
+              row.id.equals(messageId) &
+              row.isOutgoing.equals(true) &
+              row.messageType.equals(MessageType.text.name) &
+              row.deliveryStatus.isNotIn([
+                DeliveryStatus.delivered.name,
+                DeliveryStatus.synced.name,
+              ]),
+        ))
+        .write(
+          MessagesCompanion(
+            deliveryStatus: Value(status.name),
+            updatedAt: Value(DateTime.now()),
+          ),
+        );
+  });
 
   @override
   Future<void> updateDeliveryStatus(

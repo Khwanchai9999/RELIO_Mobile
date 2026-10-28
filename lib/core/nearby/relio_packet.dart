@@ -208,6 +208,9 @@ class RelioPacket {
     double? locationAccuracy,
     DateTime? locationCapturedAt,
     String? deviceModel,
+    String? qaRelayCheckId,
+    String? qaRelayDestinationHash,
+    bool? qaRelayConnected,
   }) => RelioPacket(
     protocolVersion: 1,
     packetId: const Uuid().v4(),
@@ -221,6 +224,9 @@ class RelioPacket {
       'status': status.name,
       'rescueActive': rescueActive ?? status == DeviceStatus.rescue,
       'updatedAt': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
+      'qaRelayCheckId': ?qaRelayCheckId,
+      'qaRelayDestinationHash': ?qaRelayDestinationHash,
+      'qaRelayConnected': ?qaRelayConnected,
       ..._peerMetadataFields(
         batteryLevel: batteryLevel,
         isCharging: isCharging,
@@ -622,6 +628,19 @@ class RelioPacket {
         _statusField();
         _payloadString('updatedAt');
         if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
+        if (payload.containsKey('qaRelayCheckId') ||
+            payload.containsKey('qaRelayDestinationHash') ||
+            payload.containsKey('qaRelayConnected')) {
+          final checkId = _payloadString('qaRelayCheckId');
+          final destinationHash = _payloadString('qaRelayDestinationHash');
+          if (!RegExp(r'^[0-9a-f-]{36}$').hasMatch(checkId) ||
+              !RegExp(r'^[0-9a-f]{64}$').hasMatch(destinationHash)) {
+            throw const RelioPacketException('Invalid QA relay check.');
+          }
+          if (payload.containsKey('qaRelayConnected')) {
+            _payloadBool('qaRelayConnected');
+          }
+        }
         _validatePeerMetadata();
       case RelioPacketType.ack:
         _payloadString('packetId');

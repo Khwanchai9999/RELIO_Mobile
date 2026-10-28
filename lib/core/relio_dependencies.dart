@@ -140,8 +140,12 @@ class RelioDependencies {
       conversations: repositories.conversations,
       sos: repositories.sos,
       connectedPeers: () => nearbyService.connectedPeers,
+      receiptPeers: () => nearbyService.authenticatedConnectedPeers,
       deviceIdForEndpoint: (endpointId) =>
           nearbyService.deviceIdForEndpoint(endpointId),
+      diagnostics: diagnostics,
+      forwardingAllowed: () => !RelioBuildInfo.isTest || _nearbyForeground,
+      qaTextForwardingPaused: () => qaTextForwardingPaused,
     );
     nearbyService = NearbyService(
       transport: this.transport,
@@ -219,6 +223,21 @@ class RelioDependencies {
   Future<void>? _onlineAuthResume;
   Future<bool>? _nearbySyncOperation;
   bool _nearbyForeground = true;
+  bool _qaTextForwardingPaused = false;
+  bool get qaTextForwardingPaused =>
+      RelioBuildInfo.isTest && _qaTextForwardingPaused;
+
+  Future<void> setQaTextForwardingPaused(bool paused) async {
+    if (!RelioBuildInfo.isTest) throw StateError('QA-only forwarding control');
+    await repositories.settings.setBool('qa_text_forwarding_paused', paused);
+    _qaTextForwardingPaused = paused;
+    diagnostics.record(
+      'relay',
+      paused ? 'qa_text_forwarding_paused' : 'qa_text_forwarding_resumed',
+    );
+    if (!paused) await relayEngine.forwardPending();
+  }
+
   bool _nearbyRestart = false;
   bool _nearbySessionSyncDeferred = false;
   bool _backgroundStopDeferred = false;
@@ -626,6 +645,12 @@ class RelioDependencies {
       await featureFlags.initialize();
       await _restoreInternetSimulator();
       unawaited(diagnostics.initialize());
+      if (RelioBuildInfo.isTest) {
+        _qaTextForwardingPaused = await repositories.settings.getBool(
+          'qa_text_forwarding_paused',
+          defaultValue: false,
+        );
+      }
       if (_isAndroid && !useMockTransport) {
         _readinessSubscription = connectivityStatus.changes.listen((_) {
           unawaited(startNearbySessionIfPermitted());

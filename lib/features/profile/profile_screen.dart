@@ -225,6 +225,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () => _showAbout(context),
           ),
           const SizedBox(height: 14),
+          if (!dependencies.hasAuthenticatedPrincipal)
+            OutlinedButton.icon(
+              onPressed: () => context.go('/login'),
+              icon: const Icon(Icons.login_rounded),
+              label: const Text('เข้าสู่ระบบ'),
+            ),
           if (dependencies.hasAuthenticatedPrincipal)
             OutlinedButton.icon(
               onPressed: _busy

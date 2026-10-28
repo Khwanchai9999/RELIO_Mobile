@@ -22,6 +22,7 @@ android {
 
     defaultConfig {
         applicationId = "com.relio.relio_mobile"
+        manifestPlaceholders["authRedirectScheme"] = "com.relio.mobile"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -51,6 +52,7 @@ android {
         create("dev") {
             dimension = "environment"
             applicationIdSuffix = ".dev"
+            manifestPlaceholders["authRedirectScheme"] = "com.relio.mobile.dev"
             manifestPlaceholders["appLabel"] = "RELIO"
         }
         // AGP 9 reserves flavor names that start with "test"; qa is the
@@ -58,6 +60,7 @@ android {
         create("qa") {
             dimension = "environment"
             applicationIdSuffix = ".test"
+            manifestPlaceholders["authRedirectScheme"] = "com.relio.mobile.qa"
             manifestPlaceholders["appLabel"] = "RELIO"
             val testSigningConfig = signingConfigs.findByName("test")
             if (testSigningConfig != null) signingConfig = testSigningConfig

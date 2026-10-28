@@ -214,6 +214,25 @@ remote policy enforcement.
 
 ## Change boundaries
 
+Build 39 QA Text routing candidate adds automatic/direct-only/forced-middle modes.
+Automatic routing is TEST-only, foreground, direct-first and bounded to one
+verified intermediate/two hops; it must preserve the SQLite-before-transport path.
+Media, SOS and DEV/PROD routing remain unchanged. QA Text final hop receipts can
+propagate C -> B -> A, but are trusted-hop reports, not end-to-end cryptographic
+proof. Keep retries on the same persistent envelope and do not reinterpret a
+stored ACK as final delivery. Build 38 physical evidence does not prove Build 39.
+Build 39 has 452 passing QA tests and controlled-disconnection physical evidence
+for Samsung -> Realme -> Huawei with a propagated delivered ACK. Only Samsung
+and Realme installed APK provenance was verified during that relay run. Huawei
+later reappeared in ADB and was safely updated to Build 39 with matching installed
+APK hash and preserved firstInstallTime; no new three-hop retest was claimed.
+On 2026-10-28 all-Build-39 retesting verified automatic relay via Realme,
+forced relay via Samsung/Huawei, and pending Text recovery after a middle-app
+outage. This does not prove loss after B has stored an envelope or range walking.
+See docs/BUILD39_THREE_DEVICE_RETEST_20261028.md for exact evidence and limits.
+Walking-distance and 4/5-device physical acceptance remain unverified. See
+docs/AUTOMATIC_TEXT_RELAY_BUILD39_ACCEPTANCE.md for the exact evidence boundary.
+
 Nearby Map UI, Peer Battery UI, and Route Preview use the centralized local
 `FeatureFlagController`. Build defaults are compile-time values; only TEST
 builds read/write QA overrides in `app_settings`. Route Preview requires the
@@ -284,6 +303,33 @@ this define and remain OFF on a clean install; DEV and PROD cannot activate it.
   runnable command may point to an old ASCII or Thai workspace path.
 
 ## Identity isolation candidate (schema 10)
+
+Build 40–43 local QA candidates add Auth password recovery through the existing
+AuthService/CloudDataSource boundary. Exact callback schemes are
+com.relio.mobile.dev, com.relio.mobile.qa, and com.relio.mobile, with host
+auth-reset and path /. Supabase verifies the recovery credentials; opening a
+route alone must never enable password changes. Recovery is a separate auth
+state and must not enable account Sync until password completion. Build 43
+persists a non-secret recovery guard across SDK session restoration. Live email
+acceptance needs a usable disposable QA mailbox; example.invalid is not one.
+The verified RELIO-QA backend allows only the QA callback added in this round.
+
+QA-only Text forwarding hold persists in app_settings and is restored before
+Nearby/Relay startup. It pauses received Text forwarding only, never SOS or
+PROD. Build 41 replays confirmed delivered Text ACKs from existing SQLite relay
+state while within TTL when the upstream peer reconnects. It does not replay
+the payload or migrate in-flight routes. Disable the QA hold after acceptance.
+Final ACK replay waits for completed identity handshake. Final Build 43 passed
+462 QA tests, 455 DEV tests (7 QA-only skips), analyze and signed QA gates.
+It was installed with data-preserving `adb install -r` on Samsung, Huawei and
+Realme. One controlled physical after-stored Text probe passed Samsung → Huawei
+→ Realme, including middle-app restart, one recipient materialization and final
+ACK back to Samsung. Huawei QA forwarding hold was restored OFF and Samsung
+new-message mode restored to Automatic. The QA mailbox and walking-distance
+acceptance remain unverified.
+See docs/BUILD43_ONLINE_AUTH_RELAY_ACCEPTANCE_20261028.md for actual device
+evidence and remaining email/physical limitations; automated tests are not
+proof of mailbox delivery or walking-distance acceptance.
 
 Schema 11 adds principal-owned emergency contacts in local SQLite only. Contact
 CRUD must check OwnerContext before and inside transactions; contacts never enter

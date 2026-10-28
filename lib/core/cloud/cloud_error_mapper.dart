@@ -35,6 +35,10 @@ abstract final class CloudErrorMapper {
         'validation_failed' => 'invalidInput',
         'over_email_send_rate_limit' => 'emailRateLimit',
         'over_request_rate_limit' => 'rateLimit',
+        'otp_expired' ||
+        'flow_state_expired' ||
+        'flow_state_not_found' => 'recoveryRequired',
+        'same_password' => 'samePassword',
         _ when status == 429 => 'rateLimit',
         _ when status != null && status >= 500 => 'server',
         _ => 'auth',
@@ -70,6 +74,10 @@ abstract final class CloudErrorMapper {
   static String messageFor(String code) => _message(code);
 
   static String _message(String code) => switch (code) {
+    'passwordReset' => 'กู้รหัสผ่านไม่สำเร็จ กรุณาลองใหม่ภายหลัง',
+    'recoveryRequired' =>
+      'ลิงก์กู้รหัสผ่านไม่พร้อมหรือหมดอายุ กรุณาขอลิงก์ใหม่',
+    'samePassword' => 'กรุณาใช้รหัสผ่านใหม่ที่ต่างจากรหัสผ่านเดิม',
     'emailAlreadyUsed' => 'อีเมลนี้ถูกใช้งานแล้ว',
     'weakPassword' => 'รหัสผ่านไม่ผ่านข้อกำหนดของระบบ',
     'signupDisabled' => 'ขณะนี้ระบบปิดรับสมัครบัญชีใหม่',

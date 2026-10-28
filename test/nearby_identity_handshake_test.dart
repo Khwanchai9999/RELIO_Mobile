@@ -14,6 +14,7 @@ void main() {
       final pair = await HandshakePair.create(displayNameA: 'RELIO H QA');
       addTearDown(pair.close);
       final defaultNameB = await pair.identityB.getDisplayName();
+      expect(pair.serviceA.authenticatedConnectedPeers, isEmpty);
       expect(defaultNameB, matches(RegExp(r'^ผู้ใช้ RELIO \d{4}$')));
 
       await pair.serviceA.connect('endpoint-b');
@@ -35,6 +36,10 @@ void main() {
             );
       });
 
+      expect(
+        pair.serviceA.authenticatedConnectedPeers.single.deviceId,
+        'device-b',
+      );
       expect(
         pair.serviceA.peerStates['endpoint-b'],
         NearbyConnectionState.connected,

@@ -8,6 +8,40 @@ import 'package:relio_mobile/core/nearby/peer_identity_crypto.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 void main() {
+  test('QA relay route check fields are bounded and typed', () {
+    final check = RelioPacket.deviceStatus(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      displayName: 'A',
+      status: DeviceStatus.normal,
+      qaRelayCheckId: '12345678-1234-1234-1234-123456789abc',
+      qaRelayDestinationHash: 'a' * 64,
+      qaRelayConnected: true,
+    );
+    expect(
+      RelioPacket.fromBytes(check.toBytes()).payload['qaRelayConnected'],
+      isTrue,
+    );
+    final malformed =
+        jsonDecode(utf8.decode(check.toBytes())) as Map<String, dynamic>;
+    (malformed['payload'] as Map<String, dynamic>)['qaRelayConnected'] = 'yes';
+    expect(
+      () => RelioPacket.fromBytes(
+        Uint8List.fromList(utf8.encode(jsonEncode(malformed))),
+      ),
+      throwsA(isA<RelioPacketException>()),
+    );
+    (malformed['payload'] as Map<String, dynamic>)['qaRelayConnected'] = true;
+    (malformed['payload'] as Map<String, dynamic>)['qaRelayDestinationHash'] =
+        'bad';
+    expect(
+      () => RelioPacket.fromBytes(
+        Uint8List.fromList(utf8.encode(jsonEncode(malformed))),
+      ),
+      throwsA(isA<RelioPacketException>()),
+    );
+  });
+
   test('identity challenge packet is versioned and bounded', () {
     final nonce = List.filled(43, 'A').join();
     final packet = RelioPacket.identityChallenge(

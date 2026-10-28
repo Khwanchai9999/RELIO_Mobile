@@ -34,8 +34,34 @@ class _FakeClock implements AppUpdateClock {
   DateTime now() => value;
 }
 
+class _DelayedGateway extends _FakeGateway {
+  _DelayedGateway()
+    : super(const AppUpdateGatewayResult(status: AppUpdateStatus.checked));
+  final result = Completer<AppUpdateGatewayResult>();
+  @override
+  Future<AppUpdateGatewayResult> checkForUpdate() => result.future;
+}
+
 void main() {
   group('AppUpdateService', () {
+    test('late QA update check does not notify after disposal', () async {
+      final gateway = _DelayedGateway();
+      final service = AppUpdateService(
+        gateway: gateway,
+        enabled: true,
+        environment: RelioEnvironment.test,
+      );
+      var notifications = 0;
+      service.addListener(() => notifications++);
+      final operation = service.checkForUpdate(manual: true);
+      final before = notifications;
+      service.dispose();
+      gateway.result.complete(
+        const AppUpdateGatewayResult(status: AppUpdateStatus.checked),
+      );
+      await operation;
+      expect(notifications, before);
+    });
     test('QA can run the official update check through its gateway', () async {
       final gateway = _FakeGateway(
         const AppUpdateGatewayResult(status: AppUpdateStatus.checked),

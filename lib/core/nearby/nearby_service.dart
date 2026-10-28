@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../app/environment.dart';
@@ -18,6 +19,8 @@ import '../notifications/local_notification_service.dart';
 import '../notifications/notification_preview.dart';
 import '../repositories/local_repositories.dart';
 import '../relay/relay_engine.dart';
+import '../relay/relay_models.dart';
+import '../relay/relay_route_planner.dart';
 import 'nearby_transport.dart';
 import 'nearby_readiness.dart';
 import 'peer_identity_crypto.dart';
@@ -93,8 +96,17 @@ class _PendingVerifiedIdentity {
   final String? previousFingerprint;
 }
 
+class _QaRelayRouteCheck {
+  _QaRelayRouteCheck(this.endpointId, this.destinationHash);
+  final String endpointId;
+  final String destinationHash;
+  final Completer<bool> result = Completer<bool>();
+}
+
 class NearbyService extends ChangeNotifier {
   static final Stopwatch _diagnosticClock = Stopwatch()..start();
+  static const _relayRouteModeSetting = 'qa_text_relay_route_mode';
+  static const _relayMiddleSetting = 'qa_text_relay_middle_device';
   NearbyService({
     required this.transport,
     required this.messages,
@@ -129,6 +141,146 @@ class NearbyService extends ChangeNotifier {
       ? (conversations as DriftConversationRepository).ownerContext
       : identity.profiles.owners;
   final Map<String, String> _remotePrincipals = {};
+  final Map<String, _QaRelayRouteCheck> _qaRelayRouteChecks = {};
+  final RelayRoutePlanner _relayRoutePlanner = const RelayRoutePlanner();
+  RelayTextRouteMode _textRouteMode = RelioBuildInfo.isTest
+      ? RelayTextRouteMode.automatic
+      : RelayTextRouteMode.directOnly;
+  String? _forcedRelayMiddleDeviceId;
+  RelayRoutePlan? _lastTextRoutePlan;
+  final Set<String> _textSendsInProgress = {};
+  Timer? _qaRelayRetryTimer;
+  bool _qaRelayRetryRunning = false;
+
+  RelayTextRouteMode get textRouteMode => _textRouteMode;
+  String? get forcedRelayMiddleDeviceId => _forcedRelayMiddleDeviceId;
+  RelayRoutePlan? get lastTextRoutePlan => _lastTextRoutePlan;
+
+  Future<void> configureTextRouteMode(
+    RelayTextRouteMode mode, {
+    String? forcedMiddleDeviceId,
+  }) async {
+    if (!RelioBuildInfo.isTest) {
+      throw StateError('Automatic Relay routing is available only in TEST.');
+    }
+    final middle = forcedMiddleDeviceId?.trim();
+    if (mode == RelayTextRouteMode.qaForcedRelay &&
+        (middle == null || middle.isEmpty || middle.length > 128)) {
+      throw ArgumentError.value(forcedMiddleDeviceId, 'forcedMiddleDeviceId');
+    }
+    _textRouteMode = mode;
+    _forcedRelayMiddleDeviceId = mode == RelayTextRouteMode.qaForcedRelay
+        ? middle
+        : null;
+    _lastTextRoutePlan = null;
+    await settings?.setValue(_relayRouteModeSetting, mode.name);
+    if (_forcedRelayMiddleDeviceId case final selected?) {
+      await settings?.setValue(_relayMiddleSetting, selected);
+    } else {
+      await settings?.remove(_relayMiddleSetting);
+    }
+    notifyListeners();
+  }
+
+  Future<RelayRoutePlan> planTextRoute(String destinationDeviceId) async {
+    final sourceDeviceId = await identity.getDeviceId();
+    final plan = await _relayRoutePlanner.plan(
+      mode: RelioBuildInfo.isTest
+          ? _textRouteMode
+          : RelayTextRouteMode.directOnly,
+      sourceDeviceId: sourceDeviceId,
+      destinationDeviceId: destinationDeviceId,
+      connectedPeers: connectedPeers.where(
+        (peer) =>
+            identityCrypto is MockPeerIdentityCrypto ||
+            _completedIdentityHandshakes.contains(peer.endpointId),
+      ),
+      forcedMiddleDeviceId: _forcedRelayMiddleDeviceId,
+      verifyRelay: (middle, destination) => checkQaRelayRoute(
+        middleDeviceId: middle,
+        destinationDeviceId: destination,
+      ),
+    );
+    _lastTextRoutePlan = plan;
+    diagnostics?.record(
+      'relay',
+      'route_selected',
+      peerIdentifier: destinationDeviceId,
+      fields: {
+        'routeMode': plan.mode.name,
+        'routeKind': plan.kind.name,
+        'originAlias': DiagnosticsLogService.peerAlias(sourceDeviceId),
+        'destinationAlias': DiagnosticsLogService.peerAlias(
+          destinationDeviceId,
+        ),
+        if (plan.middleDeviceId case final middle?)
+          'middleAlias': DiagnosticsLogService.peerAlias(middle),
+        'reason': ?plan.reason,
+      },
+    );
+    notifyListeners();
+    return plan;
+  }
+
+  /// ผลยืนยันสดจาก B ใช้ได้เฉพาะคำขอครั้งนี้ ไม่เก็บเป็น topology ถาวร
+  Future<bool> checkQaRelayRoute({
+    required String middleDeviceId,
+    required String destinationDeviceId,
+  }) async {
+    if (!RelioBuildInfo.isTest ||
+        _closed ||
+        middleDeviceId == destinationDeviceId) {
+      return false;
+    }
+    final sourceDeviceId = await identity.getDeviceId();
+    if (sourceDeviceId == middleDeviceId ||
+        sourceDeviceId == destinationDeviceId) {
+      return false;
+    }
+    final peers = connectedPeers
+        .where(
+          (peer) =>
+              peer.deviceId == middleDeviceId &&
+              peer.capabilities.contains('relay-v1') &&
+              _completedIdentityHandshakes.contains(peer.endpointId),
+        )
+        .toList();
+    if (peers.length != 1) return false;
+    final endpointId = peers.single.endpointId;
+    final hash = sha256.convert(utf8.encode(destinationDeviceId)).toString();
+    final checkId = const Uuid().v4();
+    final pending = _QaRelayRouteCheck(endpointId, hash);
+    _qaRelayRouteChecks[checkId] = pending;
+    try {
+      await _sendApplicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: await identity.getDeviceId(),
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: await currentStatus(),
+          qaRelayCheckId: checkId,
+          qaRelayDestinationHash: hash,
+        ),
+        peerId: endpointId,
+      );
+      final confirmed = await pending.result.future.timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => false,
+      );
+      return confirmed &&
+          !_closed &&
+          connectedPeers.any(
+            (peer) =>
+                peer.endpointId == endpointId &&
+                peer.deviceId == middleDeviceId,
+          );
+    } on Object {
+      return false;
+    } finally {
+      _qaRelayRouteChecks.remove(checkId);
+    }
+  }
+
   final Map<String, int> _remotePrincipalEpochs = {};
   final Map<String, int> _remoteProfileRevisions = {};
   static const _privateTypes = {
@@ -331,6 +483,52 @@ class NearbyService extends ChangeNotifier {
     }
     appLifecycleState = lifecycleState;
     screenRoute = route;
+    if (RelioBuildInfo.isTest &&
+        lifecycleState == 'resumed' &&
+        transport is! MockNearbyTransport) {
+      _qaRelayRetryTimer ??= Timer.periodic(const Duration(seconds: 15), (_) {
+        unawaited(_retryQaPendingText());
+      });
+    } else {
+      _qaRelayRetryTimer?.cancel();
+      _qaRelayRetryTimer = null;
+    }
+    if (RelioBuildInfo.isTest && lifecycleState == 'resumed') {
+      unawaited(_retryQaPendingText());
+    }
+  }
+
+  Future<void> _retryQaPendingText() async {
+    if (!RelioBuildInfo.isTest ||
+        _closed ||
+        _qaRelayRetryRunning ||
+        (appLifecycleState != 'resumed' && appLifecycleState != 'unknown')) {
+      return;
+    }
+    _qaRelayRetryRunning = true;
+    try {
+      await _owners.run(() async {
+        for (final conversation in await conversations.listConversations()) {
+          final pending = (await messages.listMessages(conversation.id))
+              .where(
+                (message) =>
+                    message.outgoing &&
+                    message.type == MessageType.text &&
+                    (message.status == DeliveryStatus.pending ||
+                        message.status == DeliveryStatus.nearbySent),
+              )
+              .take(20);
+          for (final message in pending) {
+            await sendMessage(message);
+          }
+        }
+        await relayEngine?.forwardPending();
+      });
+    } on Object {
+      // เปลี่ยน owner ระหว่าง retry แล้วรอรอบใหม่ โดยไม่ย้าย ownership
+    } finally {
+      _qaRelayRetryRunning = false;
+    }
   }
 
   String get statusLabel {
@@ -855,6 +1053,14 @@ class NearbyService extends ChangeNotifier {
       )
       .toList(growable: false);
 
+  List<NearbyPeer> get authenticatedConnectedPeers => connectedPeers
+      .where(
+        (peer) =>
+            identityCrypto is MockPeerIdentityCrypto ||
+            _completedIdentityHandshakes.contains(peer.endpointId),
+      )
+      .toList(growable: false);
+
   int get connectedPeerCount => connectedPeers
       .map((peer) => peer.deviceId ?? peer.endpointId)
       .toSet()
@@ -873,6 +1079,21 @@ class NearbyService extends ChangeNotifier {
   Future<void> initialize() async {
     if (initialized) return;
     initialized = true;
+    if (RelioBuildInfo.isTest && settings != null) {
+      final savedMode = await settings!.getValue(_relayRouteModeSetting);
+      _textRouteMode = RelayTextRouteMode.values.firstWhere(
+        (mode) => mode.name == savedMode,
+        orElse: () => RelayTextRouteMode.automatic,
+      );
+      final savedMiddle = await settings!.getValue(_relayMiddleSetting);
+      _forcedRelayMiddleDeviceId = savedMiddle == null || savedMiddle.isEmpty
+          ? null
+          : savedMiddle;
+      if (_textRouteMode == RelayTextRouteMode.qaForcedRelay &&
+          _forcedRelayMiddleDeviceId == null) {
+        _textRouteMode = RelayTextRouteMode.automatic;
+      }
+    }
     _subscriptions.add(transport.discoveredPeers.listen(_onPeer));
     _subscriptions.add(transport.incomingPayloads.listen(_onPayload));
     _subscriptions.add(transport.incomingFilePayloads.listen(_onFilePayload));
@@ -1546,6 +1767,38 @@ class NearbyService extends ChangeNotifier {
       _log('ส่งคำขอเชื่อมต่อไปยัง ${DiagnosticsLogService.peerAlias(peerId)}');
     } on Object catch (error) {
       if (!_isCurrentConnectionSession(peerId, traceId)) return;
+      if (_errorCode(error) == '8003') {
+        final discovered = discoveredPeers
+            .where((peer) => peer.endpointId == peerId)
+            .firstOrNull;
+        if (discovered != null && isEndpointCurrent(peerId)) {
+          diagnostics?.record(
+            'connection',
+            'already_connected_task_exception_reconciled',
+            connectionTraceId: traceId,
+            operation: 'requestConnection',
+            peerIdentifier: peerId,
+            nativeCode: 8003,
+            reason: 'native_endpoint_already_connected',
+          );
+          // Nearby SDK อาจส่ง 8003 เป็น task exception แทน connection callback
+          // แต่ native ยืนยันว่า endpoint ต่ออยู่แล้ว จึงทำ identity handshake ต่อ
+          _onConnection(
+            NearbyConnectionEvent(
+              peer: discovered,
+              state: NearbyConnectionState.failed,
+              rawStatusCode: 8003,
+              rawStatusName: 'STATUS_ALREADY_CONNECTED_TO_ENDPOINT',
+              rawStatusMessage: error is NearbyTransportException
+                  ? error.platformMessage ?? error.message
+                  : null,
+              operation: 'requestConnection',
+              connectionTraceId: traceId,
+            ),
+          );
+          return;
+        }
+      }
       _activeTransportAttempts[peerId]?['requestTaskResult'] = 'failure';
       _markTransportPhase(peerId, 'requestConnectionTaskFailure');
       _finishTransportAttempt(
@@ -2528,10 +2781,55 @@ class NearbyService extends ChangeNotifier {
     );
   }
 
-  Future<void> sendMessage(RelioMessage message) =>
-      _owners.run(() => _sendMessageOwned(message)).catchError((Object _) {});
+  Future<void> sendMessage(RelioMessage message) async {
+    if (!_textSendsInProgress.add(message.id)) return;
+    try {
+      await _owners.run(() => _sendMessageOwned(message));
+    } on Object {
+      // Repository และ OwnerContext เป็นผู้ตัดสินสิทธิ์ของข้อความ
+    } finally {
+      _textSendsInProgress.remove(message.id);
+    }
+  }
 
   Future<void> _sendMessageOwned(RelioMessage message) async {
+    final owner = _owners.capture();
+    final saved = await messages.getMessage(message.id);
+    _owners.requireCurrent(owner);
+    if (saved == null ||
+        !saved.outgoing ||
+        saved.type != MessageType.text ||
+        saved.status == DeliveryStatus.delivered ||
+        saved.status == DeliveryStatus.synced) {
+      return;
+    }
+    final origin = await identity.getDeviceId();
+    if (RelioBuildInfo.isTest && relayEngine != null) {
+      final locked = await relayEngine!.repository.getForPayload(
+        origin,
+        message.id,
+      );
+      _owners.requireCurrent(owner);
+      if (locked != null) {
+        if (locked.envelope.toPayloadPacket().senderPrincipal !=
+            await _activePrincipal()) {
+          return;
+        }
+        _owners.requireCurrent(owner);
+        if (locked.state == RelayPacketState.delivered) {
+          await messages.advanceTextRouteStatus(
+            message.id,
+            DeliveryStatus.delivered,
+          );
+        } else if (locked.state == RelayPacketState.blocked ||
+            locked.state == RelayPacketState.expired) {
+          await messages.markFailed(message.id, locked.state.name);
+        }
+        await relayEngine!.forwardPending();
+        return;
+      }
+      if (saved.status == DeliveryStatus.nearbySent) return;
+    }
     final packet = RelioPacket.textMessage(
       senderDeviceId: await identity.getDeviceId(),
       senderUserId: message.senderId ?? await _senderUserId(),
@@ -2541,19 +2839,63 @@ class NearbyService extends ChangeNotifier {
       timestamp: message.createdAt ?? DateTime.now(),
     );
     _packetMessageIds[packet.packetId] = message.id;
-    final peerId = await _endpointForMessage(message);
-    if (peerId == null) {
-      lastError = 'ยังไม่พบการเชื่อมต่อของผู้รับข้อความ';
-      _log('เก็บข้อความ ${message.id} ไว้ pending: peer ยังไม่ connected');
+    final destinationDeviceId = await _destinationDeviceForMessage(message);
+    _owners.requireCurrent(owner);
+    if (destinationDeviceId == null) return;
+    final route = RelioBuildInfo.isTest
+        ? await planTextRoute(destinationDeviceId)
+        : RelayRoutePlan(
+            mode: RelayTextRouteMode.directOnly,
+            kind: RelayRouteKind.direct,
+            sourceDeviceId: await identity.getDeviceId(),
+            destinationDeviceId: destinationDeviceId,
+            directEndpointId: await _endpointForMessage(message),
+            verifiedAt: DateTime.now().toUtc(),
+          );
+    _owners.requireCurrent(owner);
+    if (!route.ready ||
+        (route.kind == RelayRouteKind.direct &&
+            route.directEndpointId == null)) {
+      lastError = route.mode == RelayTextRouteMode.directOnly
+          ? 'ยังไม่พบการเชื่อมต่อโดยตรงของผู้รับข้อความ'
+          : 'ยังไม่พบเส้นทาง Direct หรือ Relay ที่พร้อม';
+      _log('เก็บข้อความ ${message.id} ไว้ pending: route unavailable');
       notifyListeners();
       return;
     }
+    if (route.kind == RelayRouteKind.relay) {
+      await _sendTextViaRelay(message, packet, route, owner);
+      return;
+    }
+    final peerId = route.directEndpointId!;
     try {
       await _sendApplicationBytes(packet, peerId: peerId);
-      await messages.updateDeliveryStatus(
-        message.id,
-        DeliveryStatus.nearbySent,
-      );
+      if (RelioBuildInfo.isTest) {
+        await messages.advanceTextRouteStatus(
+          message.id,
+          DeliveryStatus.nearbySent,
+        );
+      } else {
+        await messages.updateDeliveryStatus(
+          message.id,
+          DeliveryStatus.nearbySent,
+        );
+      }
+      if (RelioBuildInfo.isTest) {
+        diagnostics?.record(
+          'relay',
+          'text_direct_sent',
+          fields: {
+            'payloadAlias': DiagnosticsLogService.peerAlias(message.id),
+            'originAlias': DiagnosticsLogService.peerAlias(origin),
+            'destinationAlias': DiagnosticsLogService.peerAlias(
+              destinationDeviceId,
+            ),
+            'hopCount': 1,
+            'maxHops': 1,
+          },
+        );
+      }
       lastSentPacket = _diagnosticPacket(packet);
       _log('ส่ง textMessage ${message.id} แล้ว');
       notifyListeners();
@@ -2575,6 +2917,76 @@ class NearbyService extends ChangeNotifier {
     } on Object catch (error) {
       await messages.markFailed(message.id, '$error');
       _fail('ส่งข้อความไม่สำเร็จ: $error');
+    }
+  }
+
+  Future<void> _sendTextViaRelay(
+    RelioMessage message,
+    RelioPacket packet,
+    RelayRoutePlan route,
+    OwnerSnapshot owner,
+  ) async {
+    final engine = relayEngine;
+    final middle = route.middleDeviceId;
+    if (!RelioBuildInfo.isTest || engine == null || middle == null) {
+      return;
+    }
+    try {
+      if (message.conversationId == null ||
+          conversations is! DriftConversationRepository) {
+        throw const OwnerChangedException();
+      }
+      final localPrincipal = await _activePrincipal();
+      final remotePrincipal =
+          await (conversations as DriftConversationRepository)
+              .remotePrincipalForConversation(message.conversationId!);
+      _owners.requireCurrent(owner);
+      if (!RelioPacket.validPrincipal(remotePrincipal)) {
+        throw const OwnerChangedException();
+      }
+      final privatePacket = packet.withPrincipals(
+        localPrincipal,
+        remotePrincipal,
+      );
+      final envelope = RelayEnvelope.fromPayloadPacket(
+        packet: privatePacket,
+        destinationDeviceId: route.destinationDeviceId,
+        maxHops: 2,
+      );
+      final result = await engine.enqueueQaEnvelopeVia(
+        envelope,
+        firstHopDeviceId: middle,
+      );
+      _owners.requireCurrent(owner);
+      if (result == RelayResult.blocked || result == RelayResult.expired) {
+        await messages.markFailed(message.id, result.name);
+        return;
+      }
+      diagnostics?.record(
+        'relay',
+        'text_route_started',
+        peerIdentifier: route.destinationDeviceId,
+        fields: {
+          'payloadAlias': DiagnosticsLogService.peerAlias(message.id),
+          'relayPacketAlias': DiagnosticsLogService.peerAlias(
+            envelope.packetId,
+          ),
+          'originAlias': DiagnosticsLogService.peerAlias(route.sourceDeviceId),
+          'middleAlias': DiagnosticsLogService.peerAlias(middle),
+          'destinationAlias': DiagnosticsLogService.peerAlias(
+            route.destinationDeviceId,
+          ),
+          'routeMode': route.mode.name,
+          'hopCount': 0,
+          'maxHops': 2,
+        },
+      );
+      lastSentPacket = _diagnosticPacket(packet);
+      _log('เริ่มส่ง textMessage ${message.id} ผ่าน Relay');
+      notifyListeners();
+    } on Object catch (error) {
+      await messages.markFailed(message.id, '$error');
+      _fail('ส่งข้อความผ่าน Relay ไม่สำเร็จ: $error');
     }
   }
 
@@ -2862,14 +3274,16 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<String?> _endpointForMessage(RelioMessage message) async {
+    final deviceId = await _destinationDeviceForMessage(message);
+    return deviceId == null ? null : deviceToEndpointId[deviceId];
+  }
+
+  Future<String?> _destinationDeviceForMessage(RelioMessage message) async {
     final conversationId = message.conversationId;
     if (conversationId == null) return null;
     final conversation = await conversations.getConversation(conversationId);
     if (conversation == null) return null;
-    final deviceId = conversation.participantId;
-    final exact = deviceToEndpointId[deviceId];
-    if (exact != null) return exact;
-    return null;
+    return conversation.participantId;
   }
 
   Future<void> _sendPacket(
@@ -4816,6 +5230,7 @@ class NearbyService extends ChangeNotifier {
         case RelioPacketType.textMessage:
           await _handleText(event.peerId, packet);
         case RelioPacketType.deviceStatus:
+          await _handleQaRelayRouteCheck(event.peerId, packet);
           await _handleDeviceStatus(packet);
         case RelioPacketType.ack:
           await _handleAck(event.peerId, packet);
@@ -5571,6 +5986,10 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> _sendPendingMessage(RelioMessage message) async {
+    if (message.type == MessageType.location) {
+      await sendLocationMessage(message);
+      return;
+    }
     if (message.type != MessageType.image &&
         message.type != MessageType.video) {
       await sendMessage(message);
@@ -5669,6 +6088,56 @@ class NearbyService extends ChangeNotifier {
     );
   }
 
+  Future<void> _handleQaRelayRouteCheck(
+    String endpointId,
+    RelioPacket packet,
+  ) async {
+    if (!RelioBuildInfo.isTest ||
+        !_completedIdentityHandshakes.contains(endpointId)) {
+      return;
+    }
+    final checkId = packet.payload['qaRelayCheckId'];
+    final destinationHash = packet.payload['qaRelayDestinationHash'];
+    if (checkId is! String || destinationHash is! String) return;
+    final connected = packet.payload['qaRelayConnected'];
+    if (connected is bool) {
+      final pending = _qaRelayRouteChecks[checkId];
+      if (pending != null &&
+          !pending.result.isCompleted &&
+          pending.endpointId == endpointId &&
+          pending.destinationHash == destinationHash) {
+        pending.result.complete(connected);
+      }
+      return;
+    }
+    final matching = connectedPeers.where(
+      (peer) =>
+          peer.endpointId != endpointId &&
+          peer.deviceId != null &&
+          sha256.convert(utf8.encode(peer.deviceId!)).toString() ==
+              destinationHash &&
+          peer.capabilities.contains('relay-v1') &&
+          _completedIdentityHandshakes.contains(peer.endpointId),
+    );
+    final isConnected = matching.length == 1;
+    try {
+      await _sendApplicationBytes(
+        RelioPacket.deviceStatus(
+          senderDeviceId: await identity.getDeviceId(),
+          senderUserId: await _senderUserId(),
+          displayName: await identity.getDisplayName(),
+          status: await currentStatus(),
+          qaRelayCheckId: checkId,
+          qaRelayDestinationHash: destinationHash,
+          qaRelayConnected: isConnected,
+        ),
+        peerId: endpointId,
+      );
+    } on Object {
+      // QA route check fails closed at the requesting device.
+    }
+  }
+
   Future<void> _handleAck(String endpointId, RelioPacket packet) async {
     final acknowledgedPacketId = packet.payload['packetId']! as String;
     final messageId =
@@ -5678,6 +6147,18 @@ class NearbyService extends ChangeNotifier {
       final message = await messages.getMessage(messageId);
       if (message == null || message.status == DeliveryStatus.delivered) return;
       await messages.updateDeliveryStatus(messageId, DeliveryStatus.delivered);
+      if (RelioBuildInfo.isTest && message.type == MessageType.text) {
+        diagnostics?.record(
+          'relay',
+          'direct_ack_received',
+          fields: {
+            'payloadAlias': DiagnosticsLogService.peerAlias(messageId),
+            'destinationAlias': DiagnosticsLogService.peerAlias(
+              packet.senderDeviceId,
+            ),
+          },
+        );
+      }
       acknowledgementCount += 1;
       _log('ACK message delivered');
       _log('รับ ACK ของข้อความ $messageId');
@@ -6174,6 +6655,7 @@ class NearbyService extends ChangeNotifier {
   }
 
   Future<void> close() async {
+    _qaRelayRetryTimer?.cancel();
     if (_closed) return;
     identity.profiles.removeListener(_onProfileChanged);
     _recordSessionStop(

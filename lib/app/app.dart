@@ -142,6 +142,8 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _router = createRelioRouter(
       authReady: () => _dependencies.authInitialized,
       hasSession: () => _dependencies.hasAuthenticatedPrincipal,
+      passwordRecovery: () =>
+          _dependencies.authService.state == AuthState.passwordRecovery,
       refreshListenable: _routerRefresh,
     );
     _authStateSubscription = _dependencies.authService.watchState().listen((_) {

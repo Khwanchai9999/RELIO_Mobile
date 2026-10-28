@@ -386,6 +386,7 @@ class MockNearbyTransport implements NearbyTransport {
   int disconnectCount = 0;
   int acceptConnectionCount = 0;
   bool holdConnectionRequests = false;
+  NearbyTransportException? requestConnectionFailure;
   final Set<String> acceptedConnections = {};
   final Set<String> rejectedConnections = {};
   bool isAdvertising = false;
@@ -551,6 +552,7 @@ class MockNearbyTransport implements NearbyTransport {
     String? connectionTraceId,
   }) async {
     connectionRequestCount++;
+    if (requestConnectionFailure case final failure?) throw failure;
     final peer = peers[peerId];
     if (peer == null) {
       throw const NearbyTransportException('Mock peer was not discovered.');

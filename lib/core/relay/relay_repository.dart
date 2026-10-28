@@ -7,8 +7,13 @@ import 'relay_models.dart';
 
 abstract interface class RelayRepository {
   Future<RelayPacketRecord?> getPacket(String packetId);
+  Future<RelayPacketRecord?> getForPayload(
+    String originDeviceId,
+    String payloadId,
+  );
   Future<bool> storePacket(RelayEnvelope envelope);
   Future<List<RelayPacketRecord>> listForwardable(DateTime now);
+  Future<List<RelayPacketRecord>> listDeliveredTextReceipts(DateTime now);
   Future<void> updatePacketState(String packetId, RelayPacketState state);
   Future<RelayForwardRecord?> getForwardRecord(
     String packetId,
@@ -32,6 +37,23 @@ class DriftRelayRepository implements RelayRepository {
   DriftRelayRepository(this.db);
 
   final AppDatabase db;
+
+  @override
+  Future<RelayPacketRecord?> getForPayload(
+    String originDeviceId,
+    String payloadId,
+  ) async {
+    final row = await db
+        .customSelect(
+          'SELECT * FROM relay_packets WHERE origin_device_id = ? AND payload_id = ? ORDER BY stored_at ASC LIMIT 1',
+          variables: [
+            Variable<String>(originDeviceId),
+            Variable<String>(payloadId),
+          ],
+        )
+        .getSingleOrNull();
+    return row == null ? null : _packet(row.data);
+  }
 
   @override
   Future<RelayPacketRecord?> getPacket(String packetId) async {
@@ -90,6 +112,28 @@ class DriftRelayRepository implements RelayRepository {
           variables: [
             Variable<String>(RelayPacketState.stored.name),
             Variable<String>(RelayPacketState.forwarded.name),
+            Variable<int>(now.toUtc().millisecondsSinceEpoch),
+          ],
+        )
+        .get();
+    return rows.map((row) => _packet(row.data)).toList(growable: false);
+  }
+
+  @override
+  Future<List<RelayPacketRecord>> listDeliveredTextReceipts(
+    DateTime now,
+  ) async {
+    final rows = await db
+        .customSelect(
+          '''
+      SELECT * FROM relay_packets
+      WHERE state = ? AND payload_type = ? AND expires_at > ?
+        AND previous_hop_device_id IS NOT NULL
+      ORDER BY stored_at ASC
+      ''',
+          variables: [
+            Variable<String>(RelayPacketState.delivered.name),
+            const Variable<String>('textMessage'),
             Variable<int>(now.toUtc().millisecondsSinceEpoch),
           ],
         )
