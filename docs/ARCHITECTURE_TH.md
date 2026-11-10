@@ -42,6 +42,7 @@ flowchart LR
 | `conversations` | `id` | ห้องสนทนาและ unread |
 | `messages` | `id` | ข้อความและสถานะ แยก `conversation_id`, `delivery_status`, `cloud_sync_status` |
 | `attachments` | `id` | ไฟล์ผ่าน `message_id`, `transfer_id` และสถานะ metadata/file |
+| `conversation_aliases` | `conversation_id` | ตาราง SQL ของ schema 14 ชี้ห้องเดิมไปที่ `canonical_id` |
 | `cloud_conversation_links` | `local_conversation_id, owner_user_id` | เชื่อม local กับ cloud conversation และเก็บ cursor ข้อความ/receipt |
 | `nearby_devices` | `device_id` | ข้อมูล peer, trust และ last seen |
 | `sync_queue` | `id` | งาน Cloud แยก owner และ `next_attempt_at` |

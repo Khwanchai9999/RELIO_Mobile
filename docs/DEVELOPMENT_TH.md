@@ -41,12 +41,23 @@ Entry point คือ `lib/main.dart` DEV มี package `com.relio.relio_mobile
 <a id="android-build"></a>
 ## สร้าง QA APK และติดตั้งอย่างปลอดภัย
 
-คำสั่งขั้นต่ำสำหรับ QA local โดยใช้ VersionCode จาก `pubspec.yaml` และกำหนดข้อมูล About ให้ตรงกับรุ่นปัจจุบัน
+QA ต้องใช้ค่ากำหนด public updater จากสคริปต์ใน repo แม้ทดสอบในเครื่อง เพราะ constructor ตรวจค่าเมื่อเปิด `RELIO_ENV=test` ใช้ VersionCode จาก `pubspec.yaml` และกำหนดข้อมูล About ให้ตรงกับรุ่นปัจจุบัน
 
 ~~~powershell
 flutter pub get
-flutter build apk --flavor qa --debug --dart-define=RELIO_ENV=test --dart-define=RELIO_VERSION=0.9.0 --dart-define=RELIO_BUILD=84
-flutter build apk --flavor qa --release --dart-define=RELIO_ENV=test --dart-define=RELIO_VERSION=0.9.0 --dart-define=RELIO_BUILD=84
+. .\scripts\public-qa-config.ps1
+$qa = Get-RelioPublicQaUpdateConfig
+$qaDefines = @(
+    '--dart-define=RELIO_ENV=test',
+    '--dart-define=RELIO_VERSION=0.9.0',
+    '--dart-define=RELIO_BUILD=84',
+    "--dart-define=RELIO_PUBLIC_UPDATE_MANIFEST_URL=$($qa.ManifestUrl)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_OWNER=$($qa.Owner)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_REPO=$($qa.Repository)",
+    "--dart-define=RELIO_PUBLIC_UPDATE_CHANNEL=$($qa.Channel)"
+)
+flutter build apk --flavor qa --debug @qaDefines
+flutter build apk --flavor qa --release @qaDefines
 ~~~
 
 ผลลัพธ์อยู่ที่ `build/app/outputs/flutter-apk/app-qa-debug.apk` และ `app-qa-release.apk` ตรวจ APK manifest ด้วย `aapt2 dump badging` และ certificate ด้วย `apksigner verify --print-certs` จาก Android SDK Build Tools ก่อนใช้งาน Debug ใช้ signer ตาม variant ที่ Gradle เลือก Release ต้องมี signing ที่ใช้งานได้ตาม config QA ของทีม ให้เตรียม `android/key.properties` จากตัวอย่างและใช้ keystore ที่อนุมัติในเครื่อง สำหรับ QA release ที่ต้องใช้ public updater หรือ Supabase ให้ดู [ขั้นตอน deploy](../scripts/deploy-test.ps1) และ [TEST_DEPLOYMENT](TEST_DEPLOYMENT.md) สคริปต์ `-NoUpload` ทำ quality gates และสร้าง APK โดยข้าม upload ใช้ environment variables ของ QA ตามคู่มือ และห้ามใส่ service-role key ใน client defines
@@ -66,10 +77,12 @@ adb -s $serial install -r $apk
 <a id="test-cases"></a>
 ## การทดสอบ
 
+หากเปิด PowerShell ใหม่ ให้กำหนด `$qaDefines` ตามบล็อก QA Build ก่อนรันทดสอบ Relay
+
 ~~~powershell
 flutter analyze --no-pub
 flutter test --no-pub test/conversation_reconciliation_test.dart
-flutter test --no-pub test/automatic_relay_integration_test.dart --dart-define=RELIO_ENV=test
+flutter test --no-pub test/automatic_relay_integration_test.dart @qaDefines
 flutter test --no-pub test/packaged_thailand_map_test.dart
 ~~~
 
