@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+// แยกสัญญาการแจ้งเตือนออกจาก Android implementation เพื่อให้ทดสอบได้
+// เนื้อหา notification ต้องผ่านการกรองก่อนแสดงบน lock screen
 abstract interface class LocalNotificationSink {
   Stream<String> get tappedRoutes;
   Future<String?> consumeInitialRoute();
@@ -14,6 +16,8 @@ abstract interface class LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   });
 }
 
@@ -99,6 +103,8 @@ class AndroidLocalNotificationService implements LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   }) async {
     _ensureHandler();
     try {
@@ -108,6 +114,8 @@ class AndroidLocalNotificationService implements LocalNotificationSink {
         'body': body,
         'route': route,
         'urgent': urgent,
+        'soundEnabled': soundEnabled,
+        'vibrationEnabled': vibrationEnabled,
       });
     } on MissingPluginException {
       return;
@@ -142,5 +150,7 @@ class NoopLocalNotificationService implements LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   }) async {}
 }

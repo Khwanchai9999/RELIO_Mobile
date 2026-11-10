@@ -16,7 +16,7 @@ import 'test_database.dart';
 
 void main() {
   test(
-    'legacy demo ID collision cannot abort Nearby bootstrap after migration',
+    'opt-in DEMO seed cannot collide with quarantined legacy history',
     () async {
       final db = AppDatabase.memory();
       final legacyTime = DateTime(2025, 1, 2);
@@ -69,12 +69,16 @@ void main() {
       final deps = RelioDependencies(database: db);
       addTearDown(deps.dispose);
 
+      // เปิด DEMO อย่างชัดเจนเพื่อทดสอบ collision โดยไม่พึ่ง default ของแอป
+      await deps.repositories.settings.setBool('developer_mode_enabled', true);
+      await deps.repositories.settings.setBool('developer_demo_enabled', true);
+
       await deps.initialize();
 
       expect(deps.nearbyService.initialized, isTrue);
       expect(await deps.identity.getDeviceId(), 'preserved-device');
       final guest = (await deps.repositories.conversations.listConversations())
-          .singleWhere((room) => room.participantId == 'somchai');
+          .singleWhere((room) => room.participantId == 'demo:peer:somchai');
       expect(guest.id, isNot('somchai'));
       expect(
         await deps.repositories.conversations.getConversation('somchai'),
@@ -345,6 +349,42 @@ void main() {
   });
 
   test(
+    'older peer location metadata cannot move a canonical marker backward',
+    () async {
+      final newer = DateTime.now().toUtc();
+      await repositories.nearbyDevices.upsert(
+        deviceId: 'canonical-peer',
+        displayName: 'Peer',
+        status: DeviceStatus.normal,
+        peerLatitude: 14,
+        peerLongitude: 101,
+        peerLocationAccuracy: 8,
+        peerLocationCapturedAt: newer,
+      );
+      await repositories.nearbyDevices.upsert(
+        deviceId: 'canonical-peer',
+        displayName: 'Peer',
+        status: DeviceStatus.normal,
+        peerLatitude: 13,
+        peerLongitude: 100,
+        peerLocationAccuracy: 40,
+        peerLocationCapturedAt: newer.subtract(const Duration(minutes: 1)),
+      );
+
+      final saved = await repositories.nearbyDevices.getDevice(
+        'canonical-peer',
+      );
+      expect(saved?.peerLatitude, 14);
+      expect(saved?.peerLongitude, 101);
+      expect(saved?.peerLocationAccuracy, 8);
+      expect(
+        saved?.peerLocationCapturedAt?.difference(newer).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
+    },
+  );
+
+  test(
     'outgoing message is persisted as pending and updates conversation',
     () async {
       await repositories.conversations.ensureConversation(
@@ -396,6 +436,47 @@ void main() {
       expect(
         (await reopenedRepository.listMessages('peer-1')).single.text,
         'offline hello',
+      );
+    },
+  );
+
+  test(
+    'same-name peers keep separate conversations while repeated identity reuses one',
+    () async {
+      final database = AppDatabase.memory();
+      addTearDown(database.close);
+      final conversations = RelioRepositories(database).conversations;
+      final first = await conversations.ensureConversation(
+        id: 'peer-device-a',
+        participantId: 'peer-device-a',
+        remotePrincipalId: 'account:peer-a',
+        displayName: 'ผู้ใช้ RELIO เรลมี',
+        participantStatus: DeviceStatus.normal,
+      );
+      await conversations.ensureConversation(
+        id: first.id,
+        participantId: 'peer-device-a',
+        remotePrincipalId: 'account:peer-a',
+        displayName: 'ผู้ใช้ RELIO เรลมี',
+        participantStatus: DeviceStatus.normal,
+      );
+      final second = await conversations.ensureConversation(
+        id: 'peer-device-b',
+        participantId: 'peer-device-b',
+        remotePrincipalId: 'account:peer-b',
+        displayName: 'ผู้ใช้ RELIO เรลมี',
+        participantStatus: DeviceStatus.normal,
+      );
+
+      expect(second.id, isNot(first.id));
+      expect(await conversations.listConversations(), hasLength(2));
+      expect(
+        (await conversations.remotePrincipalForConversation(first.id)),
+        'account:peer-a',
+      );
+      expect(
+        (await conversations.remotePrincipalForConversation(second.id)),
+        'account:peer-b',
       );
     },
   );
@@ -899,6 +980,56 @@ void main() {
   });
 
   test(
+    'SOS can attach a later location without changing its event identity',
+    () async {
+      final original = await repositories.sos.createAndActivate(
+        ownerDeviceId: 'device-1',
+        ownerUserId: '',
+        message: 'need help',
+      );
+      final capturedAt = DateTime.now().toUtc();
+      final updated = await repositories.sos.updateActiveLocation(
+        eventId: original.id,
+        latitude: 13.7,
+        longitude: 100.5,
+        accuracyMeters: 8,
+        capturedAt: capturedAt,
+      );
+
+      expect(updated?.id, original.id);
+      expect(updated?.isActive, isTrue);
+      expect(updated?.latitude, 13.7);
+      expect(updated?.longitude, 100.5);
+      expect(
+        updated!.locationCapturedAt!.difference(capturedAt).inSeconds.abs(),
+        lessThan(1),
+      );
+      expect(
+        await repositories.sos.updateActiveLocation(
+          eventId: original.id,
+          latitude: 91,
+          longitude: 100.5,
+          accuracyMeters: null,
+          capturedAt: capturedAt.add(const Duration(seconds: 1)),
+        ),
+        isNull,
+      );
+
+      await repositories.sos.deactivate(original.id);
+      expect(
+        await repositories.sos.updateActiveLocation(
+          eventId: original.id,
+          latitude: 13.8,
+          longitude: 100.6,
+          accuracyMeters: null,
+          capturedAt: capturedAt.add(const Duration(seconds: 2)),
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test(
     'guest SOS stays local and is never assigned to a later account',
     () async {
       final sos = await repositories.sos.createAndActivate(
@@ -920,15 +1051,27 @@ void main() {
   );
 
   test('prototype seed data is written once and remains queryable', () async {
+    await repositories.nearbyDevices.upsert(
+      deviceId: 'somchai',
+      displayName: 'อุปกรณ์จริง',
+      status: DeviceStatus.normal,
+    );
     await repositories.seedPrototypeData();
     final first = await repositories.conversations.listConversations();
-    final messages = await repositories.messages.listMessages('somchai');
+    final messages = await repositories.messages.listMessages(
+      'demo:conversation:somchai',
+    );
     await repositories.seedPrototypeData();
     final second = await repositories.conversations.listConversations();
 
     expect(first.length, 3);
     expect(second.length, first.length);
     expect(messages, isNotEmpty);
+    expect(messages.every((message) => message.id.startsWith('demo:')), isTrue);
+    expect(
+      (await repositories.nearbyDevices.getDevice('somchai'))?.displayName,
+      'อุปกรณ์จริง',
+    );
   });
 
   test('local boolean settings survive repository reads', () async {
@@ -1096,15 +1239,17 @@ void main() {
     },
   );
 
-  test('dependency bootstrap completes in the Flutter test runtime', () async {
+  test('dependency bootstrap does not seed DEMO by default', () async {
     final dependencies = RelioDependencies(database: createTestDatabase());
     addTearDown(dependencies.dispose);
 
     await dependencies.initialize();
 
+    expect(dependencies.internalExperience.developerModeEnabled, isFalse);
+    expect(dependencies.internalExperience.demoEnabled, isFalse);
     expect(
       await dependencies.repositories.conversations.listConversations(),
-      isNotEmpty,
+      isEmpty,
     );
   });
 
@@ -1154,7 +1299,7 @@ void main() {
         await upgradedRepositories.cloudLinks.listForOwner('account-a'),
         isEmpty,
       );
-      expect(upgraded.schemaVersion, 11);
+      expect(upgraded.schemaVersion, 14);
       await upgraded.close();
     },
   );

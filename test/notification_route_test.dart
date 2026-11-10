@@ -54,4 +54,47 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     });
   }
+
+  for (final cold in [true, false]) {
+    testWidgets('SOS notification opens its exact event coldStart=$cold', (
+      tester,
+    ) async {
+      const eventId = '11111111-2222-4333-8444-555555555555';
+      const deviceId = 'stable-sender-device';
+      final route = Uri(
+        path: '/rescue/request/$deviceId',
+        queryParameters: {'eventId': eventId},
+      ).toString();
+      final notifications = RecordingNotifications()
+        ..initialRoute = cold ? route : null;
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: MockNearbyTransport(),
+        useMockTransport: true,
+        androidPlatformOverride: true,
+        localNotificationSink: notifications,
+      );
+      addTearDown(dependencies.dispose);
+      addTearDown(notifications.taps.close);
+      await dependencies.initialize();
+      await dependencies.repositories.sos.createIncoming(
+        id: eventId,
+        ownerDeviceId: deviceId,
+        ownerUserId: 'qa-owner',
+        message: 'exact event body',
+        createdAt: DateTime.utc(2026, 11, 2),
+        isActive: false,
+      );
+      await tester.pumpWidget(RelioApp(dependencies: dependencies));
+      await tester.pumpAndSettle();
+      if (!cold) {
+        notifications.taps.add(route);
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('คำขอ SOS สิ้นสุดแล้ว'), findsOneWidget);
+      expect(find.text('exact event body'), findsOneWidget);
+      expect(find.text('ไม่พบคำขอ SOS นี้ในเครื่อง'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 }

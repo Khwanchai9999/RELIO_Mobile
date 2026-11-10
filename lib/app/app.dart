@@ -76,6 +76,7 @@ class RelioThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // แจ้ง UI ให้เปลี่ยน ThemeMode ทันที แล้วบันทึกค่าไว้สำหรับการเปิดแอปครั้งถัดไป
   Future<void> setMode(ThemeMode mode) async {
     if (!_loaded) await load();
     if (_mode == mode) return;
@@ -122,6 +123,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
   late final RelioThemeController _themeController;
   late final GoRouter _router;
   late final _RouterRefresh _routerRefresh;
+  late final VoidCallback _developerModeListener;
   late final RelioDependencies _dependencies;
   late final bool _ownsDependencies;
   late final bool _ownsThemeController;
@@ -141,11 +143,15 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     _routerRefresh = _RouterRefresh();
     _router = createRelioRouter(
       authReady: () => _dependencies.authInitialized,
-      hasSession: () => _dependencies.hasAuthenticatedPrincipal,
+      hasSession: () => _dependencies.hasSelectedUserSession,
       passwordRecovery: () =>
           _dependencies.authService.state == AuthState.passwordRecovery,
+      developerModeEnabled: () =>
+          _dependencies.internalExperience.developerModeEnabled,
       refreshListenable: _routerRefresh,
     );
+    _developerModeListener = _routerRefresh.refresh;
+    _dependencies.internalExperience.addListener(_developerModeListener);
     _authStateSubscription = _dependencies.authService.watchState().listen((_) {
       _routerRefresh.refresh();
     });
@@ -170,6 +176,7 @@ class _RelioAppState extends State<RelioApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _router.routerDelegate.removeListener(_updateNearbyLifecycleContext);
     _router.dispose();
+    _dependencies.internalExperience.removeListener(_developerModeListener);
     unawaited(_authStateSubscription?.cancel());
     unawaited(_localAuthSubscription?.cancel());
     _routerRefresh.dispose();
@@ -315,12 +322,29 @@ class _IncomingConnectionPromptHostState
   }
 
   void _openNotificationRoute(String route) {
-    final isSos = route == '/sos';
+    final uri = Uri.tryParse(route);
+    final isEmergency =
+        route == '/sos' || route == '/sos/active' || route == '/rescue';
     final isChat = RegExp(r'^/chat/[A-Za-z0-9._:-]{1,128}$').hasMatch(route);
-    if (!mounted || (!isSos && !isChat)) return;
+    final isExactSos =
+        uri != null &&
+        RegExp(
+          r'^/rescue/request/[A-Za-z0-9._:-]{1,128}$',
+        ).hasMatch(uri.path) &&
+        uri.queryParameters.length == 1 &&
+        RegExp(
+          r'^[0-9a-fA-F-]{36}$',
+        ).hasMatch(uri.queryParameters['eventId'] ?? '');
+    if (!mounted || (!isEmergency && !isChat && !isExactSos)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final router = widget.router;
-      if (mounted && router != null) unawaited(router.push(route));
+      if (mounted && router != null) {
+        if (isExactSos) {
+          router.go(route);
+        } else {
+          unawaited(router.push(route));
+        }
+      }
     });
     // Warm notification อาจเข้าหลัง frame ปัจจุบัน จึงขอ frame ให้ callback ทำงาน
     WidgetsBinding.instance.ensureVisualUpdate();

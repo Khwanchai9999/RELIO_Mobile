@@ -11,6 +11,8 @@ import 'public_update_errors.dart';
 import 'public_update_manifest.dart';
 import 'public_update_provider.dart';
 
+// ประสานการตรวจ metadata และดาวน์โหลดอัปเดต QA ก่อนส่งต่อให้ Android installer
+// ผู้ใช้เป็นผู้ยืนยันการติดตั้ง; service นี้ไม่ติดตั้ง APK แบบเงียบ
 enum AppUpdateStatus {
   notApplicable,
   unavailable,

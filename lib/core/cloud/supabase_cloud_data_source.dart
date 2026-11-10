@@ -200,14 +200,27 @@ class SupabaseCloudDataSource implements CloudDataSource {
           userId: user.id,
           email: user.email ?? '',
           displayName: user.userMetadata?['display_name'] as String?,
+          isAnonymous: user.isAnonymous,
+          pendingEmail: user.newEmail,
         );
+
+  void _publishAuthenticatedIdentity(CloudIdentity identity) {
+    _identity = identity;
+    _authState = AuthState.authenticated;
+    _state = CloudState.ready;
+    _authStates.add(_authState);
+    _cloudStates.add(_state);
+  }
 
   CloudException _failure(Object error, [String code = 'network']) =>
       CloudErrorMapper.map(error, fallbackCode: code);
 
-  void _validateStoragePath(String storagePath) {
+  // ตรวจ owner ในเส้นทาง Storage ก่อนเรียก Cloud เพื่อไม่ให้ path ของไฟล์ชี้ข้ามบัญชี
+  void _validateStoragePath(String storagePath, {String? ownerUserId}) {
+    final expectedOwner = ownerUserId ?? _identity?.userId;
     if (_identity == null ||
-        !CloudStoragePathPolicy.isOwnedBy(storagePath, _identity!.userId)) {
+        expectedOwner == null ||
+        !CloudStoragePathPolicy.isOwnedBy(storagePath, expectedOwner)) {
       throw const CloudException(
         'เส้นทางไฟล์คลาวด์ไม่ปลอดภัย',
         code: 'invalidPath',
@@ -233,7 +246,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
         throw const CloudException('สร้างบัญชีไม่สำเร็จ', code: 'auth');
       }
       if (response.session == null || client.auth.currentUser == null) {
-        // Do not treat an email-confirmation response as an authenticated
+        // การตอบกลับให้ยืนยันอีเมลยังไม่ใช่ session ที่ยืนยันตัวตนแล้ว
+        // คิวจึงต้องอยู่ในเครื่องจนกว่าจะมี session จริง        // Do not treat an email-confirmation response as an authenticated
         // owner; queue rows must remain local until a real session exists.
         _identity = null;
         _authState = AuthState.guest;
@@ -280,6 +294,133 @@ class SupabaseCloudDataSource implements CloudDataSource {
       _state = CloudState.ready;
       _authStates.add(_authState);
       _cloudStates.add(_state);
+      return identity;
+    } catch (error) {
+      if (error is CloudException) rethrow;
+      throw _failure(error, 'auth');
+    }
+  }
+
+  @override
+  Future<CloudIdentity> signInAnonymously() async {
+    try {
+      final client = await _ready();
+      final current = _identity;
+      if (current != null) return current;
+      final response = await client.auth.signInAnonymously();
+      final identity = _mapUser(response.user);
+      if (identity == null || !identity.isAnonymous) {
+        throw const CloudException(
+          'สร้างบัญชี Guest บน Cloud ไม่สำเร็จ',
+          code: 'auth',
+        );
+      }
+      _publishAuthenticatedIdentity(identity);
+      return identity;
+    } catch (error) {
+      if (error is CloudException) rethrow;
+      throw _failure(error, 'auth');
+    }
+  }
+
+  @override
+  Future<CloudIdentity> requestEmailChange({required String email}) async {
+    final client = await _ready();
+    _requireAuth();
+    final expectedUserId = _identity!.userId;
+    final normalized = email.trim();
+    if (normalized.isEmpty || normalized.length > 254) {
+      throw const CloudException('อีเมลไม่ถูกต้อง', code: 'invalidEmail');
+    }
+    try {
+      final response = await client.auth.updateUser(
+        UserAttributes(email: normalized),
+      );
+      final identity = _mapUser(response.user);
+      if (identity == null || identity.userId != expectedUserId) {
+        throw const CloudException(
+          'บัญชี Cloud เปลี่ยนระหว่างแก้ไขอีเมล',
+          code: 'sessionExpired',
+        );
+      }
+      _publishAuthenticatedIdentity(identity);
+      return identity;
+    } catch (error) {
+      if (error is CloudException) rethrow;
+      throw _failure(error, 'auth');
+    }
+  }
+
+  @override
+  Future<CloudEmailChangeResult> verifyEmailChange({
+    required String email,
+    required String token,
+  }) async {
+    final client = await _ready();
+    _requireAuth();
+    final expectedUserId = _identity!.userId;
+    final expectedEmail = _identity!.pendingEmail;
+    if (token.trim().length < 6 || token.trim().length > 12) {
+      throw const CloudException('รหัสยืนยันไม่ถูกต้อง', code: 'invalidInput');
+    }
+    try {
+      final response = await client.auth.verifyOTP(
+        email: email.trim(),
+        token: token.trim(),
+        type: OtpType.emailChange,
+      );
+      final currentUser = client.auth.currentUser;
+      if (currentUser?.id != expectedUserId) {
+        throw const CloudException(
+          'บัญชี Cloud เปลี่ยนระหว่างยืนยันอีเมล',
+          code: 'sessionExpired',
+        );
+      }
+      final identity = _mapUser(response.user ?? currentUser);
+      if (identity == null || identity.userId != expectedUserId) {
+        throw const CloudException('ยืนยันอีเมลไม่สำเร็จ', code: 'auth');
+      }
+      _publishAuthenticatedIdentity(identity);
+      final verified =
+          expectedEmail != null &&
+          identity.email.toLowerCase() == expectedEmail.toLowerCase();
+      return CloudEmailChangeResult(identity: identity, verified: verified);
+    } catch (error) {
+      if (error is CloudException) rethrow;
+      throw _failure(error, 'auth');
+    }
+  }
+
+  @override
+  Future<CloudIdentity> setAccountPassword({required String password}) async {
+    final client = await _ready();
+    _requireAuth();
+    final user = client.auth.currentUser;
+    final expectedUserId = _identity!.userId;
+    if (password.length < 8 || password.length > 256) {
+      throw const CloudException(
+        'รหัสผ่านไม่ตรงตามเงื่อนไข',
+        code: 'weakPassword',
+      );
+    }
+    if (user?.emailConfirmedAt == null || user?.newEmail != null) {
+      throw const CloudException(
+        'กรุณายืนยันอีเมลก่อนตั้งรหัสผ่าน',
+        code: 'emailConfirmationRequired',
+      );
+    }
+    try {
+      final response = await client.auth.updateUser(
+        UserAttributes(password: password),
+      );
+      final identity = _mapUser(response.user);
+      if (identity == null || identity.userId != expectedUserId) {
+        throw const CloudException(
+          'บัญชี Cloud เปลี่ยนระหว่างตั้งรหัสผ่าน',
+          code: 'sessionExpired',
+        );
+      }
+      _publishAuthenticatedIdentity(identity);
       return identity;
     } catch (error) {
       if (error is CloudException) rethrow;
@@ -412,7 +553,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
           .maybeSingle();
 
       if (existing != null) {
-        // The profiles RLS contract deliberately makes id immutable after
+        // นโยบาย RLS กำหนดให้ id ของ profile เปลี่ยนไม่ได้หลัง insert
+        // จึงอัปเดตเฉพาะ display_name ที่ผู้ใช้แก้ไขได้        // The profiles RLS contract deliberately makes id immutable after
         // insert, so update only the user-editable display_name column.
         await profiles.update({'display_name': displayName}).eq('id', userId);
         return;
@@ -421,12 +563,77 @@ class SupabaseCloudDataSource implements CloudDataSource {
       try {
         await profiles.insert({'id': userId, 'display_name': displayName});
       } on PostgrestException catch (error) {
-        // An Auth trigger may create the profile between the read and insert.
+        // Auth trigger อาจสร้าง profile ระหว่างการอ่านกับ insert
+        // จัดการ race ด้วย update เฉพาะช่องที่อนุญาต ไม่ upsert id ที่ผู้ใช้ทั่วไปแก้ไม่ได้        // An Auth trigger may create the profile between the read and insert.
         // Resolve that race with the same narrowly scoped update, never upsert
         // id (which ordinary authenticated users are not allowed to update).
         if (error.code != '23505') rethrow;
         await profiles.update({'display_name': displayName}).eq('id', userId);
       }
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<void> upsertPrivateBackupRecord(
+    CloudPrivateBackupRecord record,
+  ) async {
+    _requireAuth();
+    if (!const {'conversation', 'message'}.contains(record.recordType) ||
+        record.sourceId.isEmpty ||
+        record.sourceId.length > 200 ||
+        record.revision < 1) {
+      throw const CloudException('ข้อมูลสำรองไม่ถูกต้อง', code: 'invalidInput');
+    }
+    try {
+      await (await _ready()).from('private_backup_records').upsert({
+        'owner_user_id': _identity!.userId,
+        'record_type': record.recordType,
+        'source_id': record.sourceId,
+        'payload': record.payload,
+        'revision': record.revision,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'owner_user_id,record_type,source_id');
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  Future<List<CloudPrivateBackupRecord>> fetchPrivateBackupRecords({
+    required String recordType,
+    String? afterSourceId,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    if (!const {'conversation', 'message'}.contains(recordType) ||
+        limit < 1 ||
+        limit > 100) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    try {
+      var query = (await _ready())
+          .from('private_backup_records')
+          .select('record_type,source_id,payload,revision')
+          .eq('owner_user_id', _identity!.userId)
+          .eq('record_type', recordType);
+      if (afterSourceId != null) query = query.gt('source_id', afterSourceId);
+      final rows = await query.order('source_id').limit(limit);
+      return (rows as List)
+          .map((row) {
+            final value = Map<String, dynamic>.from(row as Map);
+            return CloudPrivateBackupRecord(
+              recordType: value['record_type'] as String,
+              sourceId: value['source_id'] as String,
+              payload: Map<String, dynamic>.from(value['payload'] as Map),
+              revision: value['revision'] as int? ?? 1,
+            );
+          })
+          .toList(growable: false);
     } catch (error) {
       throw _failure(error);
     }
@@ -530,7 +737,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
       await client.from('messages').insert(data);
     } catch (error) {
       if (error is CloudException) rethrow;
-      // Concurrent retries can race after the existence check. A conflict is
+      // retry พร้อมกันอาจชนกันหลังตรวจการมีอยู่ของแถว
+      // ยอมรับ conflict เฉพาะเมื่อ payload ที่บันทึกไว้ตรงกันทุกประการ      // Concurrent retries can race after the existence check. A conflict is
       // accepted only when the persisted immutable payload matches exactly.
       try {
         final existing = await (await _ready())
@@ -794,6 +1002,47 @@ class SupabaseCloudDataSource implements CloudDataSource {
   }
 
   @override
+  Future<CloudAttachmentPage> fetchConversationAttachmentsPage({
+    required String conversationId,
+    CloudAttachmentCursor? cursor,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    if (conversationId.isEmpty || limit < 1 || limit > 100) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไฟล์ไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    try {
+      var query = (await _ready())
+          .from('attachments')
+          .select('*, messages!inner(conversation_id)')
+          .eq('messages.conversation_id', conversationId);
+      if (cursor != null) {
+        final at = cursor.createdAt.toUtc().toIso8601String();
+        query = query.or(
+          'created_at.gt.$at,and(created_at.eq.$at,id.gt.${cursor.id})',
+        );
+      }
+      final rows = await query.order('created_at').order('id').limit(limit + 1);
+      final values = (rows as List)
+          .map(
+            (row) => CloudAttachmentDto.fromJson(
+              Map<String, dynamic>.from(row as Map),
+            ),
+          )
+          .toList(growable: false);
+      return CloudAttachmentPage(
+        attachments: values.take(limit).toList(growable: false),
+        hasMore: values.length > limit,
+      );
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
   Future<void> upsertSos(CloudSosDto sos) async {
     _requireAuth();
     try {
@@ -858,12 +1107,23 @@ class SupabaseCloudDataSource implements CloudDataSource {
   @override
   Future<String> downloadAttachment({
     required String storagePath,
+    required String ownerUserId,
     required MediaStorageService mediaStorage,
     required String fileName,
     required String mimeType,
+    required int expectedByteSize,
+    String? expectedSha256,
   }) async {
     _requireAuth();
-    _validateStoragePath(storagePath);
+    _validateStoragePath(storagePath, ownerUserId: ownerUserId);
+    final mediaType = mimeType.startsWith('image/') ? 'image' : 'video';
+    if (expectedByteSize <= 0 ||
+        expectedByteSize > mediaStorage.policy.maxFor(mediaType)) {
+      throw const CloudException(
+        'ขนาดไฟล์ Cloud เกินขีดจำกัด',
+        code: 'invalidLocalData',
+      );
+    }
     try {
       final bytes = await (await _ready()).storage
           .from('relio-media')
@@ -872,6 +1132,8 @@ class SupabaseCloudDataSource implements CloudDataSource {
         bytes: bytes,
         fileName: fileName,
         mimeType: mimeType,
+        expectedByteSize: expectedByteSize,
+        expectedSha256: expectedSha256,
       );
     } catch (error) {
       throw _failure(error, 'storage');

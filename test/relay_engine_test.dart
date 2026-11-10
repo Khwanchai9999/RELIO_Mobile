@@ -16,6 +16,82 @@ import 'test_database.dart';
 
 void main() {
   test(
+    'relay participation consent gates third-party envelope acceptance',
+    () async {
+      final node = await _node('device-b');
+      addTearDown(node.close);
+      var allowed = false;
+      var secureReady = false;
+      final engine = RelayEngine(
+        transport: node.transport,
+        identity: node.identity,
+        repository: node.relay,
+        relayParticipationAllowed: () async => allowed,
+        secureRelayEnabled: () => secureReady,
+      );
+      await engine.initialize();
+      RelayEnvelope envelope(String id) => RelayEnvelope.fromPayloadPacket(
+        packet: RelioPacket.textMessage(
+          senderDeviceId: 'device-a',
+          senderUserId: 'account-a',
+          messageId: id,
+          conversationId: 'conversation-c',
+          text: 'private text',
+          timestamp: DateTime.now().toUtc(),
+        ),
+        destinationDeviceId: 'device-c',
+      );
+
+      final denied = envelope('consent-off');
+      expect(
+        await engine.handleIncomingPacket(
+          'endpoint-a',
+          RelioPacket.relayEnvelope(
+            senderDeviceId: 'device-a',
+            senderUserId: 'relay',
+            relayPacketId: denied.packetId,
+            relayPayload: denied.toJson(),
+          ),
+        ),
+        RelayResult.blocked,
+      );
+      expect(await node.relay.packetCount(), 0);
+
+      allowed = true;
+      final blockedUntilSecure = envelope('consent-secure-protocol-off');
+      expect(
+        await engine.handleIncomingPacket(
+          'endpoint-a',
+          RelioPacket.relayEnvelope(
+            senderDeviceId: 'device-a',
+            senderUserId: 'relay',
+            relayPacketId: blockedUntilSecure.packetId,
+            relayPayload: blockedUntilSecure.toJson(),
+          ),
+        ),
+        RelayResult.blocked,
+      );
+      expect(await node.relay.packetCount(), 0);
+
+      secureReady = true;
+      final accepted = envelope('consent-on');
+      expect(
+        await engine.handleIncomingPacket(
+          'endpoint-a',
+          RelioPacket.relayEnvelope(
+            senderDeviceId: 'device-a',
+            senderUserId: 'relay',
+            relayPacketId: accepted.packetId,
+            relayPayload: accepted.toJson(),
+          ),
+        ),
+        RelayResult.stored,
+      );
+      expect(await node.relay.packetCount(), 1);
+    },
+  );
+
+  test(
     'relay envelope keeps relay packet identity separate from payload ID',
     () {
       final packet = RelioPacket.textMessage(
@@ -34,9 +110,17 @@ void main() {
       expect(envelope.packetId, isNot(envelope.payloadId));
       expect(envelope.payloadId, 'message-a');
       expect(envelope.payloadType, 'textMessage');
+      expect(envelope.visitedDeviceIds, ['device-a']);
+      final restored = RelayEnvelope.fromJson(envelope.toJson());
+      expect(restored.packetId, envelope.packetId);
+      expect(restored.visitedDeviceIds, ['device-a']);
       expect(
-        RelayEnvelope.fromJson(envelope.toJson()).packetId,
-        envelope.packetId,
+        const RelayPolicy().validate(
+          envelope.copyWith(
+            visitedDeviceIds: ['device-a', 'device-b', 'device-a'],
+          ),
+        ),
+        'invalidRoutePath',
       );
     },
   );
@@ -67,6 +151,44 @@ void main() {
       expect(const RelayPolicy().validate(destinationLoop), 'invalidFirstHop');
     },
   );
+
+  test('QA policy raises only the Text hop ceiling', () {
+    const qaPolicy = RelayPolicy(
+      maxHops: RelayPolicy.qaAutomaticTextMaxHops,
+      maxTextHops: RelayPolicy.qaAutomaticTextMaxHops,
+    );
+    final text = RelayEnvelope.fromPayloadPacket(
+      packet: RelioPacket.textMessage(
+        senderDeviceId: 'device-a',
+        senderUserId: 'device-a',
+        messageId: 'eight-hop-text',
+        conversationId: 'conversation-d',
+        text: 'synthetic',
+        timestamp: DateTime.now().toUtc(),
+      ),
+      destinationDeviceId: 'device-d',
+      maxHops: RelayPolicy.qaAutomaticTextMaxHops,
+    );
+    final sos = RelayEnvelope.fromPayloadPacket(
+      packet: RelioPacket.sos(
+        senderDeviceId: 'device-a',
+        senderUserId: 'device-a',
+        displayName: 'A',
+        sosId: 'sos-eight-hop',
+        message: 'help',
+        latitude: 13.7,
+        longitude: 100.5,
+        createdAt: DateTime.now().toUtc(),
+        isActive: true,
+      ),
+      destinationDeviceId: 'device-d',
+      maxHops: RelayPolicy.qaAutomaticTextMaxHops,
+    );
+
+    expect(qaPolicy.validate(text), isNull);
+    expect(qaPolicy.validate(sos), 'invalidHopCount');
+    expect(const RelayPolicy().validate(text), 'invalidHopCount');
+  });
 
   test(
     'A to B to C stores first, forwards once, and materializes only at C',
@@ -306,6 +428,64 @@ void main() {
         await b.repositories.messages.listMessages('conversation-a'),
         isEmpty,
       );
+    },
+  );
+
+  test(
+    'relay rejects an envelope whose path has already visited this device',
+    () async {
+      final b = await _node('device-b');
+      addTearDown(b.close);
+      final packet = RelioPacket.textMessage(
+        senderDeviceId: 'device-a',
+        senderUserId: 'account-a',
+        messageId: 'looped-message',
+        conversationId: 'conversation-a',
+        text: 'loop guard fixture',
+        timestamp: DateTime.now().toUtc(),
+      );
+      final envelope =
+          RelayEnvelope.fromPayloadPacket(
+            packet: packet,
+            destinationDeviceId: 'device-d',
+            maxHops: RelayPolicy.qaAutomaticTextMaxHops,
+          ).copyWith(
+            hopCount: 2,
+            previousHopDeviceId: 'device-c',
+            visitedDeviceIds: const ['device-a', 'device-b', 'device-c'],
+          );
+      final incoming = RelioPacket.relayEnvelope(
+        senderDeviceId: 'device-c',
+        senderUserId: 'relay',
+        relayPacketId: envelope.packetId,
+        relayPayload: envelope.toJson(),
+      );
+      final engine = RelayEngine(
+        transport: b.transport,
+        identity: b.identity,
+        repository: b.relay,
+        connectedPeers: () => const [
+          NearbyPeer(
+            id: 'endpoint-d',
+            name: 'D',
+            connected: true,
+            deviceId: 'device-d',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+      );
+      await engine.initialize();
+
+      expect(
+        await engine.handleIncomingPacket('endpoint-c', incoming),
+        RelayResult.blocked,
+      );
+      expect(_relayBytes(b.transport), isEmpty);
+      expect(
+        (await b.relay.getPacket(envelope.packetId))?.state,
+        RelayPacketState.blocked,
+      );
+      await engine.dispose();
     },
   );
 
@@ -595,6 +775,8 @@ void main() {
       messages: node.repositories.messages,
       conversations: node.repositories.conversations,
       sos: node.repositories.sos,
+      verifyRelayedOrigin: (envelope, packet) async =>
+          packet.senderDeviceId == envelope.originDeviceId,
     );
     await engine.initialize();
     final capturedAt = DateTime.now().toUtc().subtract(

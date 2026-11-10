@@ -18,7 +18,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  Future<void> pumpApp(WidgetTester tester) async {
+  Future<RelioDependencies> pumpApp(
+    WidgetTester tester, {
+    bool withDemo = false,
+  }) async {
     final dependencies = RelioDependencies(
       database: AppDatabase.memory(),
       transport: MockNearbyTransport(autoAcknowledge: false),
@@ -28,26 +31,59 @@ void main() {
       await tester.pumpAndSettle();
       await dependencies.dispose();
     });
+    // Widget flows that exercise unrelated Nearby controls start after a
+    // prior explicit refusal; first-use consent has dedicated coverage.
+    await dependencies.repositories.settings.setBool(
+      'nearby_live_location_enabled',
+      false,
+    );
     await dependencies.initialize();
+    if (withDemo) {
+      await dependencies.internalExperience.setDeveloperMode(true);
+      await dependencies.internalExperience.setDemoEnabled(true);
+    }
     await tester.pumpWidget(RelioApp(dependencies: dependencies));
+    return dependencies;
+  }
+
+  Future<void> settleCurrentPage(WidgetTester tester) async {
+    await tester.pump();
+    if (find.text('สวัสดี 👋').evaluate().isNotEmpty) {
+      // Home's CHECKING indicator is intentionally an ongoing animation.
+      await tester.pump(const Duration(milliseconds: 500));
+    } else {
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<void> tapText(WidgetTester tester, String text) async {
     final finder = find.text(text);
     await tester.ensureVisible(finder);
     await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     await tester.tap(finder);
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
   }
 
   Future<void> tapLastText(WidgetTester tester, String text) async {
     final finder = find.text(text).last;
     await tester.ensureVisible(finder);
     await Scrollable.ensureVisible(tester.element(finder), alignment: 0.5);
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     await tester.tap(finder);
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
+  }
+
+  Future<void> tapScrollableText(WidgetTester tester, String text) async {
+    final finder = find.text(text);
+    await tester.scrollUntilVisible(
+      finder,
+      240,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await Scrollable.ensureVisible(tester.element(finder), alignment: 0.3);
+    await tester.tap(finder);
+    await settleCurrentPage(tester);
   }
 
   testWidgets('app starts on the RELIO welcome screen', (tester) async {
@@ -76,7 +112,7 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byIcon(Icons.radar_outlined));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       1,
@@ -84,15 +120,15 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byIcon(Icons.chat_bubble_outline));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       2,
     );
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.byIcon(Icons.warning_amber_outlined));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('SOS').first);
+    await settleCurrentPage(tester);
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       3,
@@ -100,15 +136,14 @@ void main() {
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byIcon(Icons.person_outline));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     expect(
       tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
       4,
     );
     expect(tester.takeException(), isNull);
 
-    await tester.tap(find.byTooltip('ตั้งค่า'));
-    await tester.pumpAndSettle();
+    await tapText(tester, 'การตั้งค่า');
     expect(find.text('ตั้งค่า'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -149,7 +184,7 @@ void main() {
       Icons.home_outlined,
     ]) {
       await tester.tap(find.byIcon(icon));
-      await tester.pumpAndSettle();
+      await settleCurrentPage(tester);
       await expectAllLabels();
     }
   });
@@ -163,12 +198,12 @@ void main() {
     expect(findGeneratedName(), findsOneWidget);
 
     await tester.tap(find.text('ใกล้เคียง'));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     expect(find.text('อุปกรณ์ใกล้เคียง'), findsOneWidget);
   });
 
   testWidgets('Nearby SOS filter changes the visible list', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, withDemo: true);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
     await tapText(tester, 'ใกล้เคียง');
 
@@ -178,18 +213,115 @@ void main() {
     expect(find.text('มิ้นท์'), findsNothing);
   });
 
-  testWidgets('SOS confirmation opens the active state', (tester) async {
+  testWidgets('Nearby keeps prototype peers hidden until DEMO is enabled', (
+    tester,
+  ) async {
+    final dependencies = await pumpApp(tester);
+    await tapText(tester, 'ใช้งานแบบออฟไลน์');
+    await tapText(tester, 'ใกล้เคียง');
+
+    expect(dependencies.internalExperience.developerModeEnabled, isFalse);
+    expect(dependencies.internalExperience.demoEnabled, isFalse);
+    expect(find.text('DEMO'), findsNothing);
+    expect(
+      await dependencies.repositories.conversations.listConversations(),
+      isEmpty,
+    );
+    expect(find.text('ตำแหน่งของฉัน'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('nearby-local-location-status')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('SOS request screen shows the one-tap help flow', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    tester.binding.platformDispatcher.textScaleFactorTestValue = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+      tester.binding.platformDispatcher.clearTextScaleFactorTestValue();
+    });
     await pumpApp(tester);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
     await tester.tap(find.text('SOS').first);
-    await tester.pumpAndSettle();
-    await tapText(tester, 'เปิดโหมด SOS');
-    expect(find.text('คุณต้องการเปิดโหมด SOS หรือไม่?'), findsOneWidget);
+    await settleCurrentPage(tester);
+    final form = find
+        .ancestor(
+          of: find.byType(TextField),
+          matching: find.byType(SingleChildScrollView),
+        )
+        .first;
+    final scrollable = find
+        .descendant(of: form, matching: find.byType(Scrollable))
+        .first;
+    expect(
+      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
+      0,
+    );
+    expect(find.text('ส่งสัญญาณ SOS').hitTestable(), findsOneWidget);
+    expect(find.text('คำขอ SOS'), findsOneWidget);
+    expect(find.text('โหมดกู้ภัย'), findsOneWidget);
+    expect(find.text('สถานะ: ยังไม่ได้ส่ง SOS'), findsOneWidget);
+    expect(find.text('ตำแหน่งของคุณ'), findsNothing);
+    expect(find.text('อุปกรณ์ใกล้เคียง'), findsNothing);
+    expect(find.textContaining('±'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 
-    await tester.tap(find.text('เปิด SOS'));
-    await tester.pump(const Duration(milliseconds: 200));
+  testWidgets('one tap activates SOS without a confirmation dialog', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    await pumpApp(tester);
+    await tapText(tester, 'ใช้งานแบบออฟไลน์');
+    await tester.tap(find.text('SOS').first);
+    await settleCurrentPage(tester);
+    final message =
+        'บาดเจ็บและต้องการความช่วยเหลือ กรุณามาที่จุดนัดพบใกล้ทางเข้าอุทยาน';
+    await tester.enterText(find.byType(TextField), message);
+    await tester.tap(find.text('ส่งสัญญาณ SOS'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('คุณต้องการเปิดโหมด SOS หรือไม่?'), findsNothing);
     expect(find.text('SOS ACTIVE'), findsOneWidget);
     expect(find.text('ปิดโหมด SOS'), findsOneWidget);
+    expect(find.text('เปิด SOS แล้ว'), findsOneWidget);
+    expect(find.text('ยังไม่มีอุปกรณ์เชื่อมต่อ'), findsOneWidget);
+    expect(find.text('ตำแหน่งล่าสุด'), findsOneWidget);
+    expect(find.text('ยังไม่มีพิกัดที่บันทึกไว้'), findsOneWidget);
+    final activeScroll = find
+        .ancestor(
+          of: find.text('ปิดโหมด SOS'),
+          matching: find.byType(SingleChildScrollView),
+        )
+        .first;
+    final activeScrollable = find
+        .descendant(of: activeScroll, matching: find.byType(Scrollable))
+        .first;
+    expect(
+      tester.state<ScrollableState>(activeScrollable).position.maxScrollExtent,
+      0,
+    );
+    await tester.tap(find.text('ข้อความฉุกเฉิน'));
+    await tester.pump();
+    expect(find.text(message), findsWidgets);
+    await tester.tap(find.text('ปิด').last);
+    await tester.pump();
+    await tester.tap(find.text('ปิดโหมด SOS'));
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('ต้องการปิดโหมด SOS หรือไม่?'), findsOneWidget);
+    await tester.tap(find.text('ปิด SOS'));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('สถานะ: ยังไม่ได้ส่ง SOS'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('persisted local SOS can be managed after app relaunch', (
@@ -212,12 +344,12 @@ void main() {
       ownerDeviceId: await dependencies.identity.getDeviceId(),
       ownerUserId: '',
     );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.warning_amber_outlined));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
+    await tester.tap(find.text('SOS').first);
+    await settleCurrentPage(tester);
 
-    expect(find.text('อุปกรณ์นี้กำลังส่งสัญญาณ SOS'), findsOneWidget);
-    final manageSos = find.text('จัดการ SOS');
+    expect(find.text('สถานะ: ยังไม่ได้ส่ง SOS'), findsNothing);
+    final manageSos = find.text('จัดการ SOS ที่เปิดอยู่');
     await tester.ensureVisible(manageSos);
     await tester.tap(manageSos);
     await tester.pump();
@@ -226,16 +358,18 @@ void main() {
   });
 
   testWidgets('chat composer inserts a pending local message', (tester) async {
-    await pumpApp(tester);
+    await pumpApp(tester, withDemo: true);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
     await tapLastText(tester, 'แชท');
     await tester.pump(const Duration(milliseconds: 500));
     final somchai = find.text('สมชาย ใจดี').last;
     await tester.ensureVisible(somchai);
     await tester.tap(somchai);
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
 
     await tester.enterText(find.byType(TextField), 'ทดสอบข้อความ Nearby');
+    expect(find.byTooltip('ตัวเลือกบทสนทนา'), findsNothing);
+    expect(find.byType(PopupMenuButton<String>), findsNothing);
     await tester.pump(const Duration(milliseconds: 50));
     final sendButton = find.widgetWithIcon(IconButton, Icons.send_rounded);
     await tester.ensureVisible(sendButton);
@@ -248,24 +382,41 @@ void main() {
     await tester.pump();
     expect(find.text('ทดสอบข้อความ Nearby'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('ส่งแล้ว'), findsAtLeastNWidgets(2));
+    expect(find.text('รอส่ง'), findsOneWidget);
   });
 
   testWidgets('developer diagnostics exposes mock Nearby state', (
     tester,
   ) async {
-    await pumpApp(tester);
+    final dependencies = await pumpApp(tester);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
+    await tapText(tester, 'ใกล้เคียง');
+    expect(find.text('ตรวจสอบ Nearby (สำหรับทีมพัฒนา)'), findsNothing);
+    expect(find.text('เครื่องมือภายใน'), findsNothing);
     await tester.tap(find.text('โปรไฟล์').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('ตั้งค่า'));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
+    await tapText(tester, 'การตั้งค่า');
     await tester.scrollUntilVisible(
-      find.text('ตรวจสอบ Nearby (สำหรับทีมพัฒนา)'),
+      find.text('เกี่ยวกับ RELIO'),
       250,
       scrollable: find.byType(Scrollable).last,
     );
-    await tapText(tester, 'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)');
+    await tapText(tester, 'เกี่ยวกับ RELIO');
+    for (var tap = 0; tap < 7; tap++) {
+      await tester.tap(
+        find.byKey(const ValueKey('about-version-internal-tools')),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(dependencies.internalExperience.developerModeEnabled, isTrue);
+    await tapText(tester, 'ตัวเลือกสำหรับนักพัฒนา');
+    await tester.pumpAndSettle();
+    expect(find.text('เครื่องมือภายใน'), findsOneWidget);
+    await tapScrollableText(tester, 'Nearby และ Relay');
+    await tapScrollableText(tester, 'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)');
 
     expect(find.text('MOCK transport — developer diagnostics'), findsOneWidget);
     expect(find.text('MockNearbyTransport'), findsOneWidget);
@@ -277,16 +428,31 @@ void main() {
   ) async {
     await pumpApp(tester);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
+    await tapText(tester, 'ใกล้เคียง');
+    expect(find.text('ตรวจสอบ Cloud (สำหรับทีมพัฒนา)'), findsNothing);
     await tester.tap(find.text('โปรไฟล์').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('ตั้งค่า'));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
+    await tapText(tester, 'การตั้งค่า');
     await tester.scrollUntilVisible(
-      find.text('ตรวจสอบ Cloud (สำหรับทีมพัฒนา)'),
+      find.text('เกี่ยวกับ RELIO'),
       250,
       scrollable: find.byType(Scrollable).last,
     );
-    await tapText(tester, 'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)');
+    await tapText(tester, 'เกี่ยวกับ RELIO');
+    for (var tap = 0; tap < 7; tap++) {
+      await tester.tap(
+        find.byKey(const ValueKey('about-version-internal-tools')),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tapText(tester, 'ตัวเลือกสำหรับนักพัฒนา');
+    await tester.pumpAndSettle();
+    expect(find.text('เครื่องมือภายใน'), findsOneWidget);
+    await tapScrollableText(tester, 'การวินิจฉัยและบันทึกเหตุการณ์');
+    await tapScrollableText(tester, 'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)');
 
     expect(find.text('ยังไม่ได้ตั้งค่า Cloud'), findsOneWidget);
     expect(find.text('Guest / local-only'), findsOneWidget);
@@ -298,9 +464,7 @@ void main() {
     await pumpApp(tester);
     await tapText(tester, 'ใช้งานแบบออฟไลน์');
     await tester.tap(find.text('โปรไฟล์').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('ตั้งค่า'));
-    await tester.pumpAndSettle();
+    await settleCurrentPage(tester);
     await tapText(tester, 'ธีมแอป');
 
     await tapText(tester, 'โหมดมืด');

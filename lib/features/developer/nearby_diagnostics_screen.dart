@@ -1,12 +1,15 @@
+// หน้ารวบรวมข้อมูลตรวจสอบ Nearby เพื่อช่วยแยก discovery, handshake และการเชื่อมต่อ
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/environment.dart';
 import '../../app/theme/relio_spacing.dart';
 import '../../core/nearby/nearby_transport.dart';
 import '../../core/permissions/permission_service.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Nearby Diagnostics Screen
 class NearbyDiagnosticsScreen extends StatefulWidget {
   const NearbyDiagnosticsScreen({super.key});
 
@@ -15,11 +18,13 @@ class NearbyDiagnosticsScreen extends StatefulWidget {
       _NearbyDiagnosticsScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Nearby Diagnostics Screen State)
 class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
   late final RelioDependencies _dependencies;
   late Future<String> _deviceId;
   late Future<NearbyPermissionSnapshot> _permissions;
   bool _loaded = false;
+  final _qaRestrictedDeviceController = TextEditingController();
 
   @override
   void initState() {
@@ -40,6 +45,12 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
     setState(() {
       _permissions = _dependencies.permissionService.readNearbyPermissions();
     });
+  }
+
+  @override
+  void dispose() {
+    _qaRestrictedDeviceController.dispose();
+    super.dispose();
   }
 
   @override
@@ -264,6 +275,45 @@ class _NearbyDiagnosticsScreenState extends State<NearbyDiagnosticsScreen> {
               },
             ),
             const SizedBox(height: 18),
+            if (RelioBuildInfo.isTest) ...[
+              Text(
+                'QA Direct link restriction',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _qaRestrictedDeviceController,
+                decoration: const InputDecoration(
+                  labelText: 'Verified RELIO device ID',
+                  helperText:
+                      'מנתק ומונע חיבור ישיר עד 15 דקות; אינו משנה trust או AUTO.',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  FilledButton(
+                    onPressed: () => nearby.setQaDirectLinkRestriction(
+                      _qaRestrictedDeviceController.text,
+                    ),
+                    child: const Text('Restrict direct link'),
+                  ),
+                  OutlinedButton(
+                    onPressed: () => nearby.setQaDirectLinkRestriction(null),
+                    child: const Text('Restore direct link'),
+                  ),
+                  Chip(
+                    label: Text(
+                      nearby.qaRestrictedDeviceId == null
+                          ? 'No restriction'
+                          : 'Restricted: ${nearby.qaRestrictedDeviceId}',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+            ],
             Text('State', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Wrap(

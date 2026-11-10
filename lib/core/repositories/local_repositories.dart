@@ -7,6 +7,7 @@ import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import '../database/app_database.dart';
 import '../domain/relio_entities.dart';
+import '../location/nearby_location_quality.dart';
 import '../cloud/cloud_models.dart';
 import '../sync/sync_types.dart';
 import '../identity/owner_context.dart';
@@ -38,6 +39,19 @@ abstract interface class MessageRepository {
   Stream<List<RelioMessage>> watchMessages(String conversationId);
   Future<List<RelioMessage>> listMessages(String conversationId);
   Future<RelioMessage?> getMessage(String messageId);
+  Future<void> restorePrivateBackupMessage({
+    required String conversationId,
+    required String messageId,
+    required String senderId,
+    required String senderDeviceId,
+    required MessageType messageType,
+    required String content,
+    required DateTime createdAt,
+    required DeliveryStatus deliveryStatus,
+    required bool isOutgoing,
+    String? localFilePath,
+    DateTime? readAt,
+  });
   Future<QueuedMessageLookup> lookupQueuedMessage(String messageId);
   Future<bool> deleteWeek3DemoMessage(String messageId);
   Future<RelioMessage> createOutgoingText({
@@ -105,6 +119,18 @@ abstract interface class MessageRepository {
     required String currentUserId,
     DateTime? readAt,
   });
+  Future<bool> mergeCloudMediaMessage({
+    required String conversationId,
+    required String messageId,
+    required String senderUserId,
+    required String senderDeviceId,
+    required MessageType type,
+    required String fileName,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    required String currentUserId,
+  });
+  Future<void> updateCloudMediaPath(String messageId, String localPath);
   Future<void> updateCloudSyncStatus(String messageId, String status);
   Future<void> markFailed(String messageId, String error);
 }
@@ -178,6 +204,7 @@ abstract interface class AttachmentRepository {
     required String localPath,
     required int byteSize,
     String? remoteFileName,
+    String? checksumSha256,
   });
   Future<void> updateProgress(
     String id, {
@@ -189,11 +216,13 @@ abstract interface class AttachmentRepository {
   Future<void> markFailed(String id, String errorCode);
   Future<void> updateCloudMetadataStatus(String id, String status);
   Future<void> updateCloudFileStatus(String id, String status);
+  Future<void> updateChecksumSha256(String id, String sha256);
   Future<List<RelioMediaAttachment>> listStaleTransfers();
 }
 
 abstract interface class SOSRepository {
   Stream<RelioSosEvent?> watchActive({String? ownerDeviceId});
+  Future<List<RelioSosEvent>> listActive({String? ownerDeviceId});
   Future<RelioSosEvent?> readActive({String? ownerDeviceId});
   Future<RelioSosEvent?> readLatest({String? ownerDeviceId});
   Future<RelioSosEvent> createAndActivate({
@@ -216,9 +245,21 @@ abstract interface class SOSRepository {
     DateTime? locationCapturedAt,
     required DateTime createdAt,
     required bool isActive,
+    String? requesterDisplayName,
   });
   Future<RelioSosEvent?> getById(String id);
+  Future<RelioSosEvent?> updateActiveLocation({
+    required String eventId,
+    required double latitude,
+    required double longitude,
+    required double? accuracyMeters,
+    required DateTime capturedAt,
+  });
   Future<void> deactivate(String id);
+  Future<List<RelioSosHistoryEntry>> listHistory();
+  Future<RelioSosHistoryEntry?> readHistory(String eventId);
+  Future<void> hideHistory(String eventId);
+  Future<void> hideAllHistory();
 }
 
 abstract interface class SyncQueueRepository {
@@ -252,6 +293,7 @@ abstract interface class SyncQueueRepository {
   Future<void> recoverStaleProcessing(DateTime cutoff);
   Future<void> retry(String id);
   Future<void> adoptUnowned(String ownerUserId);
+  Future<String?> localPrincipalForItem(String id);
 }
 
 abstract interface class NearbyDeviceRepository {
@@ -285,6 +327,9 @@ abstract interface class NearbyDeviceRepository {
   Future<void> rename(String deviceId, String displayName);
 }
 
+// SQLite stores these timestamps with second precision.
+const _messageRowId = CustomExpression<int>('messages.rowid');
+
 class DriftConversationRepository implements ConversationRepository {
   DriftConversationRepository(
     this.db, {
@@ -301,6 +346,9 @@ class DriftConversationRepository implements ConversationRepository {
   List<RelioConversation>? _latestConversations;
   bool _watchingConversations = false;
   int _conversationWatchGeneration = 0;
+
+  Expression<String> get _logicalConversation =>
+      CustomExpression<String>(db.logicalIdExpression('conversations.id'));
 
   @override
   Stream<List<RelioConversation>> watchConversations() {
@@ -328,10 +376,12 @@ class DriftConversationRepository implements ConversationRepository {
         db.messages.conversationId.equalsExp(db.conversations.id),
       ),
     ])..where(_ownerFilter(userId));
+    query.addColumns([_logicalConversation, _messageRowId]);
     query.orderBy([
       OrderingTerm.desc(db.conversations.lastMessageAt),
       OrderingTerm.desc(db.conversations.updatedAt),
       OrderingTerm.desc(db.messages.createdAt),
+      OrderingTerm.desc(_messageRowId),
     ]);
     return query;
   }
@@ -378,7 +428,12 @@ class DriftConversationRepository implements ConversationRepository {
   Future<RelioConversation> resolveRouteTarget(String routeId) =>
       ownerContext.run(() async {
         final byId = await getConversation(routeId);
-        if (byId != null) return byId;
+        if (byId != null) {
+          return await getConversation(
+                await db.logicalConversationId(byId.id),
+              ) ??
+              byId;
+        }
         final remote = await activeRemotePrincipal(routeId);
         for (final row in await listConversations()) {
           if (row.participantId == routeId &&
@@ -417,15 +472,23 @@ class DriftConversationRepository implements ConversationRepository {
       final remote =
           remotePrincipalId ?? activeRemote ?? 'legacy-device:$participantId';
       ownerContext.requireCurrent(owner);
-      final pair = await db
-          .customSelect(
-            "SELECT conversation_id FROM conversation_principals WHERE local_principal=? AND remote_principal=? AND state='active' LIMIT 1",
-            variables: [
-              Variable.withString(local),
-              Variable.withString(remote),
-            ],
-          )
-          .getSingleOrNull();
+      var candidates = await db.conversationCandidates(local, remote);
+      if (candidates.length > 1) {
+        await db.reconcileConversationDuplicates(local: local, remote: remote);
+        candidates = await db.conversationCandidates(local, remote);
+      }
+      QueryRow? pair;
+      for (final candidate in candidates) {
+        final scope = candidate.readNullable<String>('scope_owner');
+        if (scope != null && scope != owner.userId) continue;
+        pair ??= candidate;
+        if (candidate.readNullable<String>('remote_device_id') ==
+                participantId &&
+            (owner.userId == null || scope == owner.userId)) {
+          pair = candidate;
+          break;
+        }
+      }
       ownerContext.requireCurrent(owner);
       if (pair != null) {
         final existing = await getConversation(
@@ -433,7 +496,8 @@ class DriftConversationRepository implements ConversationRepository {
         );
         ownerContext.requireCurrent(owner);
         if (existing != null) {
-          if (activeRemote == remote &&
+          if (candidates.length == 1 &&
+              activeRemote == remote &&
               existing.participantId != participantId) {
             await (db.update(
               db.conversations,
@@ -569,7 +633,8 @@ class DriftConversationRepository implements ConversationRepository {
     final row = await db
         .customSelect(
           "SELECT COUNT(*) AS count FROM conversation_principals "
-          "WHERE state='active' AND local_principal=(SELECT value FROM app_settings WHERE key='guest_principal')",
+          "WHERE state='active' AND local_principal=(SELECT value FROM app_settings WHERE key='guest_principal') "
+          'AND conversation_id NOT IN (SELECT conversation_id FROM conversation_aliases)',
           readsFrom: {db.conversations},
         )
         .getSingle();
@@ -597,63 +662,139 @@ class DriftConversationRepository implements ConversationRepository {
 
   @override
   Future<void> adoptUnowned(String ownerUserId) async {
-    if (ownerContext.capture().userId != ownerUserId) {
-      throw const OwnerChangedException();
-    }
     final owner = ownerContext.capture();
-    final guest = await PrincipalProfileRepository.guestPrincipalFor(db);
+    if (owner.userId != ownerUserId) throw const OwnerChangedException();
     await db.transaction(() async {
+      final guest = await PrincipalProfileRepository.guestPrincipalFor(db);
+      final local = 'account:$ownerUserId';
       ownerContext.requireCurrent(owner);
-      await db.customStatement(
-        'INSERT OR IGNORE INTO conversation_scopes(conversation_id,owner_user_id,source_id) '
-        "SELECT conversation_id,?,remote_principal || '|' || conversation_id FROM conversation_principals WHERE local_principal=? AND state='active'",
-        [ownerUserId, guest],
-      );
-      await db.customUpdate(
-        "UPDATE conversation_principals SET local_principal=? WHERE local_principal=? AND state='active'",
-        variables: [
-          Variable.withString('account:$ownerUserId'),
-          Variable.withString(guest),
-        ],
-        updates: {db.conversations},
-      );
+      final remotes = await db
+          .customSelect(
+            '''
+        SELECT DISTINCT remote_principal FROM conversation_principals
+        WHERE local_principal=? AND state='active'
+      ''',
+            variables: [Variable.withString(guest)],
+          )
+          .get();
+      for (final row in remotes) {
+        final remote = row.read<String>('remote_principal');
+        final sources = await db.conversationCandidates(guest, remote);
+        for (final source in sources) {
+          if (!await db.hasConversationScopeEvidence(source, guest, remote)) {
+            continue;
+          }
+          final destination = await db.conversationCandidates(local, remote);
+          var safe = true;
+          for (final existing in destination) {
+            if (!db.hasVerifiedRemoteDevice(remote, source) ||
+                !db.hasVerifiedRemoteDevice(remote, existing) ||
+                source.readNullable<String>('remote_device_id') !=
+                    existing.readNullable<String>('remote_device_id') ||
+                !await db.hasConversationScopeEvidence(
+                  existing,
+                  local,
+                  remote,
+                )) {
+              safe = false;
+              break;
+            }
+          }
+          if (!safe) continue;
+          final id = source.read<String>('conversation_id');
+          await db.customStatement(
+            '''
+            INSERT INTO conversation_scopes(conversation_id, owner_user_id, source_id)
+            SELECT conversation_id, ?, remote_principal || '|' || conversation_id
+            FROM conversation_principals
+            WHERE local_principal=? AND ${db.logicalIdExpression('conversation_principals.conversation_id')}=?
+          ''',
+            [ownerUserId, guest, id],
+          );
+          await db.customUpdate(
+            '''
+            UPDATE conversation_principals SET local_principal=?
+            WHERE local_principal=? AND ${db.logicalIdExpression('conversation_principals.conversation_id')}=?
+          ''',
+            variables: [
+              Variable.withString(local),
+              Variable.withString(guest),
+              Variable.withString(id),
+            ],
+            updates: {db.conversations},
+          );
+          await db.reconcileConversationDuplicates(
+            local: local,
+            remote: remote,
+          );
+        }
+      }
       ownerContext.requireCurrent(owner);
     });
   }
 
   Expression<bool> _ownerFilter(String? ownerUserId) {
+    final escapedOwner = ownerUserId?.replaceAll("'", "''");
     final local = ownerUserId == null || ownerUserId.isEmpty
         ? "(SELECT value FROM app_settings WHERE key='guest_principal')"
-        : "'account:${ownerUserId.replaceAll("'", "''")}'";
+        : "'account:$escapedOwner'";
+    final scope = escapedOwner == null ? 'NULL' : "'$escapedOwner'";
     return CustomExpression<bool>(
       'EXISTS (SELECT 1 FROM conversation_principals cp '
-      "WHERE cp.conversation_id=conversations.id AND cp.state='active' AND cp.local_principal=$local)",
+      "WHERE cp.conversation_id=conversations.id AND cp.state='active' AND cp.local_principal=$local) "
+      'AND NOT EXISTS (SELECT 1 FROM conversation_scopes cs '
+      'WHERE cs.conversation_id=conversations.id AND cs.owner_user_id IS NOT $scope)',
     );
   }
 
   List<RelioConversation> _mapJoinedRows(List<TypedResult> rows) {
-    final grouped = <String, RelioConversation>{};
+    final conversations = <String, Conversation>{};
+    final members = <String, Set<String>>{};
+    final latest = <String, (Message, int)>{};
     for (final result in rows) {
       final conversation = result.readTable(db.conversations);
+      final logicalId = result.read(_logicalConversation)!;
+      conversations[conversation.id] = conversation;
+      (members[logicalId] ??= {}).add(conversation.id);
       final message = result.readTableOrNull(db.messages);
-      final current = grouped[conversation.id];
+      final previous = latest[logicalId];
+      final rowId = result.read(_messageRowId);
       if (message != null &&
-          current != null &&
-          (current.lastMessageAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-                  .compareTo(message.createdAt) >=
-              0) {
-        continue;
+          rowId != null &&
+          (previous == null ||
+              message.createdAt.isAfter(previous.$1.createdAt) ||
+              (message.createdAt == previous.$1.createdAt &&
+                  rowId > previous.$2))) {
+        latest[logicalId] = (message, rowId);
       }
-      grouped[conversation.id] = _map(
-        conversation,
-        lastMessageText: message?.content,
-      );
     }
-    return grouped.values.toList(growable: false)..sort((a, b) {
-      final aTime = a.lastMessageAt ?? a.updatedAt;
-      final bTime = b.lastMessageAt ?? b.updatedAt;
-      return bTime.compareTo(aTime);
-    });
+    return members.entries
+        .map((entry) {
+          final canonical =
+              conversations[entry.key] ?? conversations[entry.value.first]!;
+          final message = latest[entry.key]?.$1;
+          if (entry.value.length == 1) {
+            return _map(canonical, lastMessageText: message?.content);
+          }
+          final unread = entry.value.fold<int>(
+            0,
+            (total, id) => total + conversations[id]!.unreadCount,
+          );
+          return _map(
+            canonical.copyWith(
+              unreadCount: unread,
+              lastMessageAt: Value(message?.createdAt),
+            ),
+            lastMessageText: message?.content,
+          );
+        })
+        .toList(growable: false)
+      ..sort((a, b) {
+        final aTime = a.lastMessageAt ?? a.updatedAt;
+        final bTime = b.lastMessageAt ?? b.updatedAt;
+        final byTime = bTime.compareTo(aTime);
+        return byTime == 0 ? a.id.compareTo(b.id) : byTime;
+      });
   }
 
   RelioConversation _map(Conversation row, {String? lastMessageText}) =>
@@ -694,6 +835,15 @@ class DriftMessageRepository implements MessageRepository {
   final Map<String, List<RelioMessage>> _latestMessages = {};
   final Map<String, int> _messageGenerations = {};
   StreamSubscription<Object?>? _ownerScopeSubscription;
+
+  Expression<bool> _inLogicalConversation(String column, String id) {
+    final target = db.logicalIdExpression("'${id.replaceAll("'", "''")}'");
+    return CustomExpression<bool>(
+      '($column=$target OR $column IN (SELECT conversation_id '
+      'FROM conversation_aliases WHERE canonical_id=$target))',
+      watchedTables: {db.conversations},
+    );
+  }
 
   Future<void> _requireVisibleConversation(String conversationId) async {
     return _owned(() async {
@@ -756,8 +906,16 @@ class DriftMessageRepository implements MessageRepository {
     _messageSubscriptions[conversationId]?.cancel();
     _messageSubscriptions[conversationId] =
         (db.select(db.messages)
-              ..where((row) => row.conversationId.equals(conversationId))
-              ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+              ..where(
+                (row) => _inLogicalConversation(
+                  'messages.conversation_id',
+                  conversationId,
+                ),
+              )
+              ..orderBy([
+                (row) => OrderingTerm.asc(row.createdAt),
+                (_) => OrderingTerm.asc(_messageRowId),
+              ]))
             .watch()
             .listen((_) async {
               try {
@@ -780,8 +938,16 @@ class DriftMessageRepository implements MessageRepository {
         return const [];
       }
       return (await (db.select(db.messages)
-                ..where((row) => row.conversationId.equals(conversationId))
-                ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]))
+                ..where(
+                  (row) => _inLogicalConversation(
+                    'messages.conversation_id',
+                    conversationId,
+                  ),
+                )
+                ..orderBy([
+                  (row) => OrderingTerm.asc(row.createdAt),
+                  (_) => OrderingTerm.asc(_messageRowId),
+                ]))
               .get())
           .map(_map)
           .toList(growable: false);
@@ -799,6 +965,60 @@ class DriftMessageRepository implements MessageRepository {
         return null;
       }
       return _map(row);
+    });
+  }
+
+  @override
+  Future<void> restorePrivateBackupMessage({
+    required String conversationId,
+    required String messageId,
+    required String senderId,
+    required String senderDeviceId,
+    required MessageType messageType,
+    required String content,
+    required DateTime createdAt,
+    required DeliveryStatus deliveryStatus,
+    required bool isOutgoing,
+    String? localFilePath,
+    DateTime? readAt,
+  }) async {
+    return _owned(() async {
+      if (await conversations.getConversation(conversationId) == null) {
+        throw StateError('Conversation is not available in the current scope');
+      }
+      await db.transaction(() async {
+        final existing = await (db.select(
+          db.messages,
+        )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+        if (existing != null) {
+          if (!await db.sameLogicalConversation(
+            existing.conversationId,
+            conversationId,
+          )) {
+            throw StateError('Message ID belongs to a different conversation');
+          }
+          return;
+        }
+        await db
+            .into(db.messages)
+            .insert(
+              MessagesCompanion.insert(
+                id: messageId,
+                conversationId: conversationId,
+                senderId: senderId,
+                senderDeviceId: Value(senderDeviceId),
+                messageType: messageType.name,
+                content: content,
+                createdAt: createdAt,
+                updatedAt: createdAt,
+                deliveryStatus: deliveryStatus.name,
+                isOutgoing: isOutgoing,
+                localFilePath: Value(localFilePath),
+                readAt: Value(readAt),
+              ),
+            );
+        await conversations.updateLastActivity(conversationId, createdAt);
+      });
     });
   }
 
@@ -983,7 +1203,10 @@ class DriftMessageRepository implements MessageRepository {
           db.messages,
         )..where((row) => row.id.equals(messageId))).getSingleOrNull();
         if (exists != null) {
-          if (exists.conversationId != conversationId) {
+          if (!await db.sameLogicalConversation(
+            exists.conversationId,
+            conversationId,
+          )) {
             throw StateError('Message ID belongs to a different conversation');
           }
           return _map(exists);
@@ -1086,7 +1309,10 @@ class DriftMessageRepository implements MessageRepository {
           db.messages,
         )..where((row) => row.id.equals(messageId))).getSingleOrNull();
         if (exists != null) {
-          if (exists.conversationId != conversationId) {
+          if (!await db.sameLogicalConversation(
+            exists.conversationId,
+            conversationId,
+          )) {
             throw StateError('Message ID belongs to a different conversation');
           }
           return _map(exists);
@@ -1202,7 +1428,10 @@ class DriftMessageRepository implements MessageRepository {
           db.messages,
         )..where((row) => row.id.equals(messageId))).getSingleOrNull();
         if (exists != null) {
-          if (exists.conversationId != conversationId) {
+          if (!await db.sameLogicalConversation(
+            exists.conversationId,
+            conversationId,
+          )) {
             throw StateError('Message ID belongs to a different conversation');
           }
           return _map(exists);
@@ -1316,7 +1545,10 @@ class DriftMessageRepository implements MessageRepository {
       final unread =
           await (db.select(db.messages)..where(
                 (row) =>
-                    row.conversationId.equals(conversationId) &
+                    _inLogicalConversation(
+                      'messages.conversation_id',
+                      conversationId,
+                    ) &
                     row.isOutgoing.equals(false) &
                     row.readAt.isNull(),
               ))
@@ -1326,15 +1558,20 @@ class DriftMessageRepository implements MessageRepository {
       await db.transaction(() async {
         await (db.update(db.messages)..where(
               (row) =>
-                  row.conversationId.equals(conversationId) &
+                  _inLogicalConversation(
+                    'messages.conversation_id',
+                    conversationId,
+                  ) &
                   row.isOutgoing.equals(false) &
                   row.readAt.isNull(),
             ))
             .write(
               MessagesCompanion(readAt: Value(now), updatedAt: Value(now)),
             );
-        await (db.update(db.conversations)
-              ..where((row) => row.id.equals(conversationId)))
+        await (db.update(db.conversations)..where(
+              (row) =>
+                  _inLogicalConversation('conversations.id', conversationId),
+            ))
             .write(const ConversationsCompanion(unreadCount: Value(0)));
       });
       return unread.map((message) => message.id).toList(growable: false);
@@ -1403,7 +1640,10 @@ class DriftMessageRepository implements MessageRepository {
           db.messages,
         )..where((row) => row.id.equals(messageId))).getSingleOrNull();
         if (existing != null) {
-          if (existing.conversationId != conversationId ||
+          if (!await db.sameLogicalConversation(
+                existing.conversationId,
+                conversationId,
+              ) ||
               existing.senderId != senderUserId ||
               existing.content != text) {
             throw const CloudException(
@@ -1451,6 +1691,110 @@ class DriftMessageRepository implements MessageRepository {
         return true;
       });
       return result;
+    });
+  }
+
+  @override
+  Future<bool> mergeCloudMediaMessage({
+    required String conversationId,
+    required String messageId,
+    required String senderUserId,
+    required String senderDeviceId,
+    required MessageType type,
+    required String fileName,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    required String currentUserId,
+  }) async {
+    if (type != MessageType.image && type != MessageType.video) {
+      throw ArgumentError.value(type, 'type');
+    }
+    return _owned(() async {
+      if (await conversations.getConversation(conversationId) == null) {
+        return false;
+      }
+      return db.transaction(() async {
+        final existing = await (db.select(
+          db.messages,
+        )..where((row) => row.id.equals(messageId))).getSingleOrNull();
+        if (existing != null) {
+          if (!await db.sameLogicalConversation(
+                existing.conversationId,
+                conversationId,
+              ) ||
+              existing.senderId != senderUserId ||
+              existing.messageType != type.name ||
+              existing.content != fileName) {
+            throw const CloudException(
+              'รหัสข้อความสื่อซ้ำกับข้อมูลคนละรายการ',
+              code: 'invalidLocalData',
+            );
+          }
+          await (db.update(
+            db.messages,
+          )..where((row) => row.id.equals(messageId))).write(
+            MessagesCompanion(
+              cloudSyncStatus: const Value('synced'),
+              updatedAt: Value(
+                updatedAt.isAfter(existing.updatedAt)
+                    ? updatedAt
+                    : existing.updatedAt,
+              ),
+            ),
+          );
+          return false;
+        }
+
+        final outgoing = senderUserId == currentUserId;
+        await db
+            .into(db.messages)
+            .insert(
+              MessagesCompanion.insert(
+                id: messageId,
+                conversationId: conversationId,
+                senderId: senderUserId,
+                senderDeviceId: Value(senderDeviceId),
+                messageType: type.name,
+                content: fileName,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                deliveryStatus: outgoing
+                    ? DeliveryStatus.synced.name
+                    : DeliveryStatus.delivered.name,
+                cloudSyncStatus: const Value('synced'),
+                isOutgoing: outgoing,
+              ),
+            );
+        await conversations.updateLastActivity(conversationId, createdAt);
+        if (!outgoing) await _incrementUnread(conversationId);
+        return true;
+      });
+    });
+  }
+
+  @override
+  Future<void> updateCloudMediaPath(String messageId, String localPath) async {
+    return _owned(() async {
+      final current = await _visibleMessage(messageId);
+      if (current == null ||
+          (current.messageType != MessageType.image.name &&
+              current.messageType != MessageType.video.name)) {
+        throw const CloudException(
+          'ข้อความสื่อในเครื่องไม่พร้อม',
+          code: 'invalidLocalData',
+        );
+      }
+      if (current.localFilePath == localPath) {
+        return;
+      }
+      await (db.update(
+        db.messages,
+      )..where((row) => row.id.equals(messageId))).write(
+        MessagesCompanion(
+          localFilePath: Value(localPath),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
     });
   }
 
@@ -1589,6 +1933,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
     required String localPath,
     required int byteSize,
     String? remoteFileName,
+    String? checksumSha256,
   }) async {
     return _owned(() async {
       if (await conversations.getConversation(conversationId) == null) {
@@ -1598,7 +1943,10 @@ class DriftAttachmentRepository implements AttachmentRepository {
         db.messages,
       )..where((row) => row.id.equals(messageId))).getSingleOrNull();
       if (parentMessage != null &&
-          (parentMessage.conversationId != conversationId ||
+          (!await db.sameLogicalConversation(
+                parentMessage.conversationId,
+                conversationId,
+              ) ||
               !await _messageVisible(messageId))) {
         throw StateError('Message is not available in the current scope');
       }
@@ -1616,6 +1964,7 @@ class DriftAttachmentRepository implements AttachmentRepository {
               mimeType: mimeType,
               localPath: localPath,
               remoteFileName: Value(remoteFileName),
+              checksumSha256: Value(checksumSha256),
               byteSize: byteSize,
               transferStatus: MediaTransferState.pending.name,
               createdAt: now,
@@ -1693,6 +2042,21 @@ class DriftAttachmentRepository implements AttachmentRepository {
       )..where((row) => row.id.equals(id))).write(
         AttachmentsCompanion(
           cloudFileStatus: Value(status),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+    });
+  }
+
+  @override
+  Future<void> updateChecksumSha256(String id, String sha256) async {
+    return _owned(() async {
+      if (await _visibleAttachment(id) == null) return;
+      await (db.update(
+        db.attachments,
+      )..where((row) => row.id.equals(id))).write(
+        AttachmentsCompanion(
+          checksumSha256: Value(sha256),
           updatedAt: Value(DateTime.now()),
         ),
       );
@@ -1790,9 +2154,15 @@ class DriftAttachmentRepository implements AttachmentRepository {
 }
 
 class DriftSosRepository implements SOSRepository {
-  DriftSosRepository(this.db, this.queue, {this.ownerUserIdProvider});
+  DriftSosRepository(
+    this.db,
+    this.queue, {
+    required this.ownerContext,
+    this.ownerUserIdProvider,
+  });
   final AppDatabase db;
   final SyncQueueRepository queue;
+  final OwnerContext ownerContext;
   final String? Function()? ownerUserIdProvider;
 
   @override
@@ -1808,6 +2178,24 @@ class DriftSosRepository implements SOSRepository {
             ..orderBy([(row) => OrderingTerm.desc(row.updatedAt)]))
           .watch()
           .map((rows) => rows.isEmpty ? null : _map(rows.first));
+
+  @override
+  Future<List<RelioSosEvent>> listActive({String? ownerDeviceId}) async =>
+      (await (db.select(db.sosEvents)
+                ..where(
+                  (row) =>
+                      row.isActive.equals(true) &
+                      (ownerDeviceId == null
+                          ? const Constant(true)
+                          : row.ownerDeviceId.equals(ownerDeviceId)),
+                )
+                ..orderBy([
+                  (row) => OrderingTerm.desc(row.createdAt),
+                  (row) => OrderingTerm.asc(row.ownerDeviceId),
+                ]))
+              .get())
+          .map(_map)
+          .toList(growable: false);
 
   @override
   Future<RelioSosEvent?> readActive({String? ownerDeviceId}) async {
@@ -1852,9 +2240,43 @@ class DriftSosRepository implements SOSRepository {
     DateTime? locationCapturedAt,
     required DateTime createdAt,
     required bool isActive,
+    String? requesterDisplayName,
   }) async {
     final now = DateTime.now();
+    final viewer = ownerContext.capture();
+    final viewerPrincipalId = await _principalFor(viewer);
+    ownerContext.requireCurrent(viewer);
+    late final RelioSosEvent result;
     await db.transaction(() async {
+      ownerContext.requireCurrent(viewer);
+      final previous = await (db.select(
+        db.sosEvents,
+      )..where((row) => row.id.equals(id))).getSingleOrNull();
+      final incomingLocationIsValid = _validSosCoordinates(latitude, longitude);
+      final previousTime = previous?.locationCapturedAt;
+      final canReplaceLocation =
+          incomingLocationIsValid &&
+          (previous == null ||
+              previousTime == null ||
+              (locationCapturedAt != null &&
+                  !locationCapturedAt.isBefore(previousTime)));
+      final acceptedLatitude = canReplaceLocation
+          ? latitude
+          : previous?.latitude;
+      final acceptedLongitude = canReplaceLocation
+          ? longitude
+          : previous?.longitude;
+      final acceptedAccuracy = canReplaceLocation
+          ? (locationAccuracy != null &&
+                    locationAccuracy.isFinite &&
+                    locationAccuracy >= 0 &&
+                    locationAccuracy <= 100000
+                ? locationAccuracy
+                : null)
+          : previous?.locationAccuracy;
+      final acceptedLocationTime = canReplaceLocation
+          ? locationCapturedAt
+          : previous?.locationCapturedAt;
       // ให้อุปกรณ์หนึ่งมี SOS ที่ active ได้รายการเดียวก่อนบันทึก revision ใหม่
       await (db.update(db.sosEvents)..where(
             (row) =>
@@ -1874,22 +2296,152 @@ class DriftSosRepository implements SOSRepository {
               id: id,
               ownerDeviceId: ownerDeviceId,
               ownerUserId: ownerUserId,
-              message: Value(message),
-              latitude: Value(latitude),
-              longitude: Value(longitude),
-              locationAccuracy: Value(locationAccuracy),
-              locationCapturedAt: Value(locationCapturedAt),
-              createdAt: createdAt,
+              message: Value(message ?? previous?.message),
+              latitude: Value(acceptedLatitude),
+              longitude: Value(acceptedLongitude),
+              locationAccuracy: Value(acceptedAccuracy),
+              locationCapturedAt: Value(acceptedLocationTime),
+              createdAt: previous?.createdAt ?? createdAt,
               updatedAt: now,
               isActive: isActive,
               deliveryStatus: DeliveryStatus.delivered.name,
             ),
           );
+      final existingProjection =
+          await (db.select(db.sosHistoryEntries)..where(
+                (row) =>
+                    row.viewerPrincipalId.equals(viewerPrincipalId) &
+                    row.eventId.equals(id),
+              ))
+              .getSingleOrNull();
+      final displayName = requesterDisplayName?.trim();
+      final projection = SosHistoryEntriesCompanion.insert(
+        viewerPrincipalId: viewerPrincipalId,
+        eventId: id,
+        requesterDeviceId: ownerDeviceId,
+        requesterDisplayName: displayName == null || displayName.isEmpty
+            ? existingProjection?.requesterDisplayName ?? 'อุปกรณ์ RELIO'
+            : displayName,
+        eventStartedAt:
+            existingProjection?.eventStartedAt ??
+            previous?.createdAt ??
+            createdAt,
+        updatedAt: now,
+        isHidden: Value(existingProjection?.isHidden ?? false),
+        hiddenAt: Value(existingProjection?.hiddenAt),
+      );
+      await db.into(db.sosHistoryEntries).insertOnConflictUpdate(projection);
+      ownerContext.requireCurrent(viewer);
     });
     final row = await (db.select(
       db.sosEvents,
     )..where((item) => item.id.equals(id))).getSingle();
-    return _map(row);
+    ownerContext.requireCurrent(viewer);
+    result = _map(row);
+    return result;
+  }
+
+  @override
+  Future<List<RelioSosHistoryEntry>> listHistory() async {
+    final viewer = ownerContext.capture();
+    final principalId = await _principalFor(viewer);
+    ownerContext.requireCurrent(viewer);
+    final query =
+        db.select(db.sosHistoryEntries).join([
+            innerJoin(
+              db.sosEvents,
+              db.sosEvents.id.equalsExp(db.sosHistoryEntries.eventId) &
+                  db.sosEvents.ownerDeviceId.equalsExp(
+                    db.sosHistoryEntries.requesterDeviceId,
+                  ),
+            ),
+          ])
+          ..where(
+            db.sosHistoryEntries.viewerPrincipalId.equals(principalId) &
+                db.sosHistoryEntries.isHidden.equals(false),
+          )
+          ..orderBy([
+            OrderingTerm.desc(db.sosHistoryEntries.eventStartedAt),
+            OrderingTerm.desc(db.sosHistoryEntries.updatedAt),
+          ]);
+    final rows = await query.get();
+    ownerContext.requireCurrent(viewer);
+    final entries = <RelioSosHistoryEntry>[];
+    for (final row in rows) {
+      final projection = row.readTable(db.sosHistoryEntries);
+      final event = _map(row.readTable(db.sosEvents));
+      entries.add(
+        RelioSosHistoryEntry(
+          event: event,
+          requesterDisplayName: projection.requesterDisplayName,
+        ),
+      );
+    }
+    ownerContext.requireCurrent(viewer);
+    return entries;
+  }
+
+  @override
+  Future<RelioSosHistoryEntry?> readHistory(String eventId) async {
+    final viewer = ownerContext.capture();
+    final entries = await listHistory();
+    ownerContext.requireCurrent(viewer);
+    for (final entry in entries) {
+      if (entry.event.id == eventId) return entry;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> hideHistory(String eventId) async {
+    final viewer = ownerContext.capture();
+    final principalId = await _principalFor(viewer);
+    ownerContext.requireCurrent(viewer);
+    await db.transaction(() async {
+      ownerContext.requireCurrent(viewer);
+      await _hideHistoryFor(principalId, eventId);
+      ownerContext.requireCurrent(viewer);
+    });
+  }
+
+  @override
+  Future<void> hideAllHistory() async {
+    final viewer = ownerContext.capture();
+    final principalId = await _principalFor(viewer);
+    ownerContext.requireCurrent(viewer);
+    await db.transaction(() async {
+      ownerContext.requireCurrent(viewer);
+      final now = DateTime.now();
+      await (db.update(
+        db.sosHistoryEntries,
+      )..where((row) => row.viewerPrincipalId.equals(principalId))).write(
+        SosHistoryEntriesCompanion(
+          isHidden: const Value(true),
+          hiddenAt: Value(now),
+          updatedAt: Value(now),
+        ),
+      );
+      ownerContext.requireCurrent(viewer);
+    });
+  }
+
+  Future<String> _principalFor(OwnerSnapshot owner) async =>
+      owner.userId == null
+      ? await PrincipalProfileRepository.guestPrincipalFor(db)
+      : 'account:${owner.userId}';
+
+  Future<void> _hideHistoryFor(String principalId, String eventId) async {
+    await (db.update(db.sosHistoryEntries)..where(
+          (row) =>
+              row.viewerPrincipalId.equals(principalId) &
+              row.eventId.equals(eventId),
+        ))
+        .write(
+          SosHistoryEntriesCompanion(
+            isHidden: const Value(true),
+            hiddenAt: Value(DateTime.now()),
+          ),
+        );
   }
 
   @override
@@ -1898,6 +2450,60 @@ class DriftSosRepository implements SOSRepository {
       db.sosEvents,
     )..where((item) => item.id.equals(id))).getSingleOrNull();
     return row == null ? null : _map(row);
+  }
+
+  @override
+  Future<RelioSosEvent?> updateActiveLocation({
+    required String eventId,
+    required double latitude,
+    required double longitude,
+    required double? accuracyMeters,
+    required DateTime capturedAt,
+  }) async {
+    if (!_validSosCoordinates(latitude, longitude) ||
+        (accuracyMeters != null &&
+            (!accuracyMeters.isFinite ||
+                accuracyMeters < 0 ||
+                accuracyMeters > 100000))) {
+      return null;
+    }
+    final event = await db.transaction(() async {
+      final row = await (db.select(
+        db.sosEvents,
+      )..where((item) => item.id.equals(eventId))).getSingleOrNull();
+      if (row == null || !row.isActive) return null;
+      final existingTime = row.locationCapturedAt;
+      if (existingTime != null && capturedAt.isBefore(existingTime)) {
+        return null;
+      }
+      await (db.update(db.sosEvents)..where(
+            (item) => item.id.equals(eventId) & item.isActive.equals(true),
+          ))
+          .write(
+            SosEventsCompanion(
+              latitude: Value(latitude),
+              longitude: Value(longitude),
+              locationAccuracy: Value(accuracyMeters),
+              locationCapturedAt: Value(capturedAt),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+      final updated = await (db.select(
+        db.sosEvents,
+      )..where((item) => item.id.equals(eventId))).getSingleOrNull();
+      return updated == null ? null : _map(updated);
+    });
+    if (event == null) return null;
+    final currentOwner = ownerUserIdProvider?.call();
+    if (event.ownerUserId.isNotEmpty && event.ownerUserId == currentOwner) {
+      await queue.enqueue(
+        entityType: SyncEntityType.sosEvent.value,
+        entityId: eventId,
+        operation: SyncOperation.sosUpsert.value,
+        ownerUserId: event.ownerUserId,
+      );
+    }
+    return event;
   }
 
   @override
@@ -2069,7 +2675,7 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
         : 'account:${owner.userId}';
     context.requireCurrent(owner);
     final now = DateTime.now();
-    final existing =
+    final candidates =
         await (db.select(db.syncQueue)
               ..where(
                 (row) =>
@@ -2078,32 +2684,64 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
                     row.operation.equals(operation) &
                     row.status.equals(SyncQueueStatus.completed.value).not(),
               )
-              ..orderBy([(row) => OrderingTerm.desc(row.createdAt)])
-              ..limit(1))
-            .getSingleOrNull();
+              ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]))
+            .get();
     context.requireCurrent(owner);
-    if (existing != null) {
-      // Coalesce repeated local edits, but never change an existing owner's scope.
+    SyncQueueData? existing;
+    SyncQueueData? blockedByOtherPrincipal;
+    for (final candidate in candidates) {
+      if (await localPrincipalForItem(candidate.id) != principal) {
+        blockedByOtherPrincipal ??= candidate;
+        continue;
+      }
+      final isOptedInGuestBackup =
+          operation == SyncOperation.privateBackupUpsert.value &&
+          owner.userId == null &&
+          effectiveOwnerUserId != null &&
+          candidate.ownerUserId == null;
+      if (candidate.ownerUserId != effectiveOwnerUserId &&
+          !isOptedInGuestBackup) {
+        blockedByOtherPrincipal ??= candidate;
+        continue;
+      }
+      existing = candidate;
+      break;
+    }
+    context.requireCurrent(owner);
+    final matched = existing;
+    if (matched == null && blockedByOtherPrincipal != null) {
+      // Stable IDs do not authorize creating a second owner's queue row.
+      return _map(blockedByOtherPrincipal);
+    }
+    if (matched != null) {
+      final bindGuestBackup =
+          matched.ownerUserId == null &&
+          effectiveOwnerUserId != null &&
+          operation == SyncOperation.privateBackupUpsert.value &&
+          owner.userId == null;
       await (db.update(
         db.syncQueue,
-      )..where((row) => row.id.equals(existing.id))).write(
+      )..where((row) => row.id.equals(matched.id))).write(
         SyncQueueCompanion(
           status: Value(SyncQueueStatus.pending.value),
           attemptCount: const Value(0),
           lastError: const Value<String?>(null),
           nextAttemptAt: const Value<DateTime?>(null),
-          // An existing Guest row stays unowned until explicit adoption.
-          ownerUserId: const Value.absent(),
+          ownerUserId: bindGuestBackup
+              ? Value<String?>(effectiveOwnerUserId)
+              : const Value.absent(),
           updatedAt: Value(now),
         ),
       );
       return _map(
-        existing.copyWith(
+        matched.copyWith(
           status: SyncQueueStatus.pending.value,
           attemptCount: 0,
           lastError: const Value<String?>(null),
           nextAttemptAt: const Value<DateTime?>(null),
-          ownerUserId: Value<String?>(existing.ownerUserId),
+          ownerUserId: Value<String?>(
+            bindGuestBackup ? effectiveOwnerUserId : matched.ownerUserId,
+          ),
           updatedAt: now,
         ),
       );
@@ -2164,6 +2802,16 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
           )..orderBy([(row) => OrderingTerm.asc(row.createdAt)])).get())
           .map(_map)
           .toList(growable: false);
+
+  @override
+  Future<String?> localPrincipalForItem(String id) async =>
+      (await db
+              .customSelect(
+                'SELECT local_principal FROM queue_principals WHERE queue_id=?',
+                variables: [Variable.withString(id)],
+              )
+              .getSingleOrNull())
+          ?.read<String>('local_principal');
 
   @override
   Future<List<RelioQueueItem>> listEligible(DateTime now) async =>
@@ -2231,6 +2879,7 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
       _writeStatus(id, SyncQueueStatus.processing.value);
 
   @override
+  // สถานะนี้บอกว่างานในคิว Sync จบแล้ว ไม่ใช่ ACK ยืนยันการส่ง Nearby ถึงผู้รับ
   Future<void> markCompleted(String id) async {
     await (db.update(db.syncQueue)..where((row) => row.id.equals(id))).write(
       SyncQueueCompanion(
@@ -2329,27 +2978,60 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
 
   @override
   Future<void> adoptUnowned(String ownerUserId) async {
-    await (db.update(db.syncQueue)..where(
-          (row) =>
-              row.ownerUserId.isNull() &
-              const CustomExpression<bool>(
-                "EXISTS (SELECT 1 FROM queue_principals qp WHERE qp.queue_id=sync_queue.id AND qp.local_principal=(SELECT value FROM app_settings WHERE key='guest_principal'))",
-              ) &
-              row.status.isIn([
-                SyncQueueStatus.pending.value,
-                SyncQueueStatus.failed.value,
-              ]),
-        ))
-        .write(
-          SyncQueueCompanion(
-            ownerUserId: Value<String?>(ownerUserId),
-            status: Value(SyncQueueStatus.pending.value),
-            attemptCount: const Value(0),
-            lastError: const Value<String?>(null),
-            nextAttemptAt: const Value<DateTime?>(null),
-            updatedAt: Value(DateTime.now()),
-          ),
+    final context = ownerContext ??= OwnerContext(ownerUserIdProvider);
+    final owner = context.capture();
+    if (owner.userId != ownerUserId) throw const OwnerChangedException();
+    final guestPrincipal = await PrincipalProfileRepository.guestPrincipalFor(
+      db,
+    );
+    await db.transaction(() async {
+      context.requireCurrent(owner);
+      final rows = await db
+          .customSelect(
+            '''
+        SELECT q.id FROM sync_queue q
+        JOIN queue_principals qp ON qp.queue_id=q.id
+        WHERE q.owner_user_id IS NULL AND q.status IN ('pending','failed')
+          AND qp.local_principal=?
+          AND (q.entity_type NOT IN (
+              'conversation','message','attachment',
+              'private_backup_conversation','private_backup_message')
+            OR EXISTS (
+              SELECT 1 FROM conversation_principals cp
+              JOIN conversation_scopes cs ON cs.conversation_id=cp.conversation_id
+              WHERE cp.conversation_id=(${db.queueConversationExpression('q')})
+                AND cp.state='active' AND cp.local_principal=? AND cs.owner_user_id=?
+            ))
+      ''',
+            variables: [
+              Variable.withString(guestPrincipal),
+              Variable.withString('account:$ownerUserId'),
+              Variable.withString(ownerUserId),
+            ],
+          )
+          .get();
+      context.requireCurrent(owner);
+      final ids = rows.map((row) => row.read<String>('id')).toList();
+      if (ids.isEmpty) return;
+      await (db.update(db.syncQueue)..where((row) => row.id.isIn(ids))).write(
+        SyncQueueCompanion(
+          ownerUserId: Value<String?>(ownerUserId),
+          status: Value(SyncQueueStatus.pending.value),
+          attemptCount: const Value(0),
+          lastError: const Value<String?>(null),
+          nextAttemptAt: const Value<DateTime?>(null),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+      for (final id in ids) {
+        context.requireCurrent(owner);
+        await db.customStatement(
+          'UPDATE queue_principals SET local_principal=? WHERE queue_id=? AND local_principal=?',
+          ['account:$ownerUserId', id, guestPrincipal],
         );
+      }
+      context.requireCurrent(owner);
+    });
   }
 
   Future<void> _writeStatus(String id, String status) async {
@@ -2452,6 +3134,19 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
         existing?.batteryUpdatedAt == null ||
         (batteryUpdatedAt != null &&
             !batteryUpdatedAt.isBefore(existing!.batteryUpdatedAt!));
+    // Delayed deviceStatus packets must not move a peer marker backwards.
+    final existingLocationTime = existing?.peerLocationCapturedAt;
+    final existingLocationTimeIsValid =
+        existingLocationTime == null ||
+        NearbyLocationQuality.hasValidCaptureTime(
+          existingLocationTime,
+          DateTime.now(),
+        );
+    final acceptLocation =
+        existingLocationTime == null ||
+        !existingLocationTimeIsValid ||
+        (peerLocationCapturedAt != null &&
+            !peerLocationCapturedAt.isBefore(existingLocationTime));
     final companion = NearbyDevicesCompanion.insert(
       deviceId: deviceId,
       displayName: displayName,
@@ -2479,13 +3174,25 @@ class DriftNearbyDeviceRepository implements NearbyDeviceRepository {
             ? batteryUpdatedAt ?? existing?.batteryUpdatedAt
             : existing?.batteryUpdatedAt,
       ),
-      peerLatitude: Value(peerLatitude ?? existing?.peerLatitude),
-      peerLongitude: Value(peerLongitude ?? existing?.peerLongitude),
+      peerLatitude: Value(
+        acceptLocation
+            ? peerLatitude ?? existing?.peerLatitude
+            : existing?.peerLatitude,
+      ),
+      peerLongitude: Value(
+        acceptLocation
+            ? peerLongitude ?? existing?.peerLongitude
+            : existing?.peerLongitude,
+      ),
       peerLocationAccuracy: Value(
-        peerLocationAccuracy ?? existing?.peerLocationAccuracy,
+        acceptLocation
+            ? peerLocationAccuracy ?? existing?.peerLocationAccuracy
+            : existing?.peerLocationAccuracy,
       ),
       peerLocationCapturedAt: Value(
-        peerLocationCapturedAt ?? existing?.peerLocationCapturedAt,
+        acceptLocation
+            ? peerLocationCapturedAt ?? existing?.peerLocationCapturedAt
+            : existing?.peerLocationCapturedAt,
       ),
       peerDeviceModel: Value(peerDeviceModel ?? existing?.peerDeviceModel),
     );
@@ -2643,6 +3350,10 @@ class RelioDeviceIdentityRepository {
 }
 
 class RelioSettingsRepository {
+  static const automaticPrivateBackupKey = 'automatic_private_backup_enabled';
+  static const guestCloudUserIdKey = 'guest_cloud_user_id';
+  static const guestCloudPrincipalIdKey = 'guest_cloud_principal_id';
+
   RelioSettingsRepository(this.db);
   final AppDatabase db;
 
@@ -2695,6 +3406,26 @@ class RelioSettingsRepository {
           ),
         );
   }
+
+  Future<bool> bindGuestCloudIdentity({
+    required String guestUserId,
+    required String guestPrincipalId,
+  }) => db.transaction(() async {
+    final currentUserId = await getValue(guestCloudUserIdKey);
+    final currentPrincipalId = await getValue(guestCloudPrincipalIdKey);
+    if (currentUserId == null && currentPrincipalId == null) {
+      await setValue(guestCloudUserIdKey, guestUserId);
+      await setValue(guestCloudPrincipalIdKey, guestPrincipalId);
+      return true;
+    }
+    return currentUserId == guestUserId &&
+        currentPrincipalId == guestPrincipalId;
+  });
+
+  Future<void> clearGuestCloudIdentity() => db.transaction(() async {
+    await remove(guestCloudUserIdKey);
+    await remove(guestCloudPrincipalIdKey);
+  });
 
   Future<int> getInt(String key, {required int defaultValue}) async {
     final saved = await (db.select(
@@ -2873,6 +3604,7 @@ class RelioRepositories {
     sos = DriftSosRepository(
       database,
       syncQueue,
+      ownerContext: ownerContext,
       ownerUserIdProvider: ownerUserIdProvider,
     );
   }
@@ -2891,46 +3623,41 @@ class RelioRepositories {
   late final AttachmentRepository attachments;
 
   Future<void> seedPrototypeData() async {
-    final existing = await conversations.listConversations();
-    if (existing.isNotEmpty) return;
     for (final chat in RelioMockData.chats) {
       await conversations.ensureConversation(
-        id: chat.id,
-        participantId: chat.id,
+        id: 'demo:conversation:${chat.id}',
+        participantId: 'demo:peer:${chat.id}',
         displayName: chat.name,
         participantStatus: chat.status,
-      );
-    }
-    for (final device in RelioMockData.devices) {
-      await nearbyDevices.upsert(
-        deviceId: device.id,
-        displayName: device.name,
-        status: device.status,
-        signalQuality: device.signalQuality,
-        approxDistance: device.distanceMetersApprox,
+        remotePrincipalId: 'demo:principal:${chat.id}',
       );
     }
     final somchai = await conversations.ensureConversation(
-      id: 'somchai',
-      participantId: 'somchai',
+      id: 'demo:conversation:somchai',
+      participantId: 'demo:peer:somchai',
       displayName: 'สมชาย ใจดี',
       participantStatus: DeviceStatus.sos,
+      remotePrincipalId: 'demo:principal:somchai',
     );
     for (final message in RelioMockData.initialMessages) {
       final createdAt = DateTime.now().subtract(
         Duration(minutes: RelioMockData.initialMessages.length),
       );
-      final existingMessage = await (database.select(
-        database.messages,
-      )..where((row) => row.id.equals(message.id))).getSingleOrNull();
+      final existingMessage =
+          await (database.select(database.messages)..where(
+                (row) => row.id.equals('demo:message:somchai:${message.id}'),
+              ))
+              .getSingleOrNull();
       if (existingMessage != null) continue;
       await database
           .into(database.messages)
           .insert(
             MessagesCompanion.insert(
-              id: message.id,
+              id: 'demo:message:somchai:${message.id}',
               conversationId: somchai.id,
-              senderId: message.outgoing ? 'minnie' : 'somchai',
+              senderId: message.outgoing
+                  ? 'demo:peer:local'
+                  : 'demo:peer:somchai',
               messageType: message.type.name,
               content: message.text,
               createdAt: createdAt,
@@ -2971,6 +3698,16 @@ MediaTransferState _mediaTransferState(String value) =>
       (item) => item.name == value,
       orElse: () => MediaTransferState.failed,
     );
+
+bool _validSosCoordinates(double? latitude, double? longitude) =>
+    latitude != null &&
+    longitude != null &&
+    latitude.isFinite &&
+    longitude.isFinite &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180;
 
 String _formatTime(DateTime time) =>
     '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';

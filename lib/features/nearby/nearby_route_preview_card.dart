@@ -1,9 +1,11 @@
+// การ์ดแสดงตัวอย่างทิศทางแบบเส้นตรงจากข้อมูลพิกัด โดยไม่สื่อว่าเป็นระบบนำทางตามถนน
 import 'package:flutter/material.dart';
 
 import '../../core/domain/relio_entities.dart';
 import '../../core/location/nearby_map_calculations.dart';
 import '../../data/models/prototype_models.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Nearby Route Preview Card
 class NearbyRoutePreviewCard extends StatelessWidget {
   const NearbyRoutePreviewCard({
     required this.peer,
@@ -48,14 +50,14 @@ class NearbyRoutePreviewCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'ดูเส้นทาง • ${peer.name}',
+                      'ดูตำแหน่ง • ${peer.name}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
                       myLocation == null
-                          ? 'ตำแหน่งเครื่องนี้ยังไม่พร้อม • ${NearbyMapCalculations.freshnessLabel(peer.locationCapturedAt, now)}'
-                          : '${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)} • ${NearbyMapCalculations.freshnessLabel(peer.locationCapturedAt, now)}',
+                          ? 'ตำแหน่งเครื่องนี้ยังไม่พร้อม • ${NearbyMapCalculations.sharedLocationLabel(peer.locationCapturedAt, now)}'
+                          : '${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)} • ${NearbyMapCalculations.sharedLocationLabel(peer.locationCapturedAt, now)}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall,
@@ -69,7 +71,7 @@ class NearbyRoutePreviewCard extends StatelessWidget {
                 ),
               ),
               IconButton(
-                tooltip: 'ปิดดูเส้นทาง',
+                tooltip: 'ปิดดูตำแหน่ง',
                 onPressed: onClose,
                 icon: const Icon(Icons.close_rounded),
               ),

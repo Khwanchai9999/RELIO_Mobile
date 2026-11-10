@@ -1,3 +1,5 @@
+// รวมเงื่อนไข permission และความพร้อมก่อนเริ่ม Nearby radio
+// การตรวจ readiness ไม่ได้เริ่ม discovery หรือเปิด permission เอง
 enum NearbyBlocker {
   platformUnsupported,
   permissionMissing,

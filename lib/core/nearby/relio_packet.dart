@@ -4,7 +4,10 @@ import 'dart:typed_data';
 import 'package:uuid/uuid.dart';
 
 import '../../data/models/prototype_models.dart';
+import 'nearby_reachability.dart';
 
+// นิยามชนิดและโครงสร้างแพ็กเกจ RELIO ที่ transport ส่งต่อโดยไม่ตีความนโยบาย UI
+// การเพิ่มหรือเปลี่ยน field อาจกระทบ compatibility จึงต้องรักษารูปแบบ serialize ให้ตรงสัญญา
 enum RelioPacketType {
   identityChallenge,
   identityProof,
@@ -13,12 +16,14 @@ enum RelioPacketType {
   deviceStatus,
   ack,
   sos,
+  rescueStatus,
   mediaMetadata,
   mediaAck,
   locationMessage,
   readReceipt,
   relayEnvelope,
   relayAck,
+  reachabilitySnapshot,
 }
 
 class RelioPacketException implements Exception {
@@ -30,6 +35,8 @@ class RelioPacketException implements Exception {
 }
 
 class RelioPacket {
+  static const int maxQaRelayRouteHops = 16;
+
   const RelioPacket({
     required this.protocolVersion,
     required this.packetId,
@@ -121,11 +128,13 @@ class RelioPacket {
     double? locationAccuracy,
     DateTime? locationCapturedAt,
     String? deviceModel,
+    String? avatarRevision,
     List<String> capabilities = const [
       'textMessage',
       'deviceStatus',
       'ack',
       'relay-v1',
+      'avatar-v1',
     ],
   }) => RelioPacket(
     protocolVersion: 1,
@@ -149,6 +158,7 @@ class RelioPacket {
         locationAccuracy: locationAccuracy,
         locationCapturedAt: locationCapturedAt,
         deviceModel: deviceModel,
+        avatarRevision: avatarRevision,
       ),
     },
   );
@@ -211,6 +221,16 @@ class RelioPacket {
     String? qaRelayCheckId,
     String? qaRelayDestinationHash,
     bool? qaRelayConnected,
+    bool? qaRelayResolvePrincipal,
+    String? qaRelayPrincipal,
+    List<String>? qaRelayPath,
+    int? qaRelayMaxHops,
+    String? avatarRevision,
+    String? avatarAction,
+    String? avatarTransferId,
+    String? avatarPayloadId,
+    int? avatarByteSize,
+    String? avatarSha256,
   }) => RelioPacket(
     protocolVersion: 1,
     packetId: const Uuid().v4(),
@@ -227,6 +247,16 @@ class RelioPacket {
       'qaRelayCheckId': ?qaRelayCheckId,
       'qaRelayDestinationHash': ?qaRelayDestinationHash,
       'qaRelayConnected': ?qaRelayConnected,
+      'qaRelayResolvePrincipal': ?qaRelayResolvePrincipal,
+      'qaRelayPrincipal': ?qaRelayPrincipal,
+      'qaRelayPath': ?qaRelayPath,
+      'qaRelayMaxHops': ?qaRelayMaxHops,
+      'avatarRevision': ?avatarRevision,
+      'avatarAction': ?avatarAction,
+      'avatarTransferId': ?avatarTransferId,
+      'avatarPayloadId': ?avatarPayloadId,
+      'avatarByteSize': ?avatarByteSize,
+      'avatarSha256': ?avatarSha256,
       ..._peerMetadataFields(
         batteryLevel: batteryLevel,
         isCharging: isCharging,
@@ -249,6 +279,7 @@ class RelioPacket {
     double? locationAccuracy,
     DateTime? locationCapturedAt,
     String? deviceModel,
+    String? avatarRevision,
   }) => {
     ...?(batteryLevel == null ? null : {'batteryLevel': batteryLevel}),
     ...?(isCharging == null ? null : {'isCharging': isCharging}),
@@ -272,6 +303,7 @@ class RelioPacket {
                 .toIso8601String(),
           }),
     ...?(deviceModel == null ? null : {'deviceModel': deviceModel}),
+    ...?(avatarRevision == null ? null : {'avatarRevision': avatarRevision}),
   };
 
   factory RelioPacket.sos({
@@ -313,6 +345,31 @@ class RelioPacket {
       'createdAt': createdAt.toUtc().toIso8601String(),
       ...?(stateRevision == null ? null : {'stateRevision': stateRevision}),
       'isActive': isActive,
+    },
+  );
+
+  factory RelioPacket.rescueStatus({
+    required String senderDeviceId,
+    required String senderUserId,
+    required String rescueId,
+    required String displayName,
+    required bool rescueActive,
+    required DateTime updatedAt,
+    required int stateRevision,
+  }) => RelioPacket(
+    protocolVersion: 1,
+    packetId: rescueId,
+    type: RelioPacketType.rescueStatus,
+    senderDeviceId: senderDeviceId,
+    senderUserId: senderUserId,
+    createdAt: updatedAt.toUtc(),
+    payload: {
+      'rescueId': rescueId,
+      'deviceId': senderDeviceId,
+      'displayName': displayName,
+      'rescueActive': rescueActive,
+      'updatedAt': updatedAt.toUtc().toIso8601String(),
+      'stateRevision': stateRevision,
     },
   );
 
@@ -563,13 +620,24 @@ class RelioPacket {
 
   void _validatePayload() {
     switch (type) {
+      case RelioPacketType.reachabilitySnapshot:
+        final sequence = payload['sequence'];
+        final routes = payload['routes'];
+        if (sequence is! int ||
+            sequence < 1 ||
+            sequence > 9007199254740991 ||
+            routes is! List ||
+            routes.length > nearbyReachabilityMaxRoutes) {
+          throw const RelioPacketException('Invalid reachability snapshot.');
+        }
       case RelioPacketType.identityChallenge:
         if (protocolVersion != 2) {
           throw const RelioPacketException(
             'Identity handshake requires protocol v2.',
           );
         }
-        // First contact has no stable target ID yet; an empty target means
+        // การติดต่อครั้งแรกยังไม่มี target device ID ที่ยืนยันแล้ว
+        // ค่า target ว่างจึงผูก challenge กับ endpoint ที่ผ่านการยืนยันตัวตนแล้ว        // First contact has no stable target ID yet; an empty target means
         // this challenge is scoped to the already-authenticated endpoint.
         final targetDeviceId = payload['targetDeviceId'];
         if (_payloadString('challengeId').length > 64 ||
@@ -611,12 +679,14 @@ class RelioPacket {
         }
       case RelioPacketType.hello:
         _payloadString('displayName');
-        // v0.2 hello packets did not carry status. Treat that older shape as
+        // hello ของ v0.2 ไม่มีข้อมูล status จึงยังรับรูปแบบเดิมได้
+        // ส่วน handshake ที่สร้างใหม่จะใช้ข้อมูลที่เพิ่มใน v0.3        // v0.2 hello packets did not carry status. Treat that older shape as
         // normal while emitting the richer v0.3 handshake going forward.
         if (payload.containsKey('status')) _statusField();
         if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
         if (payload.containsKey('updatedAt')) _payloadString('updatedAt');
         _validatePeerMetadata();
+        _validateAvatarMetadata(allowTransfer: false);
       case RelioPacketType.textMessage:
         _payloadString('messageId');
         _payloadString('conversationId');
@@ -630,7 +700,11 @@ class RelioPacket {
         if (payload.containsKey('rescueActive')) _payloadBool('rescueActive');
         if (payload.containsKey('qaRelayCheckId') ||
             payload.containsKey('qaRelayDestinationHash') ||
-            payload.containsKey('qaRelayConnected')) {
+            payload.containsKey('qaRelayConnected') ||
+            payload.containsKey('qaRelayResolvePrincipal') ||
+            payload.containsKey('qaRelayPrincipal') ||
+            payload.containsKey('qaRelayPath') ||
+            payload.containsKey('qaRelayMaxHops')) {
           final checkId = _payloadString('qaRelayCheckId');
           final destinationHash = _payloadString('qaRelayDestinationHash');
           if (!RegExp(r'^[0-9a-f-]{36}$').hasMatch(checkId) ||
@@ -638,10 +712,62 @@ class RelioPacket {
             throw const RelioPacketException('Invalid QA relay check.');
           }
           if (payload.containsKey('qaRelayConnected')) {
-            _payloadBool('qaRelayConnected');
+            final connected = _payloadBool('qaRelayConnected');
+            if (payload.containsKey('qaRelayResolvePrincipal') ||
+                (payload.containsKey('qaRelayPrincipal') &&
+                    (!connected ||
+                        payload['qaRelayPrincipal'] is! String ||
+                        !validPrincipal(
+                          payload['qaRelayPrincipal'] as String,
+                        )))) {
+              throw const RelioPacketException(
+                'Invalid QA relay principal response.',
+              );
+            }
+            if (payload.containsKey('qaRelayPath') ||
+                payload.containsKey('qaRelayMaxHops')) {
+              throw const RelioPacketException(
+                'QA relay response cannot carry a route request path.',
+              );
+            }
+          } else {
+            if (payload.containsKey('qaRelayPrincipal')) {
+              throw const RelioPacketException(
+                'Unexpected QA relay principal.',
+              );
+            }
+            if (payload.containsKey('qaRelayResolvePrincipal')) {
+              _payloadBool('qaRelayResolvePrincipal');
+            }
+            final maxHops = payload['qaRelayMaxHops'];
+            final rawPath = payload['qaRelayPath'];
+            if (maxHops is! int ||
+                maxHops < 1 ||
+                maxHops > maxQaRelayRouteHops ||
+                rawPath is! List ||
+                rawPath.isEmpty ||
+                rawPath.length > maxQaRelayRouteHops) {
+              throw const RelioPacketException(
+                'Invalid QA relay route request.',
+              );
+            }
+            final path = <String>[];
+            for (final item in rawPath) {
+              if (item is! String || item.isEmpty || item.length > 128) {
+                throw const RelioPacketException(
+                  'Invalid QA relay route path.',
+                );
+              }
+              path.add(item);
+            }
+            if (path.last != senderDeviceId ||
+                path.toSet().length != path.length) {
+              throw const RelioPacketException('Invalid QA relay route path.');
+            }
           }
         }
         _validatePeerMetadata();
+        _validateAvatarMetadata(allowTransfer: true);
       case RelioPacketType.ack:
         _payloadString('packetId');
         if (payload.containsKey('messageId')) _payloadString('messageId');
@@ -665,6 +791,16 @@ class RelioPacket {
         _optionalNumber('accuracyMeters');
         if (payload.containsKey('locationCapturedAt')) {
           _payloadString('locationCapturedAt');
+        }
+      case RelioPacketType.rescueStatus:
+        _payloadString('rescueId');
+        _payloadString('deviceId');
+        _payloadString('displayName');
+        _payloadBool('rescueActive');
+        _payloadString('updatedAt');
+        final revision = payload['stateRevision'];
+        if (revision is! int || revision < 1) {
+          throw const RelioPacketException('Invalid rescue status revision.');
         }
       case RelioPacketType.mediaMetadata:
         _payloadString('messageId');
@@ -735,6 +871,7 @@ class RelioPacket {
           'delivered',
           'expired',
           'blocked',
+          'deferred',
         }.contains(relayStatus)) {
           throw RelioPacketException(
             'Unknown relay acknowledgement: $relayStatus',
@@ -813,6 +950,41 @@ class RelioPacket {
     } else if (payload.containsKey('locationCapturedAt') ||
         payload.containsKey('locationAccuracy')) {
       throw const RelioPacketException('Peer location metadata has no point.');
+    }
+  }
+
+  void _validateAvatarMetadata({required bool allowTransfer}) {
+    final revision = payload['avatarRevision'];
+    if (revision != null &&
+        (revision is! String ||
+            !RegExp(
+              r'^(?:[0-9a-f]{64}|removed-[1-9][0-9]{0,9})$',
+            ).hasMatch(revision))) {
+      throw const RelioPacketException('Invalid avatar revision.');
+    }
+    final action = payload['avatarAction'];
+    if (action == null) return;
+    if (!allowTransfer ||
+        (action != 'request' && action != 'transfer') ||
+        revision is! String ||
+        revision.startsWith('removed-')) {
+      throw const RelioPacketException('Invalid avatar transfer action.');
+    }
+    if (action == 'request') return;
+    final transferId = payload['avatarTransferId'];
+    final payloadId = payload['avatarPayloadId'];
+    final byteSize = payload['avatarByteSize'];
+    final digest = payload['avatarSha256'];
+    if (transferId is! String ||
+        transferId.length > 64 ||
+        payloadId is! String ||
+        payloadId.isEmpty ||
+        payloadId.length > 128 ||
+        byteSize is! int ||
+        byteSize < 1 ||
+        byteSize > 64 * 1024 ||
+        digest != revision) {
+      throw const RelioPacketException('Invalid avatar file metadata.');
     }
   }
 

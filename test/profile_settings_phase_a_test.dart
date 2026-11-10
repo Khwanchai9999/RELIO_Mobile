@@ -53,23 +53,51 @@ void main() {
       ]) {
         expect(find.text(removed), findsNothing);
       }
+      expect(find.text('ธีมแอป'), findsOneWidget);
+      expect(find.text('การตั้งค่า'), findsOneWidget);
+      expect(find.text('ออกจากโหมดออฟไลน์'), findsOneWidget);
+      expect(find.byKey(const ValueKey('guest-login')), findsOneWidget);
     },
   );
 
   testWidgets(
     'Settings keeps working notifications and Privacy without Rescue writer',
     (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(800, 1400);
+      addTearDown(() {
+        tester.view.resetDevicePixelRatio();
+        tester.view.resetPhysicalSize();
+      });
       final dependencies = await pumpScreen(tester, const SettingsScreen());
       expect(find.text('โหมดหน่วยกู้ภัย'), findsNothing);
-      expect(find.text('ธีมแอป'), findsOneWidget);
+      expect(find.text('ธีมแอป'), findsNothing);
       expect(find.text('การแจ้งเตือน'), findsWidgets);
-      expect(find.text('แสดงเนื้อหาข้อความในการแจ้งเตือน'), findsOneWidget);
-      await tester.scrollUntilVisible(
-        find.text('หลักการจัดการข้อมูล'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.ensureVisible(find.text('หลักการจัดการข้อมูล'));
+      expect(find.text('แสดงเนื้อหาข้อความ'), findsOneWidget);
+      for (final internalEntry in [
+        'จำลองอินเทอร์เน็ต Offline (QA)',
+        'ฟีเจอร์ทดลอง (QA)',
+        'ตรวจสอบอัปเดต',
+        'การวินิจฉัยระบบ',
+        'ตรวจสอบ Nearby (สำหรับทีมพัฒนา)',
+        'ตรวจสอบ Cloud (สำหรับทีมพัฒนา)',
+        'ตรวจสอบ Relay (สำหรับทีมพัฒนา)',
+      ]) {
+        expect(find.text(internalEntry), findsNothing);
+      }
+      expect(find.text('ข้อมูลอุปกรณ์และการเชื่อมต่อ'), findsNothing);
+      expect(find.text('สถานะระบบจริง'), findsNothing);
+      expect(find.text('ช่วยค้นหาอุปกรณ์ผ่านรีเลย์'), findsOneWidget);
+      expect(find.text('การจัดการข้อมูล'), findsOneWidget);
+      for (
+        var attempt = 0;
+        attempt < 8 && find.text('หลักการจัดการข้อมูล').evaluate().isEmpty;
+        attempt++
+      ) {
+        await tester.drag(find.byType(ListView).first, const Offset(0, -420));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('หลักการจัดการข้อมูล'), findsOneWidget);
       await tester.pumpAndSettle();
       await tester.tap(find.text('หลักการจัดการข้อมูล'));
       await tester.pumpAndSettle();
@@ -85,6 +113,21 @@ void main() {
           defaultValue: false,
         ),
         isFalse,
+      );
+      for (
+        var attempt = 0;
+        attempt < 8 && find.text('เกี่ยวกับ RELIO').evaluate().isEmpty;
+        attempt++
+      ) {
+        await tester.drag(find.byType(ListView).first, const Offset(0, -420));
+        await tester.pumpAndSettle();
+      }
+      expect(find.text('เกี่ยวกับ RELIO'), findsOneWidget);
+      await tester.tap(find.text('เกี่ยวกับ RELIO'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('สื่อสารและขอความช่วยเหลือผ่านอุปกรณ์ใกล้เคียง แม้ออฟไลน์'),
+        findsOneWidget,
       );
     },
   );

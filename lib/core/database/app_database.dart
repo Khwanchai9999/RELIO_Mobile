@@ -1,9 +1,16 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:drift/native.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 part 'app_database.g.dart';
+part 'conversation_reconciliation.dart';
 
+// ตาราง Drift ในไฟล์นี้กำหนดโครงสร้าง SQLite ที่เป็นแหล่งข้อมูลหลักของแอป
+// Repository เป็นผู้รับผิดชอบอ่านเขียน เพื่อไม่ให้หน้าจอผูกกับตารางโดยตรง
 class Conversations extends Table {
   TextColumn get id => text()();
   TextColumn get participantId => text()();
@@ -120,6 +127,21 @@ class SosEvents extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+// ประวัติเป็น projection แยกตามผู้ใช้ในเครื่อง; การซ่อนแถวนี้ไม่เปลี่ยน SOS ที่กำลังทำงาน
+class SosHistoryEntries extends Table {
+  TextColumn get viewerPrincipalId => text()();
+  TextColumn get eventId => text()();
+  TextColumn get requesterDeviceId => text()();
+  TextColumn get requesterDisplayName => text()();
+  DateTimeColumn get eventStartedAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  BoolColumn get isHidden => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get hiddenAt => dateTime().nullable()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {viewerPrincipalId, eventId};
+}
+
 class AppSettings extends Table {
   TextColumn get key => text()();
   TextColumn get value => text()();
@@ -204,6 +226,22 @@ class EmergencyContacts extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+class EmergencyProfiles extends Table {
+  TextColumn get principalId => text()();
+  TextColumn get medicalConditions => text().nullable()();
+  TextColumn get allergies => text().nullable()();
+  TextColumn get medications => text().nullable()();
+  TextColumn get careNotes => text().nullable()();
+  BoolColumn get shareContactsOnSos =>
+      boolean().withDefault(const Constant(false))();
+  BoolColumn get shareHealthOnSos =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {principalId};
+}
+
 @DriftDatabase(
   tables: [
     Conversations,
@@ -217,6 +255,8 @@ class EmergencyContacts extends Table {
     RelayPackets,
     RelayForwardHistory,
     EmergencyContacts,
+    EmergencyProfiles,
+    SosHistoryEntries,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -227,17 +267,23 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(super.executor);
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 14;
 
   @override
+  // เพิ่มตารางและคอลัมน์ตาม schema เดิม เพื่อเปิดฐานข้อมูลจากรุ่นก่อนโดยไม่สร้างข้อมูลใหม่ทับทั้งหมด
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator migrator) async {
       await migrator.createAll();
       await _createConversationScopes();
       await _createPrincipalSchema();
+      await _createConversationAliases();
       await customStatement(
         'CREATE INDEX IF NOT EXISTS emergency_contacts_principal_idx '
         'ON emergency_contacts(principal_id)',
+      );
+      await customStatement(
+        'CREATE INDEX IF NOT EXISTS sos_history_owner_hidden_idx '
+        'ON sos_history_entries(viewer_principal_id, is_hidden, event_started_at)',
       );
     },
     onUpgrade: (Migrator migrator, int from, int to) async {
@@ -285,7 +331,7 @@ class AppDatabase extends _$AppDatabase {
           nearbyDevices,
           nearbyDevices.publicIdentityFingerprint,
         );
-        // Peers created before key pinning must pair again before auto-reconnect.
+        // peer จากรุ่นก่อน pin key ต้องจับคู่ใหม่ก่อนอนุญาต auto-reconnect        // Peers created before key pinning must pair again before auto-reconnect.
         await customStatement(
           'UPDATE nearby_devices SET auto_reconnect_enabled = 0',
         );
@@ -368,6 +414,32 @@ class AppDatabase extends _$AppDatabase {
           'CREATE INDEX IF NOT EXISTS emergency_contacts_principal_idx '
           'ON emergency_contacts(principal_id)',
         );
+      }
+      if (from < 12) {
+        await migrator.createTable(emergencyProfiles);
+      }
+      if (from < 13) {
+        await migrator.createTable(sosHistoryEntries);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS sos_history_owner_hidden_idx '
+          'ON sos_history_entries(viewer_principal_id, is_hidden, event_started_at)',
+        );
+      }
+      if (from < 14) {
+        const audit = String.fromEnvironment('RELIO_ENV') == 'test';
+        await transaction(() async {
+          if (audit && from == 13) {
+            await _auditConversationUpgrade('before', from);
+          }
+          await _createConversationAliases();
+          await reconcileConversationDuplicates();
+          if ((await customSelect(
+            'PRAGMA foreign_key_check(conversation_aliases)',
+          ).get()).isNotEmpty) {
+            throw StateError('Conversation migration found invalid references');
+          }
+          if (audit) await _auditConversationUpgrade('after', 14);
+        });
       }
     },
     beforeOpen: (OpeningDetails details) async {

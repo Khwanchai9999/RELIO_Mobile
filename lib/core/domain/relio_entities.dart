@@ -70,6 +70,7 @@ class RelioMediaAttachment {
   final int? durationMs;
   final String? errorCode;
   final String? checksumSha256;
+  // แยกสถานะ metadata กับไฟล์บน Cloud เพราะบันทึกข้อมูลอ้างอิงสำเร็จไม่ได้แปลว่าไฟล์ส่งครบแล้ว
   final String cloudMetadataStatus;
   final String cloudFileStatus;
 
@@ -178,6 +179,16 @@ class RelioSosEvent {
   final DateTime updatedAt;
   final bool isActive;
   final DeliveryStatus deliveryStatus;
+}
+
+class RelioSosHistoryEntry {
+  const RelioSosHistoryEntry({
+    required this.event,
+    required this.requesterDisplayName,
+  });
+
+  final RelioSosEvent event;
+  final String requesterDisplayName;
 }
 
 class RelioQueueItem {

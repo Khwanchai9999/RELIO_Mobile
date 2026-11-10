@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:relio_mobile/app/environment.dart';
 import 'package:relio_mobile/core/feature_flags/feature_flags.dart';
 import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/features/nearby/nearby_screen.dart';
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
+import 'package:relio_mobile/core/relay/relay_route_planner.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 import 'package:relio_mobile/features/chat/chat_screens.dart';
@@ -140,13 +142,17 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('เปิดรูปภาพเต็มจอ'));
       await tester.pumpAndSettle();
-      expect(find.byType(InteractiveViewer), findsOneWidget);
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('ไม่สามารถเปิดรูปภาพนี้ได้'), findsOneWidget);
       await deps.authService.signIn(
         email: 'b@viewer.test',
         password: 'password',
       );
       await tester.pumpAndSettle();
-      expect(find.byType(InteractiveViewer), findsNothing);
+      expect(find.text('ไม่สามารถเปิดรูปภาพนี้ได้'), findsNothing);
     },
   );
 
@@ -187,6 +193,12 @@ void main() {
         senderDeviceId: 'local-device',
         text: 'Jane private body',
       );
+      if (RelioBuildInfo.isTest) {
+        await deps.nearbyService.configureTextRouteMode(
+          RelayTextRouteMode.automatic,
+        );
+        expect(deps.nearbyService.qaPlaintextTextEnabled, isTrue);
+      }
       await tester.pumpWidget(
         MaterialApp(
           home: RelioDependencyScope(
@@ -198,6 +210,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Bob private header'), findsOneWidget);
       expect(find.text('Jane private body'), findsOneWidget);
+      expect(
+        find.text('โหมดทดสอบ QA • ข้อความที่ผ่านรีเลย์ไม่เข้ารหัส'),
+        findsNothing,
+      );
       await deps.authService.signIn(email: 'b@ui.test', password: 'password');
       await tester.pumpAndSettle();
       expect(find.text('Bob private header'), findsNothing);

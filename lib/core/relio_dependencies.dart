@@ -5,15 +5,18 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 
 import 'database/app_database.dart';
+import 'domain/relio_entities.dart';
 import '../app/environment.dart';
 import 'connectivity/runtime_connectivity.dart';
 import 'connectivity/qa_internet_simulator.dart';
+import 'emergency/emergency_runtime_service.dart';
 import 'app_update/app_update_service.dart';
 import 'cloud/auth_service.dart';
 import 'cloud/cloud_data_source.dart';
 import 'cloud/cloud_models.dart';
 import 'cloud/supabase_cloud_data_source.dart';
 import 'diagnostics/diagnostics_log_service.dart';
+import 'developer/internal_experience_controller.dart';
 import 'device/battery_info_service.dart';
 import 'location/location_service.dart';
 import 'media/media_storage_service.dart';
@@ -48,6 +51,7 @@ class RelioDependencies {
     ConnectivityStatusService? connectivityStatusService,
     QaInternetSimulator? internetSimulator,
     PermissionService? permissionService,
+    EmergencyRuntimeService? emergencyRuntimeService,
     bool? androidPlatformOverride,
     Duration connectionAttemptTimeout = const Duration(seconds: 35),
     Duration incomingApprovalTimeout = const Duration(seconds: 90),
@@ -67,6 +71,8 @@ class RelioDependencies {
                    compatibility: BluetoothClassicTransport(),
                  )) {
     this.internetSimulator = internetSimulator ?? QaInternetSimulator();
+    this.emergencyRuntimeService =
+        emergencyRuntimeService ?? AndroidEmergencyRuntimeService();
     connectivityStatus =
         connectivityStatusService ??
         ConnectivityStatusService(internetSimulator: this.internetSimulator);
@@ -95,10 +101,26 @@ class RelioDependencies {
       state,
     ) {
       _ownerScopeChanges.add(state);
+      final identity = this.cloudDataSource.currentIdentity;
+      final guestIdentity = _isGuestCloudIdentity(identity);
+      if (state == AuthState.authenticated &&
+          _guestModeExited &&
+          !guestIdentity) {
+        unawaited(_clearGuestExitHold());
+      }
+      if (state == AuthState.authenticated &&
+          _guestModeSelected &&
+          !guestIdentity) {
+        _guestModeSelected = false;
+        unawaited(
+          repositories.settings.setValue('selected_user_mode', 'account'),
+        );
+      }
       if (state == AuthState.guest &&
           this.internetSimulator.internetAvailable &&
           _authInitialized &&
-          _offlineAuthenticatedUserId != null) {
+          _offlineAuthenticatedUserId != null &&
+          !_authRestoreTransientFailure) {
         unawaited(_clearOfflineAuthenticatedPrincipal());
       }
     });
@@ -109,6 +131,10 @@ class RelioDependencies {
       ownerUserIdProvider: _activeOwnerUserId,
       ownerScopeChanges: _ownerScopeChanges.stream,
     );
+    internalExperience = InternalExperienceController(
+      repositories.settings,
+      onDemoEnabled: repositories.seedPrototypeData,
+    );
     this.featureFlags =
         featureFlags ?? createFeatureFlagController(repositories.settings);
     repositories.profiles.cloud = this.cloudDataSource;
@@ -116,6 +142,7 @@ class RelioDependencies {
       this.cloudDataSource,
       rebind: repositories.profiles.refresh,
       onAuthenticated: _rememberOfflineAuthenticatedPrincipal,
+      onRestored: _restoreAuthenticatedPrincipal,
       onSignOut: _clearOfflineAuthenticatedPrincipal,
     );
     identity = RelioDeviceIdentityRepository(
@@ -139,13 +166,31 @@ class RelioDependencies {
       messages: repositories.messages,
       conversations: repositories.conversations,
       sos: repositories.sos,
-      connectedPeers: () => nearbyService.connectedPeers,
+      connectedPeers: () => nearbyService.authenticatedConnectedPeers,
       receiptPeers: () => nearbyService.authenticatedConnectedPeers,
       deviceIdForEndpoint: (endpointId) =>
           nearbyService.deviceIdForEndpoint(endpointId),
+      nextHopHasRoute: (nextHop, destination, maxHops) =>
+          nearbyService.checkQaRelayRoute(
+            middleDeviceId: nextHop,
+            destinationDeviceId: destination,
+            maxHops: maxHops,
+          ),
       diagnostics: diagnostics,
-      forwardingAllowed: () => !RelioBuildInfo.isTest || _nearbyForeground,
+      forwardingAllowed: () =>
+          !RelioBuildInfo.isTest ||
+          _nearbyForeground ||
+          _backgroundRelayEnabled,
+      relayParticipationAllowed: getRelayParticipationConsent,
+      secureRelayEnabled: () => false,
+      qaPlaintextTextAllowed: () => nearbyService.qaPlaintextTextEnabled,
       qaTextForwardingPaused: () => qaTextForwardingPaused,
+      verifyRelayedOrigin: (envelope, packet) =>
+          nearbyService.verifyRelayedOrigin(envelope, packet),
+      receiveRelayedSos: (endpointId, packet) =>
+          nearbyService.receiveRelayedSos(endpointId, packet),
+      receiveRelayedRescue: (endpointId, packet) =>
+          nearbyService.receiveRelayedRescue(endpointId, packet),
     );
     nearbyService = NearbyService(
       transport: this.transport,
@@ -153,16 +198,20 @@ class RelioDependencies {
       conversations: repositories.conversations,
       identity: identity,
       nearbyDevices: repositories.nearbyDevices,
-      currentUserIdProvider: () => this.cloudDataSource.currentIdentity?.userId,
+      currentUserIdProvider: _activeOwnerUserId,
       sos: repositories.sos,
       settings: repositories.settings,
       attachments: repositories.attachments,
       mediaStorage: mediaStorageService,
+      profileAvatar: this.profileAvatarRepository,
       localNotifications: localNotificationService,
       relayEngine: relayEngine,
+      reachabilityRelayAllowed: getRelayParticipationConsent,
+      backgroundRelayAllowed: () => _backgroundRelayEnabled,
       diagnostics: diagnostics,
       readRuntimeSnapshot: connectivityStatus.readRuntimeSnapshot,
       batteryInfo: this.batteryInfoService,
+      locationService: this.locationService,
       connectionAttemptTimeout: connectionAttemptTimeout,
       incomingApprovalTimeout: incomingApprovalTimeout,
       hardNegotiationTimeout: hardNegotiationTimeout,
@@ -175,6 +224,8 @@ class RelioDependencies {
       localNotifications: localNotificationService,
       diagnostics: diagnostics,
       internetSimulator: this.internetSimulator,
+      isGuestBackupSession: () => isGuestCloudBackupSession,
+      privateBackupEnabled: automaticPrivateBackupEnabled,
       isConversationActive: (conversationId) =>
           nearbyService.isConversationVisible(conversationId),
     );
@@ -194,10 +245,12 @@ class RelioDependencies {
   late final DiagnosticsLogService diagnostics;
   late final BatteryInfoService? batteryInfoService;
   late final RelioRepositories repositories;
+  late final InternalExperienceController internalExperience;
   late final FeatureFlagController featureFlags;
   late final RelioDeviceIdentityRepository identity;
   late final ProfileAvatarRepository profileAvatarRepository;
   late final PermissionService permissionService;
+  late final EmergencyRuntimeService emergencyRuntimeService;
   late final LocationService locationService;
   late final MediaStorageService mediaStorageService;
   late final LocalNotificationSink localNotificationService;
@@ -219,10 +272,14 @@ class RelioDependencies {
   final StreamController<void> _localAuthChanges =
       StreamController<void>.broadcast(sync: true);
   late final StreamSubscription<AuthState> _cloudAuthSubscription;
+  StreamSubscription<RelioSosEvent?>? _localSosLocationSubscription;
   String? _offlineAuthenticatedUserId;
   Future<void>? _onlineAuthResume;
   Future<bool>? _nearbySyncOperation;
   bool _nearbyForeground = true;
+  bool _emergencyRuntimeActive = false;
+  bool _backgroundRelayEnabled = false;
+  EmergencyMode? _runtimeServiceMode;
   bool _qaTextForwardingPaused = false;
   bool get qaTextForwardingPaused =>
       RelioBuildInfo.isTest && _qaTextForwardingPaused;
@@ -243,6 +300,14 @@ class RelioDependencies {
   bool _backgroundStopDeferred = false;
   bool _nearbyServiceListenerAttached = false;
   bool _disposed = false;
+  bool _guestModeExited = false;
+  bool _guestModeSelected = false;
+  String? _guestCloudUserId;
+  String? _guestCloudPrincipalId;
+  bool _guestCloudBindingValid = false;
+  bool _authRestoreTransientFailure = false;
+  Future<void>? _guestExitRestore;
+  Future<CloudIdentity?>? _guestCloudOperation;
   Timer? _nearbyHealthCheck;
   Timer? _nearbyRetryTimer;
   Timer? _backgroundNegotiationGraceTimer;
@@ -251,26 +316,457 @@ class RelioDependencies {
 
   int get nearbyRetryAttempt => _nearbyRetryBackoff.attempt;
 
+  Future<bool> startEmergencyRuntime(EmergencyMode mode) async {
+    if (mode == EmergencyMode.nearbyRelay) {
+      return setBackgroundRelayEnabled(true);
+    }
+    try {
+      final started = await emergencyRuntimeService.start(mode);
+      _emergencyRuntimeActive = started;
+      _runtimeServiceMode = started ? mode : null;
+      if (started && !_nearbyForeground) {
+        await startNearbySessionIfPermitted();
+      }
+      return started;
+    } on Object {
+      _emergencyRuntimeActive = false;
+      return false;
+    }
+  }
+
+  Future<void> stopEmergencyRuntime() async {
+    try {
+      await emergencyRuntimeService.stop(mode: _runtimeServiceMode);
+    } on Object {
+      // ความล้มเหลวของ native service ไม่ควรทำให้การปิด SOS/Rescue ค้าง
+    }
+    _emergencyRuntimeActive = false;
+    _runtimeServiceMode = null;
+    final deviceId = await identity.getDeviceId();
+    final activeSos = await repositories.sos.readActive(
+      ownerDeviceId: deviceId,
+    );
+    final rescueEnabled = await repositories.settings.getBool(
+      'rescue_mode',
+      defaultValue: false,
+    );
+    final nextMode = activeSos != null
+        ? EmergencyMode.sos
+        : rescueEnabled
+        ? EmergencyMode.rescue
+        : _backgroundRelayEnabled
+        ? EmergencyMode.nearbyRelay
+        : null;
+    if (nextMode != null) {
+      try {
+        _emergencyRuntimeActive = await emergencyRuntimeService.start(nextMode);
+        _runtimeServiceMode = _emergencyRuntimeActive ? nextMode : null;
+      } on Object {
+        _emergencyRuntimeActive = false;
+      }
+    }
+    if (!_nearbyForeground) {
+      if (_emergencyRuntimeActive) {
+        await startNearbySessionIfPermitted();
+      } else {
+        await nearbyService.stopSession(
+          reason: 'emergency_runtime_stopped_in_background',
+          caller: 'RelioDependencies.stopEmergencyRuntime',
+        );
+      }
+    }
+  }
+
+  bool get backgroundRelayEnabled => _backgroundRelayEnabled;
+
+  Future<String> _relayConsentSettingKey() async {
+    final deviceId = await identity.getDeviceId();
+    final profile = await identity.profiles.current();
+    return 'relay_consent_v1:$deviceId:${profile.principalId}';
+  }
+
+  Future<bool> getRelayParticipationConsent() async => repositories.settings
+      .getBool(await _relayConsentSettingKey(), defaultValue: false);
+
+  Future<void> setRelayParticipationConsent(bool allowed) async {
+    await repositories.settings.setBool(
+      await _relayConsentSettingKey(),
+      allowed,
+    );
+    nearbyService.refreshReachabilityConsent();
+    if (allowed) await relayEngine.forwardPending();
+  }
+
+  Future<bool> setBackgroundRelayEnabled(bool enabled) async {
+    if (!_isAndroid || useMockTransport) return false;
+    if (enabled) {
+      _backgroundRelayEnabled = true;
+      await repositories.settings.setBool('background_relay_enabled', true);
+      if (_runtimeServiceMode == EmergencyMode.sos ||
+          _runtimeServiceMode == EmergencyMode.rescue) {
+        await startNearbySessionIfPermitted(force: true);
+        return true;
+      }
+      try {
+        final started = await emergencyRuntimeService.start(
+          EmergencyMode.nearbyRelay,
+        );
+        if (!started) {
+          _backgroundRelayEnabled = false;
+          await repositories.settings.setBool(
+            'background_relay_enabled',
+            false,
+          );
+          return false;
+        }
+        _backgroundRelayEnabled = true;
+        _emergencyRuntimeActive = true;
+        _runtimeServiceMode = EmergencyMode.nearbyRelay;
+        await startNearbySessionIfPermitted(force: true);
+        return true;
+      } on Object {
+        _backgroundRelayEnabled = false;
+        await repositories.settings.setBool('background_relay_enabled', false);
+        return false;
+      }
+    }
+    _backgroundRelayEnabled = false;
+    await repositories.settings.setBool('background_relay_enabled', false);
+    if (_runtimeServiceMode == EmergencyMode.nearbyRelay) {
+      try {
+        await emergencyRuntimeService.stop(mode: EmergencyMode.nearbyRelay);
+      } on Object {
+        // เก็บ preference เป็นปิดไว้ แล้วให้ session reconciliation จัดการต่อ
+      }
+      _runtimeServiceMode = null;
+      _emergencyRuntimeActive = await emergencyRuntimeService.isRunning();
+    }
+    if (!_nearbyForeground && !_emergencyRuntimeActive) {
+      await nearbyService.stopSession(
+        reason: 'background_relay_disabled',
+        caller: 'RelioDependencies.setBackgroundRelayEnabled',
+      );
+    }
+    return true;
+  }
+
+  Future<void> _restoreEmergencyRuntimeFromLocalState() async {
+    if (!_isAndroid ||
+        (useMockTransport &&
+            emergencyRuntimeService is AndroidEmergencyRuntimeService)) {
+      return;
+    }
+    try {
+      _backgroundRelayEnabled = await repositories.settings.getBool(
+        'background_relay_enabled',
+        defaultValue: false,
+      );
+      final deviceId = await identity.getDeviceId();
+      final activeSos = await repositories.sos.readActive(
+        ownerDeviceId: deviceId,
+      );
+      final rescueEnabled = await repositories.settings.getBool(
+        'rescue_mode',
+        defaultValue: false,
+      );
+      final mode = activeSos != null
+          ? EmergencyMode.sos
+          : rescueEnabled
+          ? EmergencyMode.rescue
+          : null;
+      if (mode == null) {
+        if (_backgroundRelayEnabled) {
+          _emergencyRuntimeActive = await emergencyRuntimeService.isRunning(
+            mode: EmergencyMode.nearbyRelay,
+          );
+          if (!_emergencyRuntimeActive) {
+            _emergencyRuntimeActive = await emergencyRuntimeService.start(
+              EmergencyMode.nearbyRelay,
+            );
+          }
+          _runtimeServiceMode = _emergencyRuntimeActive
+              ? EmergencyMode.nearbyRelay
+              : null;
+        } else if (await emergencyRuntimeService.isRunning()) {
+          await emergencyRuntimeService.stop();
+        }
+        return;
+      }
+
+      // SQLite เป็นแหล่งจริงของ SOS/Rescue; การ restore นี้เริ่ม runtime เท่านั้น
+      // ไม่ส่ง SOS ซ้ำหรือสร้างเหตุการณ์ฉุกเฉินใหม่
+      await startEmergencyRuntime(mode);
+    } on Object catch (error) {
+      diagnostics.record(
+        'emergency',
+        'startup_runtime_restore_failed',
+        fields: {'errorType': error.runtimeType.toString()},
+      );
+    }
+  }
+
   bool get authInitialized => _authInitialized;
   bool get hasAuthenticatedPrincipal =>
-      cloudDataSource.currentIdentity != null ||
+      (cloudDataSource.currentIdentity != null &&
+          !_isGuestCloudIdentity(cloudDataSource.currentIdentity)) ||
       _offlineAuthenticatedUserId != null;
+  bool get isGuestApplicationMode => _guestModeSelected && !_guestModeExited;
+  bool get isGuestCloudSession =>
+      _isGuestCloudIdentity(cloudDataSource.currentIdentity);
+  bool get isGuestCloudBackupSession =>
+      _guestModeSelected &&
+      !_guestModeExited &&
+      _guestCloudBindingValid &&
+      cloudDataSource.currentIdentity?.userId == _guestCloudUserId;
+  bool get hasSelectedUserSession =>
+      hasAuthenticatedPrincipal || (_guestModeSelected && !_guestModeExited);
   bool get hasOfflineAuthenticatedPrincipal =>
       _offlineAuthenticatedUserId != null &&
       cloudDataSource.currentIdentity == null;
   Stream<void> get localAuthChanges => _localAuthChanges.stream;
 
-  String? _activeOwnerUserId() =>
-      cloudDataSource.currentIdentity?.userId ?? _offlineAuthenticatedUserId;
+  Future<void> _restoreGuestExitHold() => _guestExitRestore ??= () async {
+    _guestModeExited = await repositories.settings.getBool(
+      'guest_mode_exited',
+      defaultValue: false,
+    );
+    final selectedMode = await repositories.settings.getValue(
+      'selected_user_mode',
+    );
+    _guestModeSelected = selectedMode == 'guest' && !_guestModeExited;
+    _guestCloudUserId = await repositories.settings.getValue(
+      RelioSettingsRepository.guestCloudUserIdKey,
+    );
+    _guestCloudPrincipalId = await repositories.settings.getValue(
+      RelioSettingsRepository.guestCloudPrincipalIdKey,
+    );
+    final guestPrincipal = await repositories.profiles.guestPrincipal();
+    _guestCloudBindingValid =
+        _guestCloudUserId?.isNotEmpty == true &&
+        _guestCloudPrincipalId == guestPrincipal;
+  }();
+
+  bool _isGuestCloudIdentity(CloudIdentity? identity) =>
+      identity != null &&
+      (identity.isAnonymous ||
+          (_guestModeSelected &&
+              !_guestModeExited &&
+              _guestCloudBindingValid &&
+              identity.userId == _guestCloudUserId));
+
+  String? _activeOwnerUserId() {
+    final cloudIdentity = cloudDataSource.currentIdentity;
+    if (_isGuestCloudIdentity(cloudIdentity)) return null;
+    return cloudIdentity?.userId ?? _offlineAuthenticatedUserId;
+  }
+
+  Future<void> _restoreAuthenticatedPrincipal(String userId) async {
+    await _restoreGuestExitHold();
+    if (_guestModeSelected &&
+        _guestCloudBindingValid &&
+        userId == _guestCloudUserId) {
+      return;
+    }
+    await _rememberOfflineAuthenticatedPrincipal(userId);
+  }
+
+  // เคารพค่าที่บันทึกไว้ก่อนเสมอ หากยังไม่มีค่าจึงใช้ Guest ปิดและ Member เปิดเป็นค่าเริ่มต้น
+  Future<bool> automaticPrivateBackupEnabled({required bool guestMode}) async {
+    final stored = await repositories.settings.getNullableBool(
+      RelioSettingsRepository.automaticPrivateBackupKey,
+    );
+    return stored ?? !guestMode;
+  }
+
+  Future<CloudIdentity?> ensureGuestCloudIdentity({
+    bool forEmailUpgrade = false,
+  }) {
+    final active = _guestCloudOperation;
+    if (active != null) return active;
+    final operation = _ensureGuestCloudIdentity(
+      forEmailUpgrade: forEmailUpgrade,
+    );
+    _guestCloudOperation = operation;
+    return operation.whenComplete(() {
+      if (identical(_guestCloudOperation, operation)) {
+        _guestCloudOperation = null;
+      }
+    });
+  }
+
+  Future<CloudIdentity?> _ensureGuestCloudIdentity({
+    required bool forEmailUpgrade,
+  }) async {
+    await _restoreGuestExitHold();
+    if (!_guestModeSelected || _guestModeExited) return null;
+    if (!forEmailUpgrade &&
+        !await automaticPrivateBackupEnabled(guestMode: true)) {
+      return null;
+    }
+    if (!internetSimulator.internetAvailable ||
+        !cloudDataSource.configuration.isConfigured) {
+      return null;
+    }
+
+    await cloudDataSource.initialize();
+    final guestPrincipal = await repositories.profiles.guestPrincipal();
+    final savedUserId = await repositories.settings.getValue(
+      RelioSettingsRepository.guestCloudUserIdKey,
+    );
+    final savedPrincipalId = await repositories.settings.getValue(
+      RelioSettingsRepository.guestCloudPrincipalIdKey,
+    );
+    if ((savedUserId == null) != (savedPrincipalId == null) ||
+        (savedPrincipalId != null && savedPrincipalId != guestPrincipal)) {
+      throw const CloudException(
+        'ข้อมูลผูกบัญชี Guest ไม่ตรงกับเครื่องนี้ จึงหยุด Cloud ไว้เพื่อรักษาข้อมูล',
+        code: 'guestBindingMismatch',
+      );
+    }
+
+    var identity = cloudDataSource.currentIdentity;
+    if (identity == null) {
+      if (savedUserId != null) {
+        throw const CloudException(
+          'เซสชัน Guest บน Cloud หายไป ข้อมูลสำรองเดิมยังคงอยู่แต่สร้างบัญชีใหม่แทนไม่ได้',
+          code: 'guestSessionLost',
+        );
+      }
+      identity = await authService.signInAnonymously();
+    } else if (identity.isAnonymous && savedUserId == null) {
+      throw const CloudException(
+        'พบ Cloud Guest session ที่ยังไม่ผูกกับข้อมูล Guest ในเครื่อง จึงไม่เชื่อมข้อมูลโดยคาดเดา',
+        code: 'guestBindingMissing',
+      );
+    }
+    if (identity.isAnonymous == false &&
+        !(savedUserId == identity.userId &&
+            savedPrincipalId == guestPrincipal)) {
+      return null;
+    }
+    final bound = await repositories.settings.bindGuestCloudIdentity(
+      guestUserId: identity.userId,
+      guestPrincipalId: guestPrincipal,
+    );
+    if (!bound) {
+      throw const CloudException(
+        'บัญชี Cloud นี้ผูกกับข้อมูล Guest ชุดอื่น จึงไม่เริ่มซิงก์',
+        code: 'guestBindingMismatch',
+      );
+    }
+    _guestCloudUserId = identity.userId;
+    _guestCloudPrincipalId = guestPrincipal;
+    _guestCloudBindingValid = true;
+    _ownerScopeChanges.add(null);
+    _localAuthChanges.add(null);
+    return identity;
+  }
+
+  Future<void> _maybeStartGuestCloudBackup() async {
+    if (!_authInitialized ||
+        _disposed ||
+        !_guestModeSelected ||
+        _guestModeExited ||
+        !internetSimulator.internetAvailable ||
+        !await automaticPrivateBackupEnabled(guestMode: true)) {
+      return;
+    }
+    try {
+      final runtime = await connectivityStatus.readRuntimeSnapshot().timeout(
+        const Duration(seconds: 2),
+      );
+      if (runtime.hasInternetRoute == false ||
+          runtime.internetValidated == false) {
+        return;
+      }
+      await ensureGuestCloudIdentity();
+      if (cloudDataSource.currentIdentity?.isAnonymous == true ||
+          (_guestCloudBindingValid &&
+              cloudDataSource.currentIdentity?.userId == _guestCloudUserId)) {
+        unawaited(syncEngine.run());
+      }
+    } on Object catch (error) {
+      final code = error is CloudException ? error.code : 'guest_auth_failed';
+      diagnostics.record(
+        'cloud',
+        'guest_backup_auth_blocked',
+        fields: {'reason': code},
+      );
+    }
+  }
+
+  Future<void> _clearGuestExitHold() async {
+    _guestModeExited = false;
+    await repositories.settings.setBool('guest_mode_exited', false);
+  }
+
+  Future<bool> exitGuestMode() async {
+    if (hasAuthenticatedPrincipal) return false;
+    await _restoreGuestExitHold();
+    final activeOperation = _nearbySyncOperation;
+    if (activeOperation != null) await activeOperation;
+    if (nearbyService.hasActiveConnectionAttempts ||
+        nearbyService.connectedPeers.isNotEmpty) {
+      return false;
+    }
+
+    _guestModeExited = true;
+    _guestModeSelected = false;
+    try {
+      await repositories.settings.setValue('selected_user_mode', 'welcome');
+      await repositories.settings.setBool('guest_mode_exited', true);
+      await nearbyService.stopSession(
+        reason: 'guest_mode_exit',
+        caller: 'RelioDependencies.exitGuestMode',
+      );
+      // ถ้ามี peer เข้ามาระหว่างหยุด discovery ให้ยกเลิกการออกและรักษา session ไว้
+      if (nearbyService.hasActiveConnectionAttempts ||
+          nearbyService.connectedPeers.isNotEmpty) {
+        _guestModeSelected = true;
+        await repositories.settings.setValue('selected_user_mode', 'guest');
+        await _clearGuestExitHold();
+        return false;
+      }
+      _localAuthChanges.add(null);
+      return true;
+    } on Object {
+      _guestModeSelected = true;
+      await repositories.settings.setValue('selected_user_mode', 'guest');
+      await _clearGuestExitHold();
+      rethrow;
+    }
+  }
+
+  Future<void> resumeGuestMode() async {
+    if (hasAuthenticatedPrincipal) return;
+    await _restoreGuestExitHold();
+    await repositories.settings.setValue('selected_user_mode', 'guest');
+    _guestModeSelected = true;
+    final wasExited = _guestModeExited;
+    if (wasExited) await _clearGuestExitHold();
+    _localAuthChanges.add(null);
+    if (wasExited && _nearbyForeground) {
+      await startNearbySessionIfPermitted(force: true);
+    }
+    if (_authInitialized) unawaited(_maybeStartGuestCloudBackup());
+  }
 
   Future<void> _rememberOfflineAuthenticatedPrincipal(String userId) async {
     final previousOwner = _activeOwnerUserId();
-    await repositories.settings.setValue(
-      'offline_authenticated_principal',
-      userId,
-    );
+    await database.transaction(() async {
+      await repositories.settings.setValue(
+        'offline_authenticated_principal',
+        userId,
+      );
+      await repositories.settings.setValue('selected_user_mode', 'account');
+    });
     _offlineAuthenticatedUserId = userId;
-    if (previousOwner == userId) return;
+    _guestModeSelected = false;
+    if (previousOwner == userId) {
+      _ownerScopeChanges.add(userId);
+      _localAuthChanges.add(null);
+      return;
+    }
     _ownerScopeChanges.add(userId);
     _localAuthChanges.add(null);
   }
@@ -283,13 +779,36 @@ class RelioDependencies {
       await repositories.settings.remove('offline_authenticated_principal');
       return;
     }
+    if (_guestModeSelected && !_guestModeExited) {
+      _offlineAuthenticatedUserId = null;
+      _ownerScopeChanges.add(null);
+      _localAuthChanges.add(null);
+      return;
+    }
     _offlineAuthenticatedUserId = principal;
     _ownerScopeChanges.add(principal);
     _localAuthChanges.add(null);
   }
 
   Future<void> _clearOfflineAuthenticatedPrincipal() async {
+    if (_guestModeSelected && !_guestModeExited) {
+      _offlineAuthenticatedUserId = null;
+      _ownerScopeChanges.add(null);
+      _localAuthChanges.add(null);
+      return;
+    }
+    final selectedMode = await repositories.settings.getValue(
+      'selected_user_mode',
+    );
+    final hadAuthenticatedMode =
+        _offlineAuthenticatedUserId != null ||
+        cloudDataSource.currentIdentity != null ||
+        selectedMode == 'account';
     await repositories.settings.remove('offline_authenticated_principal');
+    if (hadAuthenticatedMode) {
+      await repositories.settings.setValue('selected_user_mode', 'welcome');
+      _guestModeSelected = false;
+    }
     if (_offlineAuthenticatedUserId == null) return;
     _offlineAuthenticatedUserId = null;
     if (cloudDataSource.currentIdentity != null) return;
@@ -322,10 +841,33 @@ class RelioDependencies {
       final restored = await authService.restoreSession();
       if (restored == null) await _clearOfflineAuthenticatedPrincipal();
       if (restored != null) unawaited(syncEngine.run());
-    } on Object {
-      // Keep local owner context while Cloud validation cannot reach the server.
+      if (_guestModeSelected) await _maybeStartGuestCloudBackup();
+    } on Object catch (error) {
+      if (_isTerminalAuthRestoreFailure(error)) {
+        await _clearOfflineAuthenticatedPrincipal();
+      } else if (_isTransientAuthRestoreFailure(error)) {
+        await _restoreOfflineAuthenticatedPrincipal();
+        _authRestoreTransientFailure = true;
+      }
     }
   }
+
+  bool _isTransientAuthRestoreFailure(Object error) =>
+      error is TimeoutException ||
+      error is SocketException ||
+      (error is CloudException &&
+          const {
+            'offline',
+            'network',
+            'timeout',
+            'server',
+            'rateLimit',
+            'initialization',
+          }.contains(error.code));
+
+  bool _isTerminalAuthRestoreFailure(Object error) =>
+      error is CloudException &&
+      const {'sessionExpired', 'auth', 'unauthenticated'}.contains(error.code);
 
   Future<void> initializeAuth() => _authInitialization ??= _initializeAuth();
 
@@ -349,6 +891,7 @@ class RelioDependencies {
 
   Future<void> _initializeAuth() async {
     try {
+      await _restoreGuestExitHold();
       await featureFlags.initialize();
       await _restoreInternetSimulator();
       final runtime = await connectivityStatus.readRuntimeSnapshot().timeout(
@@ -365,11 +908,20 @@ class RelioDependencies {
       await cloudDataSource.initialize();
       final restored = await authService.restoreSession();
       if (restored == null) await _clearOfflineAuthenticatedPrincipal();
+      _authRestoreTransientFailure = false;
       unawaited(syncPushRegistration());
-    } on Object {
-      // Cloud เป็น optional; เมื่อกู้ session ไม่ได้ ให้ startup ไปหน้า Welcome
+    } on Object catch (error) {
+      if (_isTransientAuthRestoreFailure(error)) {
+        _authRestoreTransientFailure = true;
+        await _restoreOfflineAuthenticatedPrincipal();
+      } else if (_isTerminalAuthRestoreFailure(error)) {
+        await _clearOfflineAuthenticatedPrincipal();
+      }
     } finally {
       _authInitialized = true;
+      if (_guestModeSelected && internetSimulator.internetAvailable) {
+        unawaited(_maybeStartGuestCloudBackup());
+      }
     }
   }
 
@@ -382,6 +934,7 @@ class RelioDependencies {
   Future<bool> syncPushRegistration() async {
     if (!RelioBuildInfo.isTest ||
         cloudDataSource.currentIdentity == null ||
+        isGuestCloudSession ||
         !cloudDataSource.configuration.isConfigured ||
         !await repositories.settings.getBool(
           'notifications_enabled',
@@ -404,7 +957,9 @@ class RelioDependencies {
   }
 
   Future<bool> removePushRegistration() async {
-    if (!RelioBuildInfo.isTest || cloudDataSource.currentIdentity == null) {
+    if (!RelioBuildInfo.isTest ||
+        cloudDataSource.currentIdentity == null ||
+        isGuestCloudSession) {
       return false;
     }
     try {
@@ -417,8 +972,10 @@ class RelioDependencies {
     }
   }
 
-  Future<bool> startNearbySessionIfPermitted({bool force = false}) {
-    if (_disposed || !nearbyService.initialized) return Future.value(false);
+  Future<bool> startNearbySessionIfPermitted({bool force = false}) async {
+    if (_disposed || !nearbyService.initialized) return false;
+    await _restoreGuestExitHold();
+    if (_guestModeExited && !hasAuthenticatedPrincipal) return false;
     final active = _nearbySyncOperation;
     if (active != null) return active;
     final operation = _syncNearbySession(force: force);
@@ -431,6 +988,19 @@ class RelioDependencies {
   }
 
   Future<bool> setNearbyForeground(bool foreground) {
+    if (foreground) {
+      unawaited(
+        emergencyRuntimeService
+            .isRunning()
+            .then((running) {
+              _emergencyRuntimeActive = running;
+              if (running) unawaited(startNearbySessionIfPermitted());
+            })
+            .catchError((Object _) {
+              _emergencyRuntimeActive = false;
+            }),
+      );
+    }
     final changed = _nearbyForeground != foreground;
     if (changed && foreground) _nearbyRestart = true;
     _nearbyForeground = foreground;
@@ -444,6 +1014,11 @@ class RelioDependencies {
           'nearbyConnected': nearbyService.connectedPeers.isNotEmpty,
         },
       );
+      if (foreground) {
+        unawaited(
+          nearbyService.locationCoordinator?.onPermissionOrReadinessChanged(),
+        );
+      }
     }
     if (changed && nearbyService.hasActiveConnectionAttempts) {
       diagnostics.record(
@@ -500,15 +1075,17 @@ class RelioDependencies {
     if (nearbyService.hasActiveConnectionAttempts) {
       final mustDefer =
           !ready ||
-          !_nearbyForeground ||
+          (!_nearbyForeground && !_emergencyRuntimeActive) ||
           !nearbyService.isAdvertising ||
           !nearbyService.isDiscovering ||
           (_nearbyRestart && !(_nearbyForeground && ready));
       if (mustDefer) {
         if (!_nearbySessionSyncDeferred) {
           diagnostics.record(
-            !ready || !_nearbyForeground ? 'lifecycle' : 'nearby',
-            !ready || !_nearbyForeground
+            !ready || (!_nearbyForeground && !_emergencyRuntimeActive)
+                ? 'lifecycle'
+                : 'nearby',
+            !ready || (!_nearbyForeground && !_emergencyRuntimeActive)
                 ? 'session_stop_deferred_active_connection'
                 : 'session_restart_deferred_active_connection',
             operation: 'RelioDependencies._syncNearbySession',
@@ -517,6 +1094,7 @@ class RelioDependencies {
                   nearbyService.activeConnectionAttempts,
               'ready': ready,
               'foreground': _nearbyForeground,
+              'emergencyRuntimeActive': _emergencyRuntimeActive,
               'advertisingActive': nearbyService.isAdvertising,
               'discoveryActive': nearbyService.isDiscovering,
               'appLifecycleState': nearbyService.appLifecycleState,
@@ -535,7 +1113,7 @@ class RelioDependencies {
       }
     }
     _nearbySessionSyncDeferred = false;
-    if (!ready || !_nearbyForeground) {
+    if (!ready || (!_nearbyForeground && !_emergencyRuntimeActive)) {
       if (_nearbyRetryTimer?.isActive == true) {
         diagnostics.record(
           'nearby',
@@ -555,6 +1133,13 @@ class RelioDependencies {
         caller: 'RelioDependencies._syncNearbySession',
       );
       return false;
+    }
+    if (!_nearbyForeground &&
+        _emergencyRuntimeActive &&
+        nearbyService.isAdvertising &&
+        nearbyService.isDiscovering) {
+      _nearbyRestart = false;
+      return true;
     }
     if (readinessChanged && readiness.ready) {
       if (_nearbyRetryTimer?.isActive == true) {
@@ -611,7 +1196,7 @@ class RelioDependencies {
       );
       _nearbyRetryTimer?.cancel();
       _nearbyRetryTimer = Timer(delay, () {
-        if (!_disposed && _nearbyForeground) {
+        if (!_disposed && (_nearbyForeground || _emergencyRuntimeActive)) {
           diagnostics.record(
             'nearby',
             'retry_started',
@@ -642,25 +1227,30 @@ class RelioDependencies {
 
   Future<void> _initialize() async {
     try {
+      await internalExperience.initialize();
       await featureFlags.initialize();
       await _restoreInternetSimulator();
+      await _restoreGuestExitHold();
       unawaited(diagnostics.initialize());
+      if (RelioBuildInfo.isTest && _isAndroid && !useMockTransport) {
+        unawaited(_recordDuplicateConversationMetadata());
+      }
       if (RelioBuildInfo.isTest) {
         _qaTextForwardingPaused = await repositories.settings.getBool(
           'qa_text_forwarding_paused',
           defaultValue: false,
         );
       }
-      if (_isAndroid && !useMockTransport) {
-        _readinessSubscription = connectivityStatus.changes.listen((_) {
+      _readinessSubscription = connectivityStatus.changes.listen((_) {
+        if (_isAndroid && !useMockTransport) {
           unawaited(startNearbySessionIfPermitted());
-          unawaited(syncEngine.run());
-        });
-      }
+        }
+        unawaited(_resumeOnlineAuth());
+        unawaited(syncEngine.run());
+      });
       unawaited(connectivityStatus.initialize());
       await identity.getDeviceId();
       await identity.getDisplayName();
-      await repositories.seedPrototypeData();
     } finally {
       final seedReady = _localSeedReady;
       if (seedReady != null && !seedReady.isCompleted) seedReady.complete();
@@ -668,11 +1258,15 @@ class RelioDependencies {
     await nearbyService.initialize();
     nearbyService.addListener(_onNearbyServiceChanged);
     _nearbyServiceListenerAttached = true;
+    await _watchLocalSosForLocationCadence();
+    await _restoreEmergencyRuntimeFromLocalState();
     if (_isAndroid && !useMockTransport) {
       await startNearbySessionIfPermitted();
       // ตรวจซ้ำเฉพาะ foreground เพื่อจับสิทธิ์/GMS ที่ไม่ส่ง radio broadcast
       _nearbyHealthCheck = Timer.periodic(const Duration(seconds: 60), (_) {
-        if (_nearbyForeground) unawaited(startNearbySessionIfPermitted());
+        if (_nearbyForeground || _emergencyRuntimeActive) {
+          unawaited(startNearbySessionIfPermitted());
+        }
       });
     }
     await initializeAuth();
@@ -684,6 +1278,66 @@ class RelioDependencies {
     // QA update checks use the official tester flow. The service throttles
     // automatic checks and never runs in DEV or PROD.
     unawaited(appUpdateService.checkForUpdate());
+  }
+
+  Future<void> _recordDuplicateConversationMetadata() async {
+    try {
+      final rows = await database.customSelect('''
+        SELECT c.id AS cid, c.display_name AS name,
+          c.participant_id AS device, cp.local_principal AS local,
+          cp.remote_principal AS remote, cp.remote_device_id AS remote_device,
+          cp.state AS principal_state, cs.owner_user_id AS scope,
+          (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id)
+            AS message_count
+        FROM conversations c
+        LEFT JOIN conversation_principals cp ON cp.conversation_id=c.id
+        LEFT JOIN conversation_scopes cs ON cs.conversation_id=c.id
+        WHERE c.display_name IN (
+          SELECT display_name FROM conversations
+          GROUP BY display_name HAVING COUNT(*)>1
+        )
+        ORDER BY c.display_name, c.created_at LIMIT 30
+      ''').get();
+      String alias(Object? value) => value is String && value.isNotEmpty
+          ? DiagnosticsLogService.peerAlias(value)
+          : 'none';
+      diagnostics.record(
+        'identity',
+        'duplicate_conversation_audit',
+        fields: {'rowCount': rows.length},
+      );
+      for (final row in rows) {
+        final data = row.data;
+        diagnostics.record(
+          'identity',
+          'duplicate_conversation_metadata',
+          fields: {
+            'nameAlias': alias(data['name']),
+            'conversationAlias': alias(data['cid']),
+            'deviceAlias': alias(data['device']),
+            'localAlias': alias(data['local']),
+            'remoteAlias': alias(data['remote']),
+            'remoteDeviceAlias': alias(data['remote_device']),
+            'scopeAlias': alias(data['scope']),
+            'principalState': data['principal_state'] ?? 'none',
+            'messageCount': data['message_count'] ?? 0,
+          },
+        );
+      }
+    } on Object {
+      diagnostics.record('identity', 'duplicate_conversation_audit_failed');
+    }
+  }
+
+  Future<void> _watchLocalSosForLocationCadence() async {
+    final deviceId = await identity.getDeviceId();
+    final active = await repositories.sos.readActive(ownerDeviceId: deviceId);
+    await nearbyService.setLocalSosActive(active != null);
+    _localSosLocationSubscription = repositories.sos
+        .watchActive(ownerDeviceId: deviceId)
+        .listen((event) {
+          unawaited(nearbyService.setLocalSosActive(event != null));
+        });
   }
 
   void _onNearbyServiceChanged() {
@@ -708,6 +1362,7 @@ class RelioDependencies {
       nearbyService.removeListener(_onNearbyServiceChanged);
     }
     await _readinessSubscription?.cancel();
+    await _localSosLocationSubscription?.cancel();
     await _nearbySyncOperation;
     await connectivityStatus.dispose();
     internetSimulator.dispose();
@@ -719,6 +1374,7 @@ class RelioDependencies {
     await _ownerScopeChanges.close();
     await _localAuthChanges.close();
     featureFlags.dispose();
+    internalExperience.dispose();
     repositories.profiles.dispose();
     await repositories.ownerContext.dispose();
     await database.close();

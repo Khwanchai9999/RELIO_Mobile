@@ -1,3 +1,4 @@
+// หน้าตั้งรหัสผ่านใหม่หลังยืนยัน recovery state จากระบบยืนยันตัวตน
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +7,8 @@ import '../../core/relio_dependencies.dart';
 import 'auth_screens.dart' show AuthScaffold;
 import 'register_validation.dart';
 
+// เปลี่ยนรหัสผ่านได้เมื่อ AuthService ยืนยัน recovery session แล้วเท่านั้น
+// การเปิด route โดยไม่มี credential ที่ผ่านการตรวจไม่สร้างสิทธิ์แก้บัญชี
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
 
@@ -13,6 +16,7 @@ class ResetPasswordScreen extends StatefulWidget {
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Reset Password Screen State)
 class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   final _form = GlobalKey<FormState>();
   final _password = TextEditingController();

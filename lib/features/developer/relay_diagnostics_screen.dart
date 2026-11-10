@@ -1,3 +1,4 @@
+// เครื่องมือ QA สำหรับตรวจเส้นทาง relay และสถานะ envelope โดยคงขอบเขตการส่งต่อที่ระบบกำหนด
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +11,7 @@ import '../../core/relio_dependencies.dart';
 import '../../core/relay/relay_route_planner.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Relay Diagnostics Screen
 class RelayDiagnosticsScreen extends StatefulWidget {
   const RelayDiagnosticsScreen({super.key});
 
@@ -17,13 +19,14 @@ class RelayDiagnosticsScreen extends StatefulWidget {
   State<RelayDiagnosticsScreen> createState() => _RelayDiagnosticsScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Relay Diagnostics Screen State)
 class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
   late RelioDependencies _dependencies;
   Future<int>? _packetCount;
   Future<List<_RelayRecipient>>? _recipients;
   String? _selectedConversationId;
   String? _selectedMiddleId;
-  RelayTextRouteMode _routeMode = RelayTextRouteMode.automatic;
+  RelayTextRouteMode _routeMode = RelayTextRouteMode.directOnly;
   RelayRoutePlan? _checkedPlan;
   String? _readyRoute;
   String _routeStatus = 'เลือกเครื่องกลางและปลายทาง';
@@ -231,7 +234,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
             color: Theme.of(context).colorScheme.primaryContainer,
             child: const ListTile(
               leading: Icon(Icons.route_outlined),
-              title: Text('Bounded store-and-forward'),
+              title: Text('Relay รับฝากและส่งต่อแบบจำกัดขอบเขต'),
               subtitle: Text(
                 'ไม่แสดงข้อความ พิกัด หรือ payload ของ relay ใน diagnostics ปกติ',
               ),
@@ -242,7 +245,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
             future: _packetCount,
             builder: (context, snapshot) => RelioSettingTile(
               icon: Icons.inventory_2_outlined,
-              title: 'Persisted relay packets',
+              title: 'ซอง Relay ที่บันทึกในเครื่อง',
               subtitle: snapshot.data?.toString() ?? 'กำลังโหลด...',
             ),
           ),
@@ -269,11 +272,38 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                       },
               ),
             ),
-          _buildRelayLog(),
+          if (RelioBuildInfo.isTest)
+            ValueListenableBuilder<List<Map<String, Object?>>>(
+              valueListenable: _dependencies.diagnostics.qaRelayEvents,
+              builder: (context, entries, _) => Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'เหตุการณ์ล่าสุดในเครื่องนี้',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (entries.isEmpty) const Text('ยังไม่มีหลักฐานการส่ง'),
+                      for (final entry in entries.take(3))
+                        Text(_relayEventThai(entry)),
+                      const Text(
+                        'แสดงหลักฐานของเครื่องนี้เท่านั้น ยังยืนยันเส้นทางครบสามเครื่องไม่ได้',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ExpansionTile(
+            title: const Text('รายละเอียดเพิ่มเติม'),
+            children: [_buildRelayLog()],
+          ),
           const SizedBox(height: 12),
           RelioSettingTile(
             icon: Icons.sync_outlined,
-            title: 'Forward pending packets',
+            title: 'ส่งต่อซองที่ค้างส่ง',
             subtitle: 'ส่งต่อผ่าน peer ที่ผ่าน hello และมี relay-v1 เท่านั้น',
             onTap: () async {
               await _dependencies.relayEngine.forwardPending();
@@ -284,7 +314,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
           OutlinedButton.icon(
             onPressed: _refresh,
             icon: const Icon(Icons.refresh),
-            label: const Text('Refresh'),
+            label: const Text('รีเฟรช'),
           ),
         ],
       ),
@@ -370,7 +400,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'โหมดการส่ง',
+                      'โหมดส่งข้อความ QA • รีเลย์ไม่เข้ารหัส',
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     RadioGroup<RelayTextRouteMode>(
@@ -395,10 +425,10 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                         children: [
                           _RouteModeOption(
                             mode: RelayTextRouteMode.automatic,
-                            title: 'เส้นทางอัตโนมัติ — แนะนำ',
+                            title: 'QA: รีเลย์ข้อความอัตโนมัติ (ไม่เข้ารหัส)',
                             subtitle:
-                                'ส่งตรงก่อน หากส่งตรงไม่ได้จะใช้เครื่องกลางที่พร้อม\n'
-                                'รองรับขณะเปิดแอปและ Nearby ทำงานอยู่',
+                                'เปิดเฉพาะเมื่อใช้ข้อมูลทดสอบ ระบบส่งตรงก่อน '
+                                'แล้วจึงใช้เครื่องกลางที่เปิดโหมด QA และอนุญาตให้ช่วยรีเลย์',
                           ),
                           _RouteModeOption(
                             mode: RelayTextRouteMode.directOnly,
@@ -407,7 +437,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                           ),
                           _RouteModeOption(
                             mode: RelayTextRouteMode.qaForcedRelay,
-                            title: 'QA: บังคับผ่านเครื่องกลาง',
+                            title: 'QA: บังคับผ่านเครื่องกลาง (ไม่เข้ารหัส)',
                             subtitle:
                                 'เลือกเครื่องกลางเองเพื่อทดสอบ แม้มีลิงก์ตรง',
                           ),
@@ -549,7 +579,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
                 if (groups.isEmpty) const Text('ยังไม่มีเหตุการณ์ส่งข้อมูล'),
                 for (final group in groups.entries.toList().reversed)
                   ExpansionTile(
-                    initiallyExpanded: group.key == groups.keys.last,
+                    initiallyExpanded: false,
                     title: Text('ข้อมูล #${group.key}'),
                     subtitle: Text(_relayEventThai(group.value.last)),
                     children: [
@@ -620,6 +650,7 @@ class _RelayDiagnosticsScreenState extends State<RelayDiagnosticsScreen> {
       };
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Relay Recipient)
 class _RelayRecipient {
   const _RelayRecipient({
     required this.conversation,
@@ -630,6 +661,7 @@ class _RelayRecipient {
   final String principalId;
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Route Mode Option)
 class _RouteModeOption extends StatelessWidget {
   const _RouteModeOption({
     required this.mode,

@@ -1,12 +1,17 @@
+// แผงรายละเอียด peer และการกระทำที่ผู้ใช้เลือกได้ เช่น สนทนาหรือจัดการความไว้ใจ
 import 'package:flutter/material.dart';
 
 import '../../core/domain/relio_entities.dart';
+import '../../core/nearby/nearby_service.dart';
+import '../../core/presentation/live_route_presentation.dart';
 import '../../core/location/nearby_map_calculations.dart';
+import '../../core/location/nearby_location_quality.dart';
 import '../../data/models/prototype_models.dart';
 
 Future<void> showNearbyPeerDetailSheet({
   required BuildContext context,
   required RelioDevice device,
+  required NearbyService nearby,
   required LocationData? myLocation,
   required VoidCallback onChat,
   required VoidCallback onNavigate,
@@ -30,6 +35,7 @@ Future<void> showNearbyPeerDetailSheet({
       snapSizes: const [0.66, 0.96],
       builder: (context, scrollController) => _PeerDetailSheet(
         device: device,
+        nearby: nearby,
         myLocation: myLocation,
         scrollController: scrollController,
         onChat: () {
@@ -47,9 +53,11 @@ Future<void> showNearbyPeerDetailSheet({
   ),
 );
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Peer Detail Sheet)
 class _PeerDetailSheet extends StatelessWidget {
   const _PeerDetailSheet({
     required this.device,
+    required this.nearby,
     required this.myLocation,
     required this.scrollController,
     required this.onChat,
@@ -59,6 +67,7 @@ class _PeerDetailSheet extends StatelessWidget {
   });
 
   final RelioDevice device;
+  final NearbyService nearby;
   final LocationData? myLocation;
   final ScrollController scrollController;
   final VoidCallback onChat;
@@ -85,15 +94,6 @@ class _PeerDetailSheet extends StatelessWidget {
       device.locationLatitude,
       device.locationLongitude,
     );
-    final staleLocation =
-        hasLocation &&
-        NearbyMapCalculations.freshness(
-              device.locationCapturedAt ??
-                  DateTime.fromMillisecondsSinceEpoch(0),
-              now,
-            ) !=
-            LocationFreshness.fresh;
-
     return Material(
       color: Theme.of(context).colorScheme.surface,
       elevation: 12,
@@ -135,10 +135,11 @@ class _PeerDetailSheet extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.circle, color: device.status.color),
             title: Text('สถานะ ${device.status.label}'),
-            subtitle: Text(
-              device.isConnected
-                  ? 'เชื่อมต่อ Nearby'
-                  : 'ไม่ได้เชื่อมต่อ Nearby',
+            subtitle: AnimatedBuilder(
+              animation: nearby,
+              builder: (context, _) => Text(
+                liveRoutePresentationFor(nearby, device.id).nearbySubtitle,
+              ),
             ),
           ),
           if (showBattery)
@@ -154,18 +155,15 @@ class _PeerDetailSheet extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.location_on_outlined),
-            title: Text(hasLocation ? 'ตำแหน่ง peer' : 'ยังไม่มีตำแหน่ง peer'),
+            title: Text(
+              hasLocation ? 'ตำแหน่งที่แชร์ล่าสุด' : 'ยังไม่มีตำแหน่งที่แชร์',
+            ),
             subtitle: Text(
               hasLocation
-                  ? '${NearbyMapCalculations.freshnessLabel(device.locationCapturedAt, now)} • ${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)}'
-                  : 'peer ต้องแชร์ตำแหน่งด้วยตนเองก่อน',
+                  ? '${NearbyMapCalculations.sharedLocationLabel(device.locationCapturedAt, now)} • ${NearbyLocationQuality.accuracyLabel(device.locationAccuracyMeters)} • ${NearbyMapCalculations.distanceLabel(distance)} • ${NearbyMapCalculations.bearingLabel(bearing)}'
+                  : 'ยังไม่มีข้อมูลตำแหน่งจากอุปกรณ์นี้',
             ),
           ),
-          if (staleLocation)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Text('ตำแหน่งเก่าอาจไม่ตรงกับตำแหน่งปัจจุบัน'),
-            ),
           _PeerDetailActions(
             device: device,
             hasLocation: hasLocation,
@@ -179,6 +177,7 @@ class _PeerDetailSheet extends StatelessWidget {
   }
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Peer Detail Actions)
 class _PeerDetailActions extends StatelessWidget {
   const _PeerDetailActions({
     required this.device,
@@ -206,9 +205,9 @@ class _PeerDetailActions extends StatelessWidget {
         ),
         if (showRoutePreview)
           FilledButton.icon(
-            onPressed: onNavigate,
+            onPressed: hasLocation ? onNavigate : null,
             icon: const Icon(Icons.navigation_rounded),
-            label: const Text('ดูเส้นทาง'),
+            label: const Text('ดูตำแหน่ง'),
             style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
           ),
       ];

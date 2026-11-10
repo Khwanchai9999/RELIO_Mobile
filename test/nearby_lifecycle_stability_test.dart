@@ -247,7 +247,7 @@ void main() {
     expect(visibleNearbyPeers(pair.serviceA), isEmpty);
   });
 
-  test('battery visibility follows fresh verified telemetry', () {
+  test('battery visibility follows the bounded reporting freshness window', () {
     final now = DateTime.utc(2026, 10, 14, 10);
     RelioNearbyDevice peer(DateTime updatedAt) => RelioNearbyDevice(
       deviceId: 'device-b',
@@ -259,7 +259,15 @@ void main() {
     );
     expect(
       isFreshNearbyBattery(
-        peer(now.subtract(const Duration(minutes: 3))),
+        peer(now.subtract(const Duration(minutes: 11, seconds: 59))),
+        connected: true,
+        now: now,
+      ),
+      isTrue,
+    );
+    expect(
+      isFreshNearbyBattery(
+        peer(now.subtract(const Duration(minutes: 12, seconds: 1))),
         connected: true,
         now: now,
       ),
@@ -273,14 +281,14 @@ void main() {
   });
 
   test(
-    'new deviceStatus restores battery visibility after stale telemetry',
+    'new deviceStatus restores battery visibility after expired telemetry',
     () async {
       final battery = FakeBatteryInfoService(
         BatterySnapshot(
           level: 2,
           isCharging: false,
           updatedAt: DateTime.now().toUtc().subtract(
-            const Duration(minutes: 3),
+            const Duration(minutes: 13),
           ),
         ),
       );

@@ -2,6 +2,7 @@ package com.pkmnapps.nearby_connections;
 
 import android.app.Activity;
 import android.content.pm.PackageInfo;
+import android.content.Context;
 import android.util.Log;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
@@ -35,6 +36,7 @@ import java.io.OutputStream;
 import java.io.FileOutputStream;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -51,6 +53,7 @@ import io.flutter.plugin.common.EventChannel;
  */
 public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin, ActivityAware {
 	private Activity activity;
+	private Context applicationContext;
 	private static final String SERVICE_ID = "com.pkmnapps.nearby_connections";
 	private static MethodChannel channel;
 	private static EventChannel eventChannel;
@@ -59,6 +62,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 	private final Map<String, String> connectionTraceIds = new ConcurrentHashMap<>();
 	private final Map<String, String> connectionOperations = new ConcurrentHashMap<>();
 	private final Map<String, Boolean> incomingConnections = new ConcurrentHashMap<>();
+	private final Map<String, String> endpointServiceIds = new ConcurrentHashMap<>();
 	private volatile int advertisingStrategy = 0;
 	private volatile int discoveryStrategy = 0;
 	private NearbyConnectionsPlugin(Activity activity) {
@@ -83,6 +87,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				try {
 					// Copy the file to a new location.
 					Uri uri = Uri.parse(sourceUri);
+					if (activity == null) throw new IOException("Activity unavailable for file payload");
 					InputStream in = activity.getContentResolver().openInputStream(uri);
 					copyStream(in, new FileOutputStream(new File(destinationFilepath)));
 					// Delete the original file.
@@ -96,12 +101,13 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				break;
 			case "stopAdvertising":
 				Log.d("nearby_connections", "stopAdvertising");
-				Nearby.getConnectionsClient(activity).stopAdvertising();
+				Nearby.getConnectionsClient(applicationContext).stopAdvertising();
 				result.success(null);
 				break;
 			case "stopDiscovery":
 				Log.d("nearby_connections", "stopDiscovery");
-				Nearby.getConnectionsClient(activity).stopDiscovery();
+				Nearby.getConnectionsClient(applicationContext).stopDiscovery();
+				endpointServiceIds.clear();
 				result.success(null);
 				break;
 			case "startAdvertising": {
@@ -113,22 +119,32 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				assert userNickName != null;
 				if (serviceId == null || serviceId == "")
 					serviceId = SERVICE_ID;
+				final String diagnosticServiceId = serviceId;
+				final int diagnosticStrategy = strategy;
 
 				AdvertisingOptions advertisingOptions = new AdvertisingOptions.Builder()
 						.setStrategy(getStrategy(strategy)).build();
+				qaDiagnostic("nearby_advertising_start_requested", null, mapOf(
+						"serviceId", serviceId, "strategy", strategyName(strategy), "role", "advertiser"));
 
-				Nearby.getConnectionsClient(activity).startAdvertising(userNickName, serviceId,
+				Nearby.getConnectionsClient(applicationContext).startAdvertising(userNickName, serviceId,
 								advertConnectionLifecycleCallback, advertisingOptions)
 						.addOnSuccessListener(new OnSuccessListener<Void>() {
 							@Override
 							public void onSuccess(Void aVoid) {
 								Log.d("nearby_connections", "startAdvertising");
+								qaDiagnostic("nearby_advertising_task_succeeded", null, mapOf(
+									"serviceId", diagnosticServiceId, "strategy", strategyName(diagnosticStrategy),
+										"role", "advertiser", "result", true));
 								result.success(true);
 							}
 						}).addOnFailureListener(new OnFailureListener() {
 							@Override
 							public void onFailure(@NonNull Exception e) {
-								result.error("Failure", e.getMessage(), null);
+								Map<String, Object> details = failureDetails("startAdvertising", e);
+								qaDiagnostic("nearby_advertising_task_failed", null, diagnosticFields(
+									details, "serviceId", diagnosticServiceId, "strategy", strategyName(diagnosticStrategy), "role", "advertiser"));
+								result.error("Failure", safeMessage(e), details);
 							}
 						});
 				break;
@@ -142,35 +158,45 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				assert userNickName != null;
 				if (serviceId == null || serviceId == "")
 					serviceId = SERVICE_ID;
+				final String diagnosticServiceId = serviceId;
+				final int diagnosticStrategy = strategy;
 
 				DiscoveryOptions discoveryOptions = new DiscoveryOptions.Builder().setStrategy(getStrategy(strategy))
 						.build();
-				Nearby.getConnectionsClient(activity)
+				qaDiagnostic("nearby_discovery_start_requested", null, mapOf(
+						"serviceId", serviceId, "strategy", strategyName(strategy), "role", "discoverer"));
+				Nearby.getConnectionsClient(applicationContext)
 						.startDiscovery(serviceId, endpointDiscoveryCallback, discoveryOptions)
 						.addOnSuccessListener(new OnSuccessListener<Void>() {
 							@Override
 							public void onSuccess(Void aVoid) {
 								Log.d("nearby_connections", "startDiscovery");
+								qaDiagnostic("nearby_discovery_task_succeeded", null, mapOf(
+									"serviceId", diagnosticServiceId, "strategy", strategyName(diagnosticStrategy),
+										"role", "discoverer", "result", true));
 								result.success(true);
 							}
 						}).addOnFailureListener(new OnFailureListener() {
 							@Override
 							public void onFailure(@NonNull Exception e) {
-								result.error("Failure", e.getMessage(), null);
+								Map<String, Object> details = failureDetails("startDiscovery", e);
+								qaDiagnostic("nearby_discovery_task_failed", null, diagnosticFields(
+									details, "serviceId", diagnosticServiceId, "strategy", strategyName(diagnosticStrategy), "role", "discoverer"));
+								result.error("Failure", safeMessage(e), details);
 							}
 						});
 				break;
 			}
 			case "stopAllEndpoints":
 				Log.d("nearby_connections", "stopAllEndpoints");
-				Nearby.getConnectionsClient(activity).stopAllEndpoints();
+				Nearby.getConnectionsClient(applicationContext).stopAllEndpoints();
 				result.success(null);
 				break;
 			case "disconnectFromEndpoint": {
 				Log.d("nearby_connections", "disconnectFromEndpoint");
 				String endpointId = call.argument("endpointId");
 				assert endpointId != null;
-				Nearby.getConnectionsClient(activity).disconnectFromEndpoint(endpointId);
+				Nearby.getConnectionsClient(applicationContext).disconnectFromEndpoint(endpointId);
 				result.success(null);
 				break;
 			}
@@ -187,7 +213,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 
 				assert userNickName != null;
 				assert endpointId != null;
-				Nearby.getConnectionsClient(activity)
+				Nearby.getConnectionsClient(applicationContext)
 						.requestConnection(userNickName, endpointId, discoverConnectionLifecycleCallback)
 						.addOnSuccessListener(new OnSuccessListener<Void>() {
 							@Override
@@ -216,7 +242,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 						"acceptConnection", null, null);
 
 				assert endpointId != null;
-				Nearby.getConnectionsClient(activity).acceptConnection(endpointId, payloadCallback)
+				Nearby.getConnectionsClient(applicationContext).acceptConnection(endpointId, payloadCallback)
 						.addOnSuccessListener(new OnSuccessListener<Void>() {
 							@Override
 							public void onSuccess(Void aVoid) {
@@ -240,7 +266,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				String endpointId = (String) call.argument("endpointId");
 
 				assert endpointId != null;
-				Nearby.getConnectionsClient(activity).rejectConnection(endpointId)
+				Nearby.getConnectionsClient(applicationContext).rejectConnection(endpointId)
 						.addOnSuccessListener(new OnSuccessListener<Void>() {
 							@Override
 							public void onSuccess(Void aVoid) {
@@ -262,7 +288,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 				assert endpointId != null;
 				assert bytes != null;
 				Payload payload = Payload.fromBytes(bytes);
-				Nearby.getConnectionsClient(activity).sendPayload(endpointId, payload);
+				Nearby.getConnectionsClient(applicationContext).sendPayload(endpointId, payload);
 				Log.d("nearby_connections", "sentPayload");
 				result.success(payload.getId());
 				break;
@@ -278,7 +304,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 					File file = new File(filePath);
 
 					Payload filePayload = Payload.fromFile(file);
-					Nearby.getConnectionsClient(activity).sendPayload(endpointId, filePayload);
+					Nearby.getConnectionsClient(applicationContext).sendPayload(endpointId, filePayload);
 					Log.d("nearby_connections", "sentFilePayload");
 					result.success(filePayload.getId()); // return payload id to dart
 				} catch (FileNotFoundException e) {
@@ -291,7 +317,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 			case "cancelPayload": {
 				String payloadId = (String) call.argument("payloadId");
 				assert payloadId != null;
-				Nearby.getConnectionsClient(activity).cancelPayload(Long.parseLong(payloadId));
+				Nearby.getConnectionsClient(applicationContext).cancelPayload(Long.parseLong(payloadId));
 				Log.d("nearby_connections", "cancelPayload");
 				result.success(null);
 				break;
@@ -307,13 +333,20 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 			Log.d("nearby_connections", "ad.onConnectionInitiated");
 			connectionStartedAt.putIfAbsent(endpointId, SystemClock.elapsedRealtime());
 			incomingConnections.put(endpointId, connectionInfo.isIncomingConnection());
+			String traceId = ensureConnectionTraceId(endpointId);
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
 			args.put("endpointName", connectionInfo.getEndpointName());
 			args.put("authenticationToken", connectionInfo.getAuthenticationToken());
 			args.put("isIncomingConnection", connectionInfo.isIncomingConnection());
+			args.put("connectionTraceId", traceId);
+			args.put("strategy", strategyName(advertisingStrategy));
 
 			args.put("method", "ad.onConnectionInitiated");
+			qaDiagnostic("nearby_connection_initiated", endpointId, mapOf(
+					"callbackSource", "advertiser", "role", connectionInfo.isIncomingConnection() ? "responder" : "initiator",
+					"isIncomingConnection", connectionInfo.isIncomingConnection(), "strategy", strategyName(advertisingStrategy),
+					"connectionTraceId", traceId));
 			sendEvent(args);
 		}
 
@@ -328,9 +361,17 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 			Log.d("nearby_connections", "ad.onDisconnected");
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
+			String traceId = connectionTraceIds.get(endpointId);
+			if (traceId != null) args.put("connectionTraceId", traceId);
+			args.put("strategy", strategyName(advertisingStrategy));
+			args.put("role", "advertiser");
+			qaDiagnostic("nearby_connection_disconnected", endpointId, mapOf(
+					"callbackSource", "advertiser", "role", "advertiser",
+					"strategy", strategyName(advertisingStrategy), "connectionTraceId", traceId));
 
 			args.put("method", "ad.onDisconnected");
 			sendEvent(args);
+			clearConnectionTrace(endpointId);
 		}
 	};
 
@@ -340,13 +381,20 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 			Log.d("nearby_connections", "dis.onConnectionInitiated");
 			connectionStartedAt.putIfAbsent(endpointId, SystemClock.elapsedRealtime());
 			incomingConnections.put(endpointId, connectionInfo.isIncomingConnection());
+			String traceId = ensureConnectionTraceId(endpointId);
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
 			args.put("endpointName", connectionInfo.getEndpointName());
 			args.put("authenticationToken", connectionInfo.getAuthenticationToken());
 			args.put("isIncomingConnection", connectionInfo.isIncomingConnection());
+			args.put("connectionTraceId", traceId);
+			args.put("strategy", strategyName(discoveryStrategy));
 
 			args.put("method", "dis.onConnectionInitiated");
+			qaDiagnostic("nearby_connection_initiated", endpointId, mapOf(
+					"callbackSource", "discoverer", "role", connectionInfo.isIncomingConnection() ? "responder" : "initiator",
+					"isIncomingConnection", connectionInfo.isIncomingConnection(), "strategy", strategyName(discoveryStrategy),
+					"connectionTraceId", traceId));
 			sendEvent(args);
 		}
 
@@ -361,9 +409,17 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 			Log.d("nearby_connections", "dis.onDisconnected");
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
+			String traceId = connectionTraceIds.get(endpointId);
+			if (traceId != null) args.put("connectionTraceId", traceId);
+			args.put("strategy", strategyName(discoveryStrategy));
+			args.put("role", "discoverer");
+			qaDiagnostic("nearby_connection_disconnected", endpointId, mapOf(
+					"callbackSource", "discoverer", "role", "discoverer",
+					"strategy", strategyName(discoveryStrategy), "connectionTraceId", traceId));
 
 			args.put("method","dis.onDisconnected");
 			sendEvent(args);
+			clearConnectionTrace(endpointId);
 		}
 	};
 
@@ -415,6 +471,10 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		public void onEndpointFound(@NonNull String endpointId,
 									@NonNull DiscoveredEndpointInfo discoveredEndpointInfo) {
 			Log.d("nearby_connections", "onEndpointFound");
+			endpointServiceIds.put(endpointId, discoveredEndpointInfo.getServiceId());
+			qaDiagnostic("nearby_endpoint_found", endpointId, mapOf(
+					"serviceId", discoveredEndpointInfo.getServiceId(), "strategy", strategyName(discoveryStrategy),
+					"role", "discoverer"));
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
 			args.put("endpointName", discoveredEndpointInfo.getEndpointName());
@@ -427,6 +487,10 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		@Override
 		public void onEndpointLost(@NonNull String endpointId) {
 			Log.d("nearby_connections", "onEndpointLost");
+			String serviceId = endpointServiceIds.remove(endpointId);
+			qaDiagnostic("nearby_endpoint_lost", endpointId, mapOf(
+					"serviceId", serviceId == null ? "unknown" : serviceId,
+					"strategy", strategyName(discoveryStrategy), "role", "discoverer"));
 			Map<String, Object> args = new HashMap<>();
 			args.put("endpointId", endpointId);
 
@@ -471,6 +535,62 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		incomingConnections.remove(endpointId);
 	}
 
+	private String ensureConnectionTraceId(String endpointId) {
+		String existing = connectionTraceIds.get(endpointId);
+		if (existing != null) return existing;
+		String generated = UUID.randomUUID().toString();
+		String previous = connectionTraceIds.putIfAbsent(endpointId, generated);
+		return previous == null ? generated : previous;
+	}
+
+	private void clearConnectionTrace(String endpointId) {
+		connectionTraceIds.remove(endpointId);
+		connectionOperations.remove(endpointId);
+		connectionStartedAt.remove(endpointId);
+		incomingConnections.remove(endpointId);
+	}
+
+	private void qaDiagnostic(String name, String endpointId, Map<String, Object> fields) {
+		if (applicationContext == null || !"com.relio.relio_mobile.test".equals(applicationContext.getPackageName())) return;
+		Map<String, Object> event = new HashMap<>(fields);
+		event.put("method", "native.diagnostic");
+		event.put("name", name);
+		if (applicationContext != null
+				&& "com.relio.relio_mobile.test".equals(applicationContext.getPackageName())) {
+			event.put("nativeElapsedRealtimeMs", SystemClock.elapsedRealtime());
+		}
+		if (endpointId != null) {
+			event.put("endpointId", endpointId);
+			event.put("endpointAlias", endpointAlias(endpointId));
+			String traceId = connectionTraceIds.get(endpointId);
+			if (traceId != null) event.put("connectionTraceId", traceId);
+		}
+		Log.i("RELIO_NEARBY_QA", name + " " + safeDiagnosticSummary(event));
+		sendEvent(event);
+	}
+
+	private String safeDiagnosticSummary(Map<String, Object> event) {
+		Map<String, Object> safe = new HashMap<>(event);
+		safe.remove("endpointId");
+		safe.remove("method");
+		safe.remove("name");
+		return safe.toString();
+	}
+
+	private Map<String, Object> mapOf(Object... entries) {
+		Map<String, Object> values = new HashMap<>();
+		for (int index = 0; index + 1 < entries.length; index += 2) {
+			values.put(String.valueOf(entries[index]), entries[index + 1]);
+		}
+		return values;
+	}
+
+	private Map<String, Object> diagnosticFields(Map<String, Object> initial, Object... entries) {
+		Map<String, Object> values = new HashMap<>(initial);
+		values.putAll(mapOf(entries));
+		return values;
+	}
+
 	private Map<String, Object> getNearbyDiagnostics() {
 		Map<String, Object> snapshot = new HashMap<>();
 		snapshot.put("androidApi", VERSION.SDK_INT);
@@ -479,7 +599,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		snapshot.put("advertisingStrategy", strategyName(advertisingStrategy));
 		snapshot.put("discoveryStrategy", strategyName(discoveryStrategy));
 		try {
-			PackageInfo info = activity.getPackageManager().getPackageInfo("com.google.android.gms", 0);
+			PackageInfo info = applicationContext.getPackageManager().getPackageInfo("com.google.android.gms", 0);
 			snapshot.put("googlePlayServicesAvailable", true);
 			snapshot.put("googlePlayServicesVersionName", info.versionName == null ? "unknown" : info.versionName);
 			snapshot.put("googlePlayServicesVersionCode", VERSION.SDK_INT >= 28
@@ -501,6 +621,10 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 		Map<String, Object> event = new HashMap<>();
 		event.put("method", "native.diagnostic");
 		event.put("name", name);
+		if (applicationContext != null
+				&& "com.relio.relio_mobile.test".equals(applicationContext.getPackageName())) {
+			event.put("nativeElapsedRealtimeMs", SystemClock.elapsedRealtime());
+		}
 		event.put("operation", operation);
 		event.put("role", Boolean.TRUE.equals(incomingConnections.get(endpointId))
 				? "responder" : "initiator");
@@ -584,6 +708,7 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 
 	@Override
 	public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+		applicationContext = binding.getApplicationContext();
 		channel = new MethodChannel(binding.getBinaryMessenger(), "nearby_connections");
 		channel.setMethodCallHandler(this);
 		eventChannel=new EventChannel(binding.getBinaryMessenger(), "nearby_connections/events");
@@ -611,10 +736,12 @@ public class NearbyConnectionsPlugin implements MethodCallHandler, FlutterPlugin
 
 	@Override
 	public void onDetachedFromActivity() {
+		this.activity = null;
 	}
 
 	@Override
 	public void onDetachedFromActivityForConfigChanges() {
+		this.activity = null;
 	}
 
 	@Override

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:drift/drift.dart' show Variable;
 import '../identity/owner_context.dart';
 
@@ -7,12 +8,15 @@ import '../cloud/cloud_data_source.dart';
 import '../cloud/cloud_models.dart';
 import '../cloud/cloud_storage_policy.dart';
 import '../connectivity/qa_internet_simulator.dart';
+import '../database/app_database.dart';
 import '../domain/relio_entities.dart';
 import '../media/media_storage_service.dart';
 import '../notifications/local_notification_service.dart';
 import '../notifications/notification_preview.dart';
 import '../repositories/local_repositories.dart';
-import '../../data/models/prototype_models.dart' show DeviceStatus, MessageType;
+import '../../data/models/prototype_models.dart'
+    show DeliveryStatus, DeviceStatus, MessageType;
+import '../../data/mock_data.dart';
 import 'sync_types.dart';
 
 abstract interface class SyncClock {
@@ -50,6 +54,7 @@ enum SyncEngineState {
   idle,
   waitingForCloud,
   waitingForOwnership,
+  waitingForBinding,
   running,
   completed,
   error,
@@ -96,6 +101,8 @@ class SyncEngineSnapshot {
   final DateTime? nextRetryAt;
 }
 
+// ประมวลผลคิว Cloud ที่บันทึกใน SQLite พร้อมตรวจ session และ owner ก่อนส่ง
+// งาน offline จะคงอยู่ในเครื่อง ส่วน retry และ pull/merge ทำผ่าน repository ที่กำหนดไว้
 class SyncEngine {
   SyncEngine({
     required this.repositories,
@@ -105,6 +112,8 @@ class SyncEngine {
     this.localNotifications,
     this.diagnostics,
     this.isConversationActive,
+    this.isGuestBackupSession,
+    this.privateBackupEnabled,
     QaInternetSimulator? internetSimulator,
     SyncClock? clock,
     SyncRetryPolicy? retryPolicy,
@@ -120,6 +129,8 @@ class SyncEngine {
   final LocalNotificationSink? localNotifications;
   final DiagnosticsLogService? diagnostics;
   final bool Function(String conversationId)? isConversationActive;
+  final bool Function()? isGuestBackupSession;
+  final Future<bool> Function({required bool guestMode})? privateBackupEnabled;
   final SyncClock clock;
   final SyncRetryPolicy retryPolicy;
   final QaInternetSimulator _internetSimulator;
@@ -135,6 +146,7 @@ class SyncEngine {
   bool _started = false;
   bool _disposed = false;
   bool _runAgainForOwner = false;
+  bool _runAgain = false;
 
   SyncEngineSnapshot get snapshot => _snapshot;
 
@@ -156,16 +168,25 @@ class SyncEngine {
   }
 
   Future<void> run({bool adoptUnownedItems = false}) {
-    if (_runOperation != null) return _runOperation!;
+    final active = _runOperation;
+    if (active != null) {
+      _runAgain = true;
+      return active;
+    }
     final operation = _run(adoptUnownedItems: adoptUnownedItems);
-    _runOperation = operation;
-    return operation.whenComplete(() {
-      _runOperation = null;
-      if (_runAgainForOwner && _started && !_disposed) {
-        _runAgainForOwner = false;
-        scheduleMicrotask(_scheduleRun);
-      }
-    });
+    late final Future<void> drained;
+    drained = operation
+        .whenComplete(() {
+          _runOperation = null;
+        })
+        .then((_) async {
+          final rerun = _runAgain || _runAgainForOwner;
+          _runAgain = false;
+          _runAgainForOwner = false;
+          if (rerun && _started && !_disposed) await run();
+        });
+    _runOperation = drained;
+    return drained;
   }
 
   Future<void> retryFailed(String id) async {
@@ -173,16 +194,242 @@ class SyncEngine {
     await run();
   }
 
+  Future<int> restorePrivateBackup() async {
+    final identity = cloud.currentIdentity;
+    if (!_isCloudReady || identity == null) {
+      throw const CloudException(
+        'กรุณาเข้าสู่ระบบและเชื่อมต่ออินเทอร์เน็ต',
+        code: 'signedOut',
+      );
+    }
+    final epoch = repositories.ownerContext.capture();
+    final guestMode = isGuestBackupSession?.call() ?? false;
+    if (guestMode ? epoch.userId != null : epoch.userId != identity.userId) {
+      throw const CloudException(
+        'บัญชีในเครื่องไม่ตรงกับ Cloud',
+        code: 'permissionDenied',
+      );
+    }
+    String? cursor;
+    final conversations = <String, Map<String, dynamic>>{};
+    do {
+      final page = await cloud.fetchPrivateBackupRecords(
+        recordType: 'conversation',
+        afterSourceId: cursor,
+        limit: 100,
+      );
+      repositories.ownerContext.requireCurrent(epoch);
+      for (final record in page) {
+        conversations[record.sourceId] = record.payload;
+        cursor = record.sourceId;
+      }
+      if (page.length < 100) break;
+    } while (true);
+    for (final entry in conversations.entries) {
+      final payload = entry.value;
+      final peerDeviceId = payload['peerDeviceId'];
+      final displayName = payload['displayName'];
+      if (peerDeviceId is! String ||
+          peerDeviceId.isEmpty ||
+          displayName is! String) {
+        continue;
+      }
+      final remotePrincipal =
+          payload['remotePrincipal'] as String? ??
+          'restored-device:$peerDeviceId';
+      await repositories.conversations.ensureConversation(
+        id: entry.key,
+        participantId: peerDeviceId,
+        displayName: displayName,
+        participantStatus: DeviceStatus.normal,
+        remotePrincipalId: remotePrincipal,
+      );
+      repositories.ownerContext.requireCurrent(epoch);
+    }
+    cursor = null;
+    var restored = 0;
+    do {
+      final page = await cloud.fetchPrivateBackupRecords(
+        recordType: 'message',
+        afterSourceId: cursor,
+        limit: 100,
+      );
+      repositories.ownerContext.requireCurrent(epoch);
+      for (final record in page) {
+        cursor = record.sourceId;
+        final payload = record.payload;
+        final sourceConversation = payload['localConversationId'];
+        final conversationPayload = sourceConversation is String
+            ? conversations[sourceConversation]
+            : null;
+        if (conversationPayload == null) continue;
+        final localConversation = await repositories.conversations
+            .ensureConversation(
+              id: sourceConversation as String,
+              participantId: conversationPayload['peerDeviceId'] as String,
+              displayName:
+                  conversationPayload['displayName'] as String? ??
+                  'อุปกรณ์ RELIO',
+              participantStatus: DeviceStatus.normal,
+              remotePrincipalId:
+                  conversationPayload['remotePrincipal'] as String?,
+            );
+        final typeName = payload['messageType'];
+        final type = MessageType.values
+            .where((value) => value.name == typeName)
+            .firstOrNull;
+        final sender = payload['senderIdentity'];
+        final created = DateTime.tryParse(
+          payload['createdAt'] as String? ?? '',
+        );
+        if (type == null || created == null || sender is! String) continue;
+        String? localPath;
+        final attachmentList = payload['attachments'];
+        if (attachmentList is List && attachmentList.isNotEmpty) {
+          final meta = Map<String, dynamic>.from(attachmentList.first as Map);
+          final attachmentId = meta['id'] as String;
+          final fileName = meta['fileName'] as String;
+          final mimeType = meta['mimeType'] as String;
+          final byteSize = meta['byteSize'] as int;
+          final storagePath = meta['storagePath'] as String;
+          final digest = meta['sha256'] as String?;
+          final existingAttachment = await repositories.attachments.getById(
+            attachmentId,
+          );
+          var existingIsValid = false;
+          if (existingAttachment != null) {
+            if (existingAttachment.messageId !=
+                    (payload['localMessageId'] as String? ?? record.sourceId) ||
+                existingAttachment.byteSize != byteSize ||
+                existingAttachment.mimeType != mimeType) {
+              throw const CloudException(
+                'ไฟล์แนบในเครื่องขัดแย้งกับข้อมูลสำรอง',
+                code: 'invalidLocalData',
+              );
+            }
+            if (await mediaStorage.isManagedFile(
+              existingAttachment.localPath,
+            )) {
+              final validation = await mediaStorage.validateFile(
+                existingAttachment.localPath,
+              );
+              existingIsValid =
+                  validation.mimeType == mimeType &&
+                  validation.byteSize == byteSize &&
+                  (digest == null ||
+                      await mediaStorage.sha256ForFile(
+                            existingAttachment.localPath,
+                          ) ==
+                          digest);
+              if (existingIsValid) localPath = existingAttachment.localPath;
+            }
+          }
+          if (!existingIsValid) {
+            localPath = await cloud.downloadAttachment(
+              storagePath: storagePath,
+              ownerUserId: identity.userId,
+              mediaStorage: mediaStorage,
+              fileName: fileName,
+              mimeType: mimeType,
+              expectedByteSize: byteSize,
+              expectedSha256: digest,
+            );
+          }
+          repositories.ownerContext.requireCurrent(epoch);
+        }
+        final messageId =
+            payload['localMessageId'] as String? ?? record.sourceId;
+        final content = payload['content'] as String? ?? '';
+        final outgoing = payload['isOutgoing'] as bool? ?? false;
+        final delivery = DeliveryStatus.values.firstWhere(
+          (value) => value.name == payload['deliveryStatus'],
+          orElse: () => DeliveryStatus.pending,
+        );
+        final before = await repositories.messages.getMessage(messageId);
+        await repositories.messages.restorePrivateBackupMessage(
+          conversationId: localConversation.id,
+          messageId: messageId,
+          senderId: sender,
+          senderDeviceId: payload['senderDeviceId'] as String? ?? '',
+          messageType: type,
+          content: content,
+          createdAt: created,
+          deliveryStatus: delivery,
+          isOutgoing: outgoing,
+          localFilePath: localPath,
+          readAt: DateTime.tryParse(payload['readAt'] as String? ?? ''),
+        );
+        if (attachmentList is List && attachmentList.isNotEmpty) {
+          final meta = Map<String, dynamic>.from(attachmentList.first as Map);
+          final attachmentId = meta['id'] as String;
+          if (await repositories.attachments.getById(attachmentId) == null &&
+              localPath != null) {
+            await repositories.attachments.createPending(
+              id: attachmentId,
+              conversationId: localConversation.id,
+              messageId: messageId,
+              transferId: meta['transferId'] as String? ?? attachmentId,
+              mediaType: meta['mediaType'] == 'video'
+                  ? MediaType.video
+                  : MediaType.image,
+              fileName: meta['fileName'] as String,
+              mimeType: meta['mimeType'] as String,
+              localPath: localPath,
+              byteSize: meta['byteSize'] as int,
+              remoteFileName: meta['storagePath'] as String,
+              checksumSha256: meta['sha256'] as String?,
+            );
+            await repositories.attachments.markCompleted(
+              attachmentId,
+              localPath: localPath,
+            );
+          } else if (localPath != null) {
+            final prior = await repositories.attachments.getById(attachmentId);
+            if (prior != null && prior.localPath != localPath) {
+              await repositories.messages.updateCloudMediaPath(
+                messageId,
+                localPath,
+              );
+              await repositories.attachments.markCompleted(
+                attachmentId,
+                localPath: localPath,
+              );
+            }
+          }
+        }
+        if (before == null) restored++;
+        repositories.ownerContext.requireCurrent(epoch);
+      }
+      if (page.length < 100) break;
+    } while (true);
+    return restored;
+  }
+
   Future<void> adoptGuestItemsAndRun() async {
     final currentIdentity = cloud.currentIdentity;
+    if ((isGuestBackupSession?.call() ?? false) ||
+        currentIdentity?.isAnonymous == true) {
+      throw const CloudException(
+        'ข้อมูล Guest จะยังอยู่ในเครื่องจนกว่าจะเข้าสู่ระบบบัญชีสมาชิก',
+        code: 'permissionDenied',
+      );
+    }
     if (currentIdentity == null || cloud.authState != AuthState.authenticated) {
       await _setWaitingForCloud();
       return;
     }
-    await repositories.syncQueue.adoptUnowned(currentIdentity.userId);
-    await repositories.conversations.adoptUnowned(currentIdentity.userId);
+    await _adoptGuestItems(currentIdentity.userId);
     await run();
   }
+
+  Future<void> _adoptGuestItems(String userId) => repositories.ownerContext.run(
+    () => repositories.database.transaction(() async {
+      final owner = repositories.ownerContext.capture();
+      await repositories.conversations.adoptUnowned(userId);
+      await repositories.syncQueue.adoptUnowned(userId);
+      repositories.ownerContext.requireCurrent(owner);
+    }),
+  );
 
   Future<CloudConversationBinding> linkConversationToCloud({
     required String localConversationId,
@@ -190,7 +437,10 @@ class SyncEngine {
   }) async {
     final epoch = repositories.ownerContext.capture();
     final owner = cloud.currentIdentity;
-    if (!_isCloudReady || owner == null) {
+    if (!_isCloudReady ||
+        owner == null ||
+        (isGuestBackupSession?.call() ?? false) ||
+        owner.isAnonymous) {
       throw const CloudException(
         'กรุณาเข้าสู่ระบบก่อนเชื่อม Cloud',
         code: 'signedOut',
@@ -229,20 +479,26 @@ class SyncEngine {
   }) async {
     final owner = cloud.currentIdentity;
     if (!_isCloudReady ||
-        owner == null ||
-        await repositories.cloudLinks.get(
-              localConversationId: localConversationId,
-              ownerUserId: owner.userId,
-            ) ==
-            null) {
+        (isGuestBackupSession?.call() ?? false) ||
+        owner == null) {
       return;
     }
     for (final id in messageIds) {
       final message = await repositories.messages.getMessage(id);
+      final sourceId = message?.conversationId;
       if (message == null ||
           message.outgoing ||
           message.readAt == null ||
-          message.conversationId != localConversationId) {
+          sourceId == null ||
+          !await repositories.database.sameLogicalConversation(
+            sourceId,
+            localConversationId,
+          ) ||
+          await repositories.cloudLinks.get(
+                localConversationId: sourceId,
+                ownerUserId: owner.userId,
+              ) ==
+              null) {
         continue;
       }
       await repositories.syncQueue.enqueue(
@@ -268,6 +524,7 @@ class SyncEngine {
     }
   }
 
+  // ตรวจ Cloud session และขอบเขต owner ก่อนประมวลผล โดยยังเคารพการยินยอมสำรองข้อมูล
   Future<void> _runOwned({required bool adoptUnownedItems}) async {
     if (_disposed) return;
     if (!_internetSimulator.internetAvailable || !_isCloudReady) {
@@ -275,9 +532,30 @@ class SyncEngine {
       return;
     }
     final currentIdentity = cloud.currentIdentity!;
+    final guestMode = isGuestBackupSession?.call() ?? false;
+    final owner = repositories.ownerContext.capture();
+    if ((currentIdentity.isAnonymous && !guestMode) ||
+        (guestMode && owner.userId != null) ||
+        (!guestMode && owner.userId != currentIdentity.userId)) {
+      await _emit(state: SyncEngineState.waitingForOwnership);
+      return;
+    }
+    final backupEnabled = await _privateBackupIsEnabled(guestMode: guestMode);
     if (adoptUnownedItems) {
-      await repositories.syncQueue.adoptUnowned(currentIdentity.userId);
-      await repositories.conversations.adoptUnowned(currentIdentity.userId);
+      if (guestMode) {
+        throw const CloudException(
+          'Guest ไม่สามารถนำข้อมูลไปผูกบัญชีโดยอัตโนมัติได้',
+          code: 'permissionDenied',
+        );
+      }
+      await _adoptGuestItems(currentIdentity.userId);
+    }
+
+    if (backupEnabled) {
+      await _enqueuePrivateBackupBackfill(
+        currentIdentity.userId,
+        guestMode: guestMode,
+      );
     }
 
     await _emit(
@@ -287,22 +565,26 @@ class SyncEngine {
     );
     var hadFailure = false;
     var hadOwnershipBlock = false;
-    try {
-      await _importAndPull(currentIdentity.userId);
-      _pullRetryCount = 0;
-      _pullRetryTimer?.cancel();
-      _pullRetryTimer = null;
-    } on OwnerChangedException {
-      rethrow;
-    } on Object catch (error) {
-      hadFailure = true;
-      _schedulePullRetry();
-      final code = error is CloudException ? error.code : 'pull_failed';
-      await _emit(
-        state: SyncEngineState.running,
-        lastFailureAt: clock.now(),
-        lastError: code,
-      );
+    var hadBindingBlock = false;
+    if (!guestMode) {
+      try {
+        await _importAndPull(currentIdentity.userId);
+        _pullRetryCount = 0;
+        _pullRetryTimer?.cancel();
+        _pullRetryTimer = null;
+      } on OwnerChangedException {
+        rethrow;
+      } on Object catch (error) {
+        hadFailure = true;
+        _schedulePullRetry();
+        final code = error is CloudException ? error.code : 'pull_failed';
+        await _emit(
+          state: SyncEngineState.running,
+          lastFailureAt: clock.now(),
+          lastError: code,
+        );
+      }
+      await _reconcileCloudMediaDownloads(currentIdentity.userId);
     }
     while (!_disposed) {
       if (!_isCloudReady ||
@@ -312,6 +594,13 @@ class SyncEngine {
       final candidates = await repositories.syncQueue.listEligible(clock.now());
       var claimedAny = false;
       for (final candidate in candidates) {
+        final operation = SyncOperation.parse(candidate.operation);
+        if (guestMode && operation != SyncOperation.privateBackupUpsert) {
+          continue;
+        }
+        if (operation == SyncOperation.privateBackupUpsert && !backupEnabled) {
+          continue;
+        }
         if (candidate.ownerUserId != currentIdentity.userId) {
           hadOwnershipBlock = true;
           await _recordQueueDecision(
@@ -319,6 +608,21 @@ class SyncEngine {
             currentIdentity.userId,
             selected: false,
             reason: 'owner_mismatch',
+          );
+          continue;
+        }
+        final localPrincipal = await repositories.syncQueue
+            .localPrincipalForItem(candidate.id);
+        final expectedPrincipal = guestMode
+            ? (await repositories.profiles.current()).principalId
+            : 'account:${currentIdentity.userId}';
+        if (localPrincipal != expectedPrincipal) {
+          hadOwnershipBlock = true;
+          await _recordQueueDecision(
+            candidate,
+            currentIdentity.userId,
+            selected: false,
+            reason: 'local_principal_mismatch',
           );
           continue;
         }
@@ -336,14 +640,18 @@ class SyncEngine {
           continue;
         }
         if (!await _dependenciesReady(candidate, currentIdentity.userId)) {
+          final reason = await _dependencySkipReason(
+            candidate,
+            currentIdentity.userId,
+          );
+          if (reason == 'conversation_binding_missing') {
+            hadBindingBlock = true;
+          }
           await _recordQueueDecision(
             candidate,
             currentIdentity.userId,
             selected: false,
-            reason: await _dependencySkipReason(
-              candidate,
-              currentIdentity.userId,
-            ),
+            reason: reason,
           );
           continue;
         }
@@ -406,6 +714,8 @@ class SyncEngine {
     await _refreshSnapshot(
       state: hadOwnershipBlock
           ? SyncEngineState.waitingForOwnership
+          : hadBindingBlock
+          ? SyncEngineState.waitingForBinding
           : hadFailure
           ? SyncEngineState.error
           : SyncEngineState.completed,
@@ -432,7 +742,8 @@ class SyncEngine {
           ownerUserId: currentUserId,
         );
         if (link == null) return false;
-        // Old Guest or other-account conversation rows must not hold up a
+        // แถวบทสนทนาของ Guest หรือบัญชีอื่นต้องไม่ขวางข้อความที่มี owner แยกต่างหาก
+        // เมื่อบัญชีปัจจุบันมี Cloud link ของตนเองแล้ว        // Old Guest or other-account conversation rows must not hold up a
         // separately owned message once this account already has its Cloud link.
         final hasOwnedIncompleteConversationWrite = all.any(
           (queued) =>
@@ -479,7 +790,23 @@ class SyncEngine {
           item.entityId,
           SyncOperation.attachmentMetadataUpsert.value,
         );
+      case SyncOperation.attachmentDownload:
+        final attachment = await repositories.attachments.getById(
+          item.entityId,
+        );
+        if (attachment == null) return true;
+        final parent = await repositories.messages.getMessage(
+          attachment.messageId,
+        );
+        if (parent?.conversationId == null) return false;
+        return await repositories.cloudLinks.get(
+              localConversationId: parent!.conversationId!,
+              ownerUserId: currentUserId,
+            ) !=
+            null;
       case SyncOperation.profileUpsert || SyncOperation.sosUpsert || null:
+        return true;
+      case SyncOperation.privateBackupUpsert:
         return true;
       case SyncOperation.conversationUpsert:
         return await repositories.cloudLinks.get(
@@ -548,7 +875,8 @@ class SyncEngine {
             }
             return null;
           case MessageType.location:
-            // Cloud message rows have no coordinate fields and the pull merge
+            // แถว Cloud message ไม่มีช่องพิกัด และการ merge ข้อความรองรับเฉพาะ text
+            // หากส่งชนิดนี้จะทำให้รายงานสำเร็จทั้งที่ข้อมูลตำแหน่งสูญหาย            // Cloud message rows have no coordinate fields and the pull merge
             // is text-only; syncing this would falsely report a lossy success.
             return 'unsupported_location_cloud_sync';
           case MessageType.system:
@@ -603,11 +931,51 @@ class SyncEngine {
         }
         if (metadataRows.isEmpty) return 'attachment_metadata_missing';
         return null;
+      case SyncOperation.attachmentDownload:
+        final attachment = await repositories.attachments.getById(
+          item.entityId,
+        );
+        if (attachment == null) return 'attachment_missing';
+        final parent = await repositories.messages.getMessage(
+          attachment.messageId,
+        );
+        if (parent == null || parent.conversationId == null) {
+          return 'attachment_message_missing';
+        }
+        if ((parent.type != MessageType.image &&
+                parent.type != MessageType.video) ||
+            attachment.mediaType.name != parent.type.name ||
+            parent.senderId == null ||
+            !CloudStoragePathPolicy.isOwnedBy(
+              attachment.remoteFileName ?? '',
+              parent.senderId!,
+            ) ||
+            attachment.byteSize <= 0 ||
+            attachment.byteSize >
+                mediaStorage.policy.maxFor(attachment.mediaType.name)) {
+          return 'attachment_download_metadata_invalid';
+        }
+        final messageType = attachment.mediaType == MediaType.image
+            ? MessageType.image
+            : MessageType.video;
+        if (!_matchesMediaMime(messageType, attachment.mimeType)) {
+          return 'attachment_download_mime_invalid';
+        }
+        if (await repositories.cloudLinks.get(
+              localConversationId: parent.conversationId!,
+              ownerUserId: item.ownerUserId ?? '',
+            ) ==
+            null) {
+          return 'attachment_conversation_unlinked';
+        }
+        return null;
       case SyncOperation.profileUpsert ||
           SyncOperation.conversationUpsert ||
           SyncOperation.sosUpsert ||
           SyncOperation.readReceiptUpsert ||
           null:
+        return null;
+      case SyncOperation.privateBackupUpsert:
         return null;
     }
   }
@@ -616,6 +984,15 @@ class SyncEngine {
     RelioQueueItem item,
     String currentUserId,
   ) async {
+    if (SyncOperation.parse(item.operation) ==
+            SyncOperation.conversationUpsert &&
+        await repositories.cloudLinks.get(
+              localConversationId: item.entityId,
+              ownerUserId: currentUserId,
+            ) ==
+            null) {
+      return 'conversation_binding_missing';
+    }
     if (SyncOperation.parse(item.operation) == SyncOperation.messageUpsert) {
       final message = await repositories.messages.getMessage(item.entityId);
       if (message == null) return 'message_missing';
@@ -687,6 +1064,15 @@ class SyncEngine {
         : item.ownerUserId == currentUserId
         ? 'current'
         : 'foreign';
+    // lastError มีเฉพาะ error code ที่ SyncEngine สร้างไว้ ไม่บันทึกข้อความ
+    // จาก backend เพื่อกัน content, token หรือข้อมูลส่วนตัวหลุดเข้า diagnostics
+    final failureCode = item.lastError;
+    final safeFailureCode =
+        failureCode != null &&
+            failureCode.length <= 64 &&
+            RegExp(r'^[A-Za-z0-9_.:-]+$').hasMatch(failureCode)
+        ? failureCode
+        : null;
     final now = clock.now();
     log.record(
       'cloud_sync',
@@ -713,6 +1099,8 @@ class SyncEngine {
         'dependencyPresent': dependencyPresent,
         'queueStatus': item.status,
         'ageSeconds': now.difference(item.createdAt).inSeconds,
+        'entityType': item.entityType,
+        'failureCode': ?safeFailureCode,
         if (conversationId != null)
           'conversationKey': conversationId.length <= 8
               ? conversationId
@@ -801,6 +1189,26 @@ class SyncEngine {
             if (inserted && remote.senderId != userId) {
               await _notifyCloudMessage(link, remote);
             }
+          } else if (remote.messageType == 'image' ||
+              remote.messageType == 'video') {
+            final displayName = _cloudMediaDisplayName(remote.content);
+            final inserted = await repositories.messages.mergeCloudMediaMessage(
+              conversationId: link.localConversationId,
+              messageId: remote.id,
+              senderUserId: remote.senderId,
+              senderDeviceId: remote.senderDeviceId,
+              type: remote.messageType == 'image'
+                  ? MessageType.image
+                  : MessageType.video,
+              fileName: displayName,
+              createdAt: remote.createdAt,
+              updatedAt: remote.updatedAt,
+              currentUserId: userId,
+            );
+            repositories.ownerContext.requireCurrent(owner);
+            if (inserted && remote.senderId != userId) {
+              await _notifyCloudMessage(link, remote);
+            }
           }
           final cursor = CloudMessageCursor(
             createdAt: remote.createdAt,
@@ -858,6 +1266,404 @@ class SyncEngine {
         }
         if (receipts.length < 100) break;
       }
+
+      await _pullCloudAttachments(link, userId, owner);
+    }
+  }
+
+  String _cloudMediaDisplayName(String? content) =>
+      content != null && content.isNotEmpty && content.length <= 255
+      ? content
+      : 'ไฟล์สื่อ';
+
+  String _cloudMediaCursorKey(String userId, String conversationId) =>
+      'cloud_media_cursor:$userId:$conversationId';
+
+  CloudAttachmentCursor? _decodeCloudAttachmentCursor(String? value) {
+    if (value == null || value.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(value) as Map<String, dynamic>;
+      final id = decoded['id'] as String?;
+      final createdAt = decoded['createdAt'] as String?;
+      if (id == null ||
+          !RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id) ||
+          createdAt == null) {
+        return null;
+      }
+      return CloudAttachmentCursor(
+        createdAt: DateTime.parse(createdAt),
+        id: id,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<void> _pullCloudAttachments(
+    CloudConversationBinding link,
+    String userId,
+    OwnerSnapshot owner,
+  ) async {
+    final cursorKey = _cloudMediaCursorKey(userId, link.cloudConversationId);
+    var cursor = _decodeCloudAttachmentCursor(
+      await repositories.settings.getValue(cursorKey),
+    );
+    repositories.ownerContext.requireCurrent(owner);
+
+    while (_isCloudReady && cloud.currentIdentity?.userId == userId) {
+      final page = await cloud.fetchConversationAttachmentsPage(
+        conversationId: link.cloudConversationId,
+        cursor: cursor,
+        limit: 100,
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      if (page.attachments.isEmpty) break;
+
+      for (final remoteAttachment in page.attachments) {
+        repositories.ownerContext.requireCurrent(owner);
+        final createdAt = remoteAttachment.createdAt;
+        final storageOwner = remoteAttachment.ownerUserId;
+        if (createdAt == null ||
+            storageOwner == null ||
+            storageOwner.isEmpty ||
+            (remoteAttachment.sha256 != null &&
+                !RegExp(
+                  r'^[0-9a-f]{64}$',
+                ).hasMatch(remoteAttachment.sha256!)) ||
+            remoteAttachment.id.isEmpty ||
+            remoteAttachment.byteSize <= 0 ||
+            remoteAttachment.fileName.isEmpty ||
+            remoteAttachment.fileName.length > 255 ||
+            remoteAttachment.fileName.contains('/') ||
+            remoteAttachment.fileName.contains('\\') ||
+            remoteAttachment.fileName.contains(RegExp(r'[\x00-\x1f\x7f]')) ||
+            !CloudStoragePathPolicy.isOwnedBy(
+              remoteAttachment.storagePath,
+              storageOwner,
+            )) {
+          throw const CloudException(
+            'metadata ไฟล์ Cloud ไม่ถูกต้อง',
+            code: 'invalidLocalData',
+          );
+        }
+        final remoteMessage = await cloud.fetchMessage(
+          remoteAttachment.messageId,
+        );
+        repositories.ownerContext.requireCurrent(owner);
+        if (remoteMessage == null ||
+            remoteMessage.conversationId != link.cloudConversationId ||
+            (remoteMessage.senderId != userId &&
+                remoteMessage.senderId != link.peerUserId) ||
+            remoteAttachment.ownerUserId != remoteMessage.senderId ||
+            remoteAttachment.messageId != remoteMessage.id ||
+            (remoteMessage.messageType != 'image' &&
+                remoteMessage.messageType != 'video') ||
+            remoteAttachment.mediaType != remoteMessage.messageType ||
+            !CloudStoragePathPolicy.isOwnedBy(
+              remoteAttachment.storagePath,
+              remoteMessage.senderId,
+            )) {
+          throw const CloudException(
+            'ไฟล์ Cloud ไม่ตรงกับข้อความและสมาชิกบทสนทนา',
+            code: 'permissionDenied',
+          );
+        }
+        final type = remoteMessage.messageType == 'image'
+            ? MessageType.image
+            : MessageType.video;
+        final displayName = _cloudMediaDisplayName(remoteMessage.content);
+        await repositories.messages.mergeCloudMediaMessage(
+          conversationId: link.localConversationId,
+          messageId: remoteMessage.id,
+          senderUserId: remoteMessage.senderId,
+          senderDeviceId: remoteMessage.senderDeviceId,
+          type: type,
+          fileName: displayName,
+          createdAt: remoteMessage.createdAt,
+          updatedAt: remoteMessage.updatedAt,
+          currentUserId: userId,
+        );
+        repositories.ownerContext.requireCurrent(owner);
+
+        final maxBytes = mediaStorage.policy.maxFor(type.name);
+        if (remoteAttachment.byteSize > maxBytes ||
+            !_matchesMediaMime(type, remoteAttachment.mimeType)) {
+          throw const CloudException(
+            'ชนิดหรือขนาดไฟล์ Cloud ไม่รองรับ',
+            code: 'invalidLocalData',
+          );
+        }
+        var local = await repositories.attachments.getById(remoteAttachment.id);
+        repositories.ownerContext.requireCurrent(owner);
+        if (local == null) {
+          local = await repositories.attachments.createPending(
+            id: remoteAttachment.id,
+            conversationId: link.localConversationId,
+            messageId: remoteMessage.id,
+            transferId: 'cloud:${remoteAttachment.id}',
+            mediaType: type == MessageType.image
+                ? MediaType.image
+                : MediaType.video,
+            fileName: remoteAttachment.fileName,
+            mimeType: remoteAttachment.mimeType,
+            localPath: '',
+            byteSize: remoteAttachment.byteSize,
+            remoteFileName: remoteAttachment.storagePath,
+            checksumSha256: remoteAttachment.sha256,
+          );
+          await repositories.attachments.updateCloudFileStatus(
+            remoteAttachment.id,
+            'downloadPending',
+          );
+        } else if (local.messageId != remoteMessage.id ||
+            local.mediaType.name != remoteAttachment.mediaType ||
+            local.fileName != remoteAttachment.fileName ||
+            local.mimeType != remoteAttachment.mimeType ||
+            local.byteSize != remoteAttachment.byteSize ||
+            (local.checksumSha256 != null &&
+                remoteAttachment.sha256 != null &&
+                local.checksumSha256 != remoteAttachment.sha256) ||
+            local.remoteFileName != remoteAttachment.storagePath) {
+          throw const CloudException(
+            'รหัสไฟล์ Cloud ซ้ำกับข้อมูลสื่อคนละรายการ',
+            code: 'invalidLocalData',
+          );
+        }
+        if (remoteAttachment.sha256 != null && local.checksumSha256 == null) {
+          await repositories.attachments.updateChecksumSha256(
+            remoteAttachment.id,
+            remoteAttachment.sha256!,
+          );
+          local = (await repositories.attachments.getById(
+            remoteAttachment.id,
+          ))!;
+        }
+        repositories.ownerContext.requireCurrent(owner);
+
+        final hasLocalFile = await mediaStorage.isManagedFile(local.localPath);
+        if (!hasLocalFile &&
+            local.cloudFileStatus != CloudSyncStatus.failed.value) {
+          await repositories.attachments.updateCloudFileStatus(
+            remoteAttachment.id,
+            'downloadPending',
+          );
+          await _enqueueCloudAttachmentDownload(local, userId);
+        }
+        cursor = CloudAttachmentCursor(
+          createdAt: createdAt,
+          id: remoteAttachment.id,
+        );
+        await repositories.settings.setValue(
+          cursorKey,
+          jsonEncode({
+            'createdAt': createdAt.toUtc().toIso8601String(),
+            'id': remoteAttachment.id,
+          }),
+        );
+        repositories.ownerContext.requireCurrent(owner);
+      }
+      if (!page.hasMore) break;
+    }
+  }
+
+  bool _matchesMediaMime(MessageType type, String mimeType) =>
+      type == MessageType.image
+      ? const {'image/jpeg', 'image/png', 'image/webp'}.contains(mimeType)
+      : const {'video/mp4', 'video/quicktime'}.contains(mimeType);
+
+  Future<void> _processCloudAttachmentDownload(
+    RelioQueueItem item,
+    String userId,
+  ) async {
+    final owner = repositories.ownerContext.capture();
+    final attachment = await repositories.attachments.getById(item.entityId);
+    repositories.ownerContext.requireCurrent(owner);
+    if (attachment == null) {
+      throw const CloudException(
+        'ไม่พบไฟล์ในเครื่อง',
+        code: 'invalidLocalData',
+      );
+    }
+    final message = await repositories.messages.getMessage(
+      attachment.messageId,
+    );
+    repositories.ownerContext.requireCurrent(owner);
+    if (message == null ||
+        message.conversationId == null ||
+        message.senderId == null) {
+      throw const CloudException(
+        'ไม่พบข้อความต้นทางของไฟล์',
+        code: 'invalidLocalData',
+      );
+    }
+    final link = await repositories.cloudLinks.get(
+      localConversationId: message.conversationId!,
+      ownerUserId: userId,
+    );
+    repositories.ownerContext.requireCurrent(owner);
+    if (link == null || cloud.currentIdentity?.userId != userId) {
+      throw const SyncOwnershipException('waiting_for_ownership');
+    }
+
+    final remote = await cloud.fetchAttachment(attachment.id);
+    repositories.ownerContext.requireCurrent(owner);
+    if (remote == null ||
+        remote.id != attachment.id ||
+        remote.messageId != message.id ||
+        remote.ownerUserId != message.senderId ||
+        remote.storagePath != attachment.remoteFileName ||
+        remote.mediaType != attachment.mediaType.name ||
+        remote.fileName != attachment.fileName ||
+        remote.mimeType != attachment.mimeType ||
+        remote.byteSize != attachment.byteSize ||
+        (remote.sha256 != null &&
+            !RegExp(r'^[0-9a-f]{64}$').hasMatch(remote.sha256!)) ||
+        (attachment.checksumSha256 != null &&
+            remote.sha256 != null &&
+            attachment.checksumSha256 != remote.sha256) ||
+        !CloudStoragePathPolicy.isOwnedBy(
+          remote.storagePath,
+          remote.ownerUserId ?? '',
+        ) ||
+        !_matchesMediaMime(message.type, remote.mimeType)) {
+      throw const CloudException(
+        'metadata ของไฟล์ไม่ตรงกับข้อความที่อนุญาต',
+        code: 'permissionDenied',
+      );
+    }
+    if (remote.ownerUserId != userId && remote.ownerUserId != link.peerUserId) {
+      throw const CloudException(
+        'เจ้าของไฟล์ไม่ใช่สมาชิกบทสนทนา',
+        code: 'permissionDenied',
+      );
+    }
+
+    Future<String?> verifiedLocalFile(String? candidate) async {
+      if (candidate == null ||
+          candidate.isEmpty ||
+          !await mediaStorage.isManagedFile(candidate)) {
+        return null;
+      }
+      try {
+        final validation = await mediaStorage.validateFile(candidate);
+        if (validation.mimeType == remote.mimeType &&
+            validation.byteSize == remote.byteSize &&
+            (remote.sha256 == null ||
+                await mediaStorage.sha256ForFile(candidate) == remote.sha256)) {
+          return candidate;
+        }
+      } on Object {
+        // ไฟล์เก่าที่ไม่ตรงกับ metadata จะถูกแทนด้วยสำเนา Cloud ที่ตรวจแล้ว
+      }
+      return null;
+    }
+
+    final existingPath =
+        await verifiedLocalFile(message.localFilePath) ??
+        await verifiedLocalFile(attachment.localPath);
+    repositories.ownerContext.requireCurrent(owner);
+    final storedPath =
+        existingPath ??
+        await cloud.downloadAttachment(
+          storagePath: remote.storagePath,
+          ownerUserId: remote.ownerUserId!,
+          mediaStorage: mediaStorage,
+          fileName: remote.fileName,
+          mimeType: remote.mimeType,
+          expectedByteSize: remote.byteSize,
+          expectedSha256: remote.sha256,
+        );
+    repositories.ownerContext.requireCurrent(owner);
+    if (cloud.currentIdentity?.userId != userId) {
+      throw const SyncOwnershipException('waiting_for_ownership');
+    }
+    await repositories.messages.updateCloudMediaPath(message.id, storedPath);
+    repositories.ownerContext.requireCurrent(owner);
+    final actualSha256 = await mediaStorage.sha256ForFile(storedPath);
+    if (remote.sha256 != null && actualSha256 != remote.sha256) {
+      throw const CloudException(
+        'SHA-256 ของไฟล์ไม่ตรงกับ metadata',
+        code: 'invalidLocalData',
+      );
+    }
+    await repositories.attachments.updateChecksumSha256(
+      attachment.id,
+      actualSha256,
+    );
+    repositories.ownerContext.requireCurrent(owner);
+    await repositories.attachments.markCompleted(
+      attachment.id,
+      localPath: storedPath,
+    );
+    await repositories.attachments.updateCloudFileStatus(
+      attachment.id,
+      CloudSyncStatus.synced.value,
+    );
+  }
+
+  Future<void> _enqueueCloudAttachmentDownload(
+    RelioMediaAttachment attachment,
+    String userId,
+  ) async {
+    final queue = await repositories.syncQueue.listAll();
+    final active = queue.any(
+      (row) =>
+          row.entityId == attachment.id &&
+          row.operation == SyncOperation.attachmentDownload.value &&
+          row.ownerUserId == userId &&
+          row.status != SyncQueueStatus.completed.value &&
+          row.status != SyncQueueStatus.failed.value,
+    );
+    if (active) return;
+    await repositories.syncQueue.enqueue(
+      entityType: SyncEntityType.attachment.value,
+      entityId: attachment.id,
+      operation: SyncOperation.attachmentDownload.value,
+      ownerUserId: userId,
+    );
+  }
+
+  Future<void> _reconcileCloudMediaDownloads(String userId) async {
+    if (!_isCloudReady || cloud.currentIdentity?.userId != userId) return;
+    final owner = repositories.ownerContext.capture();
+    final attachments = await repositories.attachments.listAll();
+    repositories.ownerContext.requireCurrent(owner);
+    final queue = await repositories.syncQueue.listAll();
+    repositories.ownerContext.requireCurrent(owner);
+    for (final attachment in attachments) {
+      final remotePath = attachment.remoteFileName;
+      if (remotePath == null ||
+          CloudStoragePathPolicy.ownerFor(remotePath) == null) {
+        continue;
+      }
+      if (attachment.cloudFileStatus == CloudSyncStatus.failed.value) continue;
+      final hasLocalFile = await mediaStorage.isManagedFile(
+        attachment.localPath,
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      if (hasLocalFile) continue;
+      await repositories.attachments.updateCloudFileStatus(
+        attachment.id,
+        'downloadPending',
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      final active = queue.any(
+        (row) =>
+            row.entityId == attachment.id &&
+            row.operation == SyncOperation.attachmentDownload.value &&
+            row.ownerUserId == userId &&
+            row.status != SyncQueueStatus.completed.value &&
+            row.status != SyncQueueStatus.failed.value,
+      );
+      if (!active) {
+        await repositories.syncQueue.enqueue(
+          entityType: SyncEntityType.attachment.value,
+          entityId: attachment.id,
+          operation: SyncOperation.attachmentDownload.value,
+          ownerUserId: userId,
+        );
+        repositories.ownerContext.requireCurrent(owner);
+      }
     }
   }
 
@@ -865,7 +1671,10 @@ class SyncEngine {
     CloudConversationBinding link,
     CloudMessageDto message,
   ) async {
-    if (isConversationActive?.call(link.localConversationId) ?? false) {
+    final logicalId = await repositories.database.logicalConversationId(
+      link.localConversationId,
+    );
+    if (isConversationActive?.call(logicalId) ?? false) {
       final ids = await repositories.messages.markConversationRead(
         link.localConversationId,
       );
@@ -886,7 +1695,7 @@ class SyncEngine {
     }
     final showPreview = await repositories.settings.getBool(
       'notification_preview',
-      defaultValue: false,
+      defaultValue: true,
     );
     await notifications.show(
       id: message.id,
@@ -902,6 +1711,14 @@ class SyncEngine {
       ),
       route: '/chat/${link.localConversationId}',
       urgent: false,
+      soundEnabled: await repositories.settings.getBool(
+        'notification_sound',
+        defaultValue: true,
+      ),
+      vibrationEnabled: await repositories.settings.getBool(
+        'notification_vibration',
+        defaultValue: true,
+      ),
     );
   }
 
@@ -993,7 +1810,8 @@ class SyncEngine {
           CloudMessageDto(
             id: message.id,
             conversationId: link.cloudConversationId,
-            // Supabase RLS binds outgoing messages to auth.uid. Local
+            // Supabase RLS ผูกผู้ส่งกับ auth.uid; ชื่อ sender จาก prototype หรืออุปกรณ์
+            // จึงใช้แทน Cloud owner ID ไม่ได้            // Supabase RLS binds outgoing messages to auth.uid. Local
             // prototype/device sender labels are not Cloud ownership IDs.
             senderId: userId,
             senderDeviceId: message.senderDeviceId ?? '',
@@ -1034,7 +1852,7 @@ class SyncEngine {
             code: 'invalidLocalData',
           );
         }
-        await cloud.upsertAttachment(_attachmentDto(attachment, userId));
+        await cloud.upsertAttachment(await _attachmentDto(attachment, userId));
       case SyncOperation.attachmentUpload:
         final attachment = await repositories.attachments.getById(
           item.entityId,
@@ -1055,6 +1873,8 @@ class SyncEngine {
           localPath: attachment.localPath,
           storagePath: _storagePath(attachment, userId),
         );
+      case SyncOperation.attachmentDownload:
+        await _processCloudAttachmentDownload(item, userId);
       case SyncOperation.readReceiptUpsert:
         final message = await repositories.messages.getMessage(item.entityId);
         if (message?.readAt == null || message?.conversationId == null) {
@@ -1080,22 +1900,272 @@ class SyncEngine {
             readAt: message.readAt!,
           ),
         );
+      case SyncOperation.privateBackupUpsert:
+        await _processPrivateBackup(item, userId);
     }
   }
 
-  CloudAttachmentDto _attachmentDto(
+  Future<void> _enqueuePrivateBackupBackfill(
+    String userId, {
+    required bool guestMode,
+  }) async {
+    if (!_isCloudReady || cloud.currentIdentity?.userId != userId) return;
+    final epoch = repositories.ownerContext.capture();
+    if (guestMode ? epoch.userId != null : epoch.userId != userId) return;
+    final principal = (await repositories.profiles.current()).principalId;
+    if (principal != (guestMode ? principal : 'account:$userId') ||
+        (guestMode && !(isGuestBackupSession?.call() ?? false))) {
+      return;
+    }
+    final existing = await repositories.syncQueue.listAll();
+    repositories.ownerContext.requireCurrent(epoch);
+    var added = 0;
+    Future<void> enqueue(String entityType, String id) async {
+      var alreadyQueued = false;
+      for (final row in existing) {
+        if (row.entityType != entityType ||
+            row.entityId != id ||
+            row.operation != SyncOperation.privateBackupUpsert.value ||
+            row.ownerUserId != userId) {
+          continue;
+        }
+        if (await repositories.syncQueue.localPrincipalForItem(row.id) ==
+            principal) {
+          alreadyQueued = true;
+          break;
+        }
+      }
+      if (alreadyQueued || added >= 500) return;
+      await repositories.syncQueue.enqueue(
+        entityType: entityType,
+        entityId: id,
+        operation: SyncOperation.privateBackupUpsert.value,
+        ownerUserId: userId,
+      );
+      repositories.ownerContext.requireCurrent(epoch);
+      added++;
+    }
+
+    final conversations = await repositories.conversations.listConversations();
+    repositories.ownerContext.requireCurrent(epoch);
+    for (final conversation in conversations) {
+      if (RelioMockData.isDemoId(conversation.id) ||
+          RelioMockData.isDemoId(conversation.participantId)) {
+        continue;
+      }
+      await enqueue('private_backup_conversation', conversation.id);
+      final backedUpConversations = {conversation.id};
+      final messages = await repositories.messages.listMessages(
+        conversation.id,
+      );
+      repositories.ownerContext.requireCurrent(epoch);
+      for (final message in messages) {
+        if (message.type == MessageType.text ||
+            message.type == MessageType.image ||
+            message.type == MessageType.video) {
+          if ((message.type == MessageType.image ||
+                  message.type == MessageType.video) &&
+              (message.localFilePath == null ||
+                  !await mediaStorage.isManagedFile(message.localFilePath!))) {
+            continue;
+          }
+          final sourceId = message.conversationId;
+          if (sourceId != null && backedUpConversations.add(sourceId)) {
+            await enqueue('private_backup_conversation', sourceId);
+          }
+          await enqueue('private_backup_message', message.id);
+          if (added >= 500) break;
+        }
+      }
+      if (added >= 500) break;
+    }
+    if (added >= 500) _runAgain = true;
+  }
+
+  Future<void> _processPrivateBackup(RelioQueueItem item, String userId) async {
+    final owner = repositories.ownerContext.capture();
+    final guestMode = isGuestBackupSession?.call() ?? false;
+    final principal = await repositories.syncQueue.localPrincipalForItem(
+      item.id,
+    );
+    final expectedPrincipal = guestMode
+        ? (await repositories.profiles.current()).principalId
+        : 'account:$userId';
+    if ((guestMode ? owner.userId != null : owner.userId != userId) ||
+        cloud.currentIdentity?.userId != userId ||
+        principal != expectedPrincipal ||
+        !await _privateBackupIsEnabled(guestMode: guestMode)) {
+      throw const SyncOwnershipException('waiting_for_ownership');
+    }
+    if (item.entityType == 'private_backup_conversation') {
+      final conversation = await repositories.conversations.getConversation(
+        item.entityId,
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      if (conversation == null ||
+          RelioMockData.isDemoId(conversation.id) ||
+          RelioMockData.isDemoId(conversation.participantId)) {
+        throw const CloudException(
+          'บทสนทนาไม่เข้าเกณฑ์สำรอง',
+          code: 'invalidLocalData',
+        );
+      }
+      await cloud.upsertPrivateBackupRecord(
+        CloudPrivateBackupRecord(
+          recordType: 'conversation',
+          sourceId: conversation.id,
+          payload: {
+            'localConversationId': conversation.id,
+            'peerDeviceId': conversation.participantId,
+            'remotePrincipal': await repositories.conversations
+                .remotePrincipalForConversation(conversation.id),
+            'displayName': conversation.displayName,
+            'createdAt': conversation.createdAt.toUtc().toIso8601String(),
+            'updatedAt': conversation.updatedAt.toUtc().toIso8601String(),
+            'provenance': 'account_private_backup',
+          },
+        ),
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      return;
+    }
+    if (item.entityType != 'private_backup_message') {
+      throw const CloudException(
+        'ประเภทข้อมูลสำรองไม่รองรับ',
+        code: 'unsupportedOperation',
+      );
+    }
+    final message = await repositories.messages.getMessage(item.entityId);
+    repositories.ownerContext.requireCurrent(owner);
+    if (message == null ||
+        message.conversationId == null ||
+        (message.type != MessageType.text &&
+            message.type != MessageType.image &&
+            message.type != MessageType.video)) {
+      throw const CloudException(
+        'ข้อความไม่เข้าเกณฑ์สำรอง',
+        code: 'invalidLocalData',
+      );
+    }
+    final conversation = await repositories.conversations.getConversation(
+      message.conversationId!,
+    );
+    if (conversation == null ||
+        RelioMockData.isDemoId(conversation.id) ||
+        RelioMockData.isDemoId(conversation.participantId)) {
+      throw const CloudException(
+        'บทสนทนาไม่เข้าเกณฑ์สำรอง',
+        code: 'invalidLocalData',
+      );
+    }
+    final attachments = (await repositories.attachments.listAll())
+        .where((row) => row.messageId == message.id)
+        .toList(growable: false);
+    if ((message.type == MessageType.image ||
+            message.type == MessageType.video) &&
+        attachments.isEmpty) {
+      throw const CloudException(
+        'ไม่พบข้อมูลไฟล์แนบของข้อความสื่อ',
+        code: 'invalidLocalData',
+      );
+    }
+    final attachmentPayload = <Map<String, Object?>>[];
+    for (final attachment in attachments) {
+      if (!await mediaStorage.isManagedFile(attachment.localPath)) {
+        throw const CloudException(
+          'ไม่พบไฟล์สื่อในเครื่อง',
+          code: 'missingLocalFile',
+        );
+      }
+      final validation = await mediaStorage.validateFile(attachment.localPath);
+      if (validation.mimeType != attachment.mimeType ||
+          validation.byteSize != attachment.byteSize) {
+        throw const CloudException(
+          'ไฟล์สื่อไม่ตรงกับ metadata',
+          code: 'invalidLocalData',
+        );
+      }
+      final sha256 = await mediaStorage.sha256ForFile(attachment.localPath);
+      final path = CloudStoragePathPolicy.forPrivateBackupAttachment(
+        userId: userId,
+        messageId: message.id,
+        attachmentId: attachment.id,
+        fileName: attachment.fileName,
+      );
+      await cloud.uploadAttachment(
+        localPath: attachment.localPath,
+        storagePath: path,
+      );
+      repositories.ownerContext.requireCurrent(owner);
+      attachmentPayload.add({
+        'id': attachment.id,
+        'transferId': attachment.transferId,
+        'fileName': attachment.fileName,
+        'mimeType': attachment.mimeType,
+        'mediaType': attachment.mediaType.name,
+        'byteSize': attachment.byteSize,
+        'sha256': sha256,
+        'storagePath': path,
+      });
+    }
+    await cloud.upsertPrivateBackupRecord(
+      CloudPrivateBackupRecord(
+        recordType: 'message',
+        sourceId: message.id,
+        payload: {
+          'localMessageId': message.id,
+          'localConversationId': message.conversationId,
+          'senderIdentity': message.senderId,
+          'senderDeviceId': message.senderDeviceId,
+          'messageType': message.type.name,
+          'content': message.text,
+          'isOutgoing': message.outgoing,
+          'deliveryStatus': message.status?.name ?? 'pending',
+          'createdAt': message.createdAt?.toUtc().toIso8601String(),
+          'readAt': message.readAt?.toUtc().toIso8601String(),
+          'attachments': attachmentPayload,
+          'provenance': 'account_private_backup',
+        },
+      ),
+    );
+    repositories.ownerContext.requireCurrent(owner);
+  }
+
+  Future<bool> _privateBackupIsEnabled({required bool guestMode}) async =>
+      await privateBackupEnabled?.call(guestMode: guestMode) ?? true;
+
+  Future<CloudAttachmentDto> _attachmentDto(
     RelioMediaAttachment attachment,
     String userId,
-  ) => CloudAttachmentDto(
-    id: attachment.id,
-    messageId: attachment.messageId,
-    storagePath: _storagePath(attachment, userId),
-    mediaType: attachment.mediaType.name,
-    mimeType: attachment.mimeType,
-    fileName: attachment.fileName,
-    byteSize: attachment.byteSize,
-    transferStatus: attachment.transferStatus.name,
-  );
+  ) async {
+    if (!await mediaStorage.isManagedFile(attachment.localPath)) {
+      throw const CloudException(
+        'ไม่พบไฟล์สื่อในเครื่อง',
+        code: 'missingLocalFile',
+      );
+    }
+    final validation = await mediaStorage.validateFile(attachment.localPath);
+    if (validation.mimeType != attachment.mimeType ||
+        validation.byteSize != attachment.byteSize) {
+      throw const CloudException(
+        'ไฟล์ในเครื่องไม่ตรงกับ metadata',
+        code: 'invalidLocalData',
+      );
+    }
+    final digest = await mediaStorage.sha256ForFile(attachment.localPath);
+    await repositories.attachments.updateChecksumSha256(attachment.id, digest);
+    return CloudAttachmentDto(
+      id: attachment.id,
+      messageId: attachment.messageId,
+      storagePath: _storagePath(attachment, userId),
+      mediaType: attachment.mediaType.name,
+      mimeType: attachment.mimeType,
+      fileName: attachment.fileName,
+      byteSize: attachment.byteSize,
+      transferStatus: attachment.transferStatus.name,
+      sha256: digest,
+    );
+  }
 
   String _storagePath(RelioMediaAttachment attachment, String userId) =>
       CloudStoragePathPolicy.forAttachment(
@@ -1122,12 +2192,19 @@ class SyncEngine {
           item.entityId,
           CloudSyncStatus.synced.value,
         );
+      case SyncOperation.attachmentDownload:
+        await repositories.attachments.updateCloudFileStatus(
+          item.entityId,
+          CloudSyncStatus.synced.value,
+        );
       case SyncOperation.profileUpsert ||
           SyncOperation.conversationUpsert ||
           SyncOperation.sosUpsert ||
           null:
         break;
       case SyncOperation.readReceiptUpsert:
+        break;
+      case SyncOperation.privateBackupUpsert:
         break;
     }
   }
@@ -1144,7 +2221,7 @@ class SyncEngine {
           item.entityId,
           CloudSyncStatus.syncing.value,
         );
-      case SyncOperation.attachmentUpload:
+      case SyncOperation.attachmentUpload || SyncOperation.attachmentDownload:
         await repositories.attachments.updateCloudFileStatus(
           item.entityId,
           CloudSyncStatus.syncing.value,
@@ -1155,6 +2232,8 @@ class SyncEngine {
           null:
         break;
       case SyncOperation.readReceiptUpsert:
+        break;
+      case SyncOperation.privateBackupUpsert:
         break;
     }
   }
@@ -1176,6 +2255,15 @@ class SyncEngine {
           item.entityId,
           CloudSyncStatus.failed.value,
         );
+      case SyncOperation.attachmentDownload:
+        await repositories.attachments.updateCloudFileStatus(
+          item.entityId,
+          CloudSyncStatus.failed.value,
+        );
+        await repositories.attachments.markFailed(
+          item.entityId,
+          'cloud_download_failed',
+        );
       case SyncOperation.profileUpsert ||
           SyncOperation.conversationUpsert ||
           SyncOperation.sosUpsert ||
@@ -1183,11 +2271,14 @@ class SyncEngine {
         break;
       case SyncOperation.readReceiptUpsert:
         break;
+      case SyncOperation.privateBackupUpsert:
+        break;
     }
   }
 
   Future<void> _handleFailure(RelioQueueItem item, Object error) async {
-    // Keep queue diagnostics safe: backend text must not echo SOS coordinates,
+    // จำกัดรายละเอียด diagnostics เพื่อไม่ให้ข้อความจาก backend เปิดเผยพิกัด SOS
+    // เนื้อหาข้อความ token หรือข้อมูลอ่อนไหวใน payload    // Keep queue diagnostics safe: backend text must not echo SOS coordinates,
     // message content, tokens, or other sensitive payload details.
     final message = error is CloudException ? error.code : 'local_sync_error';
     final permanent =
@@ -1199,6 +2290,13 @@ class SyncEngine {
       final next = clock.now().add(
         retryPolicy.delayForAttempt(item.attemptCount),
       );
+      if (SyncOperation.parse(item.operation) ==
+          SyncOperation.attachmentDownload) {
+        await repositories.attachments.updateCloudFileStatus(
+          item.entityId,
+          'downloadPending',
+        );
+      }
       _queueRetryTimer?.cancel();
       _queueRetryTimer = Timer(next.difference(clock.now()), () {
         if (!_disposed && _isCloudReady) unawaited(run());
@@ -1252,7 +2350,11 @@ class SyncEngine {
       cloud.currentIdentity != null;
 
   void _scheduleRun() {
-    if (!_started || _disposed || _runOperation != null) return;
+    if (!_started || _disposed) return;
+    if (_runOperation != null) {
+      _runAgain = true;
+      return;
+    }
     unawaited(run());
   }
 
@@ -1272,6 +2374,7 @@ class SyncEngine {
     await _refreshSnapshot(state: SyncEngineState.waitingForCloud);
   }
 
+  // สรุปคิวที่เก็บใน SQLite เพื่อแจ้ง Stream สถานะ โดยหน้า UI ต้องกรอง owner ตามการใช้งานเอง
   Future<void> _refreshSnapshot({SyncEngineState? state}) async {
     final rows = await repositories.syncQueue.listAll();
     final summary = _summary(rows);

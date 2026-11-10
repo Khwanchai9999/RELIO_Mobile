@@ -689,6 +689,9 @@ class MockNearbyTransport implements NearbyTransport {
     String? identityFingerprintHint,
     String? authenticationToken,
     bool isIncomingRequest = true,
+    String? connectionTraceId,
+    String? callbackOperation,
+    String? strategy,
   }) {
     final peer = NearbyPeer(
       id: id,
@@ -702,6 +705,9 @@ class MockNearbyTransport implements NearbyTransport {
         state: NearbyConnectionState.incomingRequest,
         authenticationToken: authenticationToken,
         isIncomingRequest: isIncomingRequest,
+        connectionTraceId: connectionTraceId,
+        operation: callbackOperation,
+        strategy: strategy,
       ),
     );
   }

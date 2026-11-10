@@ -1,3 +1,4 @@
+// หน้าตรวจสอบสถานะ Cloud สำหรับงานพัฒนา โดยแสดงข้อมูลวินิจฉัยที่ระบบเตรียมไว้
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -5,6 +6,7 @@ import '../../core/cloud/cloud_models.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Cloud Diagnostics Screen
 class CloudDiagnosticsScreen extends StatelessWidget {
   const CloudDiagnosticsScreen({super.key});
 

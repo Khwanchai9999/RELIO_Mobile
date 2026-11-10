@@ -10,6 +10,11 @@ abstract final class RelioColors {
   static const warning = Color(0xFFF59E0B);
   static const success = Color(0xFF22C55E);
   static const info = Color(0xFF06B6D4);
+  static const mapNormal = Color(0xFF16A34A);
+  static const mapSos = Color(0xFFEF334D);
+  static const mapRescue = Color(0xFF2563EB);
+  static const mapSelf = Color(0xFF00A7C7);
+  static const mapSelfHeading = brandNavy;
 
   static const lightBackground = Color(0xFFF8FAFC);
   static const lightSurface = Color(0xFFFFFFFF);

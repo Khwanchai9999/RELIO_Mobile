@@ -1,9 +1,12 @@
+// หน้าเริ่มต้นที่ให้เลือกเส้นทางเข้าใช้งาน เช่น บัญชีหรือ Guest ก่อนเข้าสู่แอป
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
+import '../../core/relio_dependencies.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Welcome Screen
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
 
@@ -73,7 +76,10 @@ class WelcomeScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   TextButton(
-                    onPressed: () => context.go('/home'),
+                    onPressed: () async {
+                      await RelioDependencyScope.of(context).resumeGuestMode();
+                      if (context.mounted) context.go('/home');
+                    },
                     child: const Text('ใช้งานแบบออฟไลน์'),
                   ),
                 ],
@@ -86,6 +92,7 @@ class WelcomeScreen extends StatelessWidget {
   }
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Feature)
 class _Feature extends StatelessWidget {
   const _Feature({
     required this.icon,

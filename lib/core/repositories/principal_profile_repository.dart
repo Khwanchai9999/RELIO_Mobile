@@ -101,6 +101,7 @@ class PrincipalProfileRepository extends ChangeNotifier {
     );
   }
 
+  // ผูกชื่อและ snapshot ในคิวกับ principal ที่เริ่มแก้ไข แล้วตรวจ owner ซ้ำใน transaction
   Future<void> setName(String name, {bool enqueue = true}) async {
     name = name.trim();
     if (name.isEmpty || name.runes.length > 40) throw ArgumentError.value(name);

@@ -6,8 +6,52 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
 import 'package:relio_mobile/core/nearby/peer_identity_crypto.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
+import 'package:relio_mobile/core/relay/relay_models.dart';
 
 void main() {
+  test('avatar file transfer metadata is bounded and backward tolerant', () {
+    final revision = 'a' * 64;
+    final request = RelioPacket.deviceStatus(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      displayName: 'A',
+      status: DeviceStatus.normal,
+      avatarRevision: revision,
+      avatarAction: 'request',
+    );
+    expect(
+      RelioPacket.fromBytes(request.toBytes()).payload['avatarAction'],
+      'request',
+    );
+
+    final transfer = RelioPacket.deviceStatus(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      displayName: 'A',
+      status: DeviceStatus.normal,
+      avatarRevision: revision,
+      avatarAction: 'transfer',
+      avatarTransferId: 'transfer-a',
+      avatarPayloadId: '17',
+      avatarByteSize: 16 * 1024,
+      avatarSha256: revision,
+    );
+    expect(
+      RelioPacket.fromBytes(transfer.toBytes()).payload['avatarByteSize'],
+      16 * 1024,
+    );
+    final malformed =
+        jsonDecode(utf8.decode(transfer.toBytes())) as Map<String, dynamic>;
+    (malformed['payload'] as Map<String, dynamic>)['avatarByteSize'] =
+        65 * 1024;
+    expect(
+      () => RelioPacket.fromBytes(
+        Uint8List.fromList(utf8.encode(jsonEncode(malformed))),
+      ),
+      throwsA(isA<RelioPacketException>()),
+    );
+  });
+
   test('QA relay route check fields are bounded and typed', () {
     final check = RelioPacket.deviceStatus(
       senderDeviceId: 'device-a',
@@ -34,6 +78,36 @@ void main() {
     (malformed['payload'] as Map<String, dynamic>)['qaRelayConnected'] = true;
     (malformed['payload'] as Map<String, dynamic>)['qaRelayDestinationHash'] =
         'bad';
+    expect(
+      () => RelioPacket.fromBytes(
+        Uint8List.fromList(utf8.encode(jsonEncode(malformed))),
+      ),
+      throwsA(isA<RelioPacketException>()),
+    );
+  });
+
+  test('QA relay route request path is bounded and sender-bound', () {
+    final request = RelioPacket.deviceStatus(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      displayName: 'A',
+      status: DeviceStatus.normal,
+      qaRelayCheckId: '12345678-1234-1234-1234-123456789abc',
+      qaRelayDestinationHash: 'a' * 64,
+      qaRelayPath: const ['device-origin', 'device-a'],
+      qaRelayMaxHops: 7,
+    );
+    expect(RelioPacket.fromBytes(request.toBytes()).payload['qaRelayPath'], [
+      'device-origin',
+      'device-a',
+    ]);
+
+    final malformed =
+        jsonDecode(utf8.decode(request.toBytes())) as Map<String, dynamic>;
+    (malformed['payload'] as Map<String, dynamic>)['qaRelayPath'] = [
+      'device-origin',
+      'device-b',
+    ];
     expect(
       () => RelioPacket.fromBytes(
         Uint8List.fromList(utf8.encode(jsonEncode(malformed))),
@@ -210,6 +284,29 @@ void main() {
     expect(decoded.payload['isActive'], isTrue);
     expect(decoded.payload['latitude'], 13.7);
     expect(decoded.payload['stateRevision'], 4);
+  });
+
+  test('rescue status packet is bounded and supported by relay envelopes', () {
+    final packet = RelioPacket.rescueStatus(
+      senderDeviceId: 'device-a',
+      senderUserId: 'user-a',
+      rescueId: 'rescue-a-1',
+      displayName: 'A',
+      rescueActive: true,
+      updatedAt: DateTime.utc(2026, 11, 10),
+      stateRevision: 1,
+    );
+    final decoded = RelioPacket.fromBytes(packet.toBytes());
+    expect(decoded.type, RelioPacketType.rescueStatus);
+    expect(decoded.payload['rescueActive'], isTrue);
+
+    final envelope = RelayEnvelope.fromPayloadPacket(
+      packet: packet,
+      destinationDeviceId: 'device-c',
+      maxHops: 2,
+    );
+    expect(const RelayPolicy().validate(envelope), isNull);
+    expect(envelope.toPayloadPacket().payload['stateRevision'], 1);
   });
 
   test(

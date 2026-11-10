@@ -1,6 +1,11 @@
 import 'dart:math' as math;
 
-enum LocationFreshness { fresh, stale, veryStale }
+import 'nearby_location_quality.dart';
+
+// ฟังก์ชันคำนวณสำหรับแผนที่ เช่น ความสด ระยะทาง และ heading โดยไม่แตะ GPS หรือ transport
+enum LocationFreshness { fresh, stale, veryStale, invalid }
+
+enum NearbyHeadingConfidence { reliable, provisional }
 
 class NearbyMapCalculations {
   const NearbyMapCalculations._();
@@ -9,17 +14,32 @@ class NearbyMapCalculations {
   static const staleFor = Duration(minutes: 10);
 
   static bool isValidPoint(double? latitude, double? longitude) =>
-      latitude != null &&
-      longitude != null &&
-      latitude.isFinite &&
-      longitude.isFinite &&
-      latitude >= -90 &&
-      latitude <= 90 &&
-      longitude >= -180 &&
-      longitude <= 180;
+      NearbyLocationQuality.isValidCoordinates(latitude, longitude);
+
+  static double? validCompassHeading(
+    double? degrees, {
+    required double? accuracyDegrees,
+  }) {
+    if (degrees == null ||
+        !degrees.isFinite ||
+        degrees < 0 ||
+        degrees > 360 ||
+        (accuracyDegrees != null &&
+            (!accuracyDegrees.isFinite ||
+                accuracyDegrees < 0 ||
+                accuracyDegrees > 45))) {
+      return null;
+    }
+    return degrees == 360 ? 0 : degrees;
+  }
+
+  static bool isFreshLocation(DateTime? capturedAt, DateTime now) =>
+      capturedAt != null &&
+      freshness(capturedAt, now) == LocationFreshness.fresh;
 
   static LocationFreshness freshness(DateTime capturedAt, DateTime now) {
-    final age = now.difference(capturedAt.toLocal());
+    final age = NearbyLocationQuality.effectiveAge(capturedAt, now);
+    if (age == null) return LocationFreshness.invalid;
     if (age <= freshFor) return LocationFreshness.fresh;
     if (age <= staleFor) return LocationFreshness.stale;
     return LocationFreshness.veryStale;
@@ -27,8 +47,9 @@ class NearbyMapCalculations {
 
   static String freshnessLabel(DateTime? capturedAt, DateTime now) {
     if (capturedAt == null) return 'ยังไม่มีตำแหน่ง';
-    final age = now.difference(capturedAt.toLocal());
-    if (age.isNegative || age <= const Duration(seconds: 30)) {
+    final age = NearbyLocationQuality.effectiveAge(capturedAt, now);
+    if (age == null) return 'เวลา GPS ไม่ถูกต้อง';
+    if (age <= const Duration(seconds: 30)) {
       return 'อัปเดตเมื่อครู่';
     }
     final label = age.inMinutes < 1
@@ -40,7 +61,35 @@ class NearbyMapCalculations {
       LocationFreshness.fresh => 'อัปเดต $label',
       LocationFreshness.stale => '⚠ อัปเดต $label',
       LocationFreshness.veryStale => '⚠ ตำแหน่งอาจไม่ใช่ตำแหน่งปัจจุบัน',
+      LocationFreshness.invalid => 'เวลา GPS ไม่ถูกต้อง',
     };
+  }
+
+  static String sharedLocationLabel(DateTime? capturedAt, DateTime now) {
+    if (capturedAt == null) return 'ยังไม่มีตำแหน่งที่แชร์';
+    final age = now.difference(capturedAt.toLocal());
+    if (age.isNegative) return 'เวลาแชร์ไม่ถูกต้อง';
+    if (age.inMinutes < 1) return 'แชร์ล่าสุดเมื่อครู่';
+    if (age.inHours < 1) return 'แชร์ล่าสุด ${age.inMinutes} นาทีที่แล้ว';
+    if (age.inDays < 1) return 'แชร์ล่าสุด ${age.inHours} ชั่วโมงที่แล้ว';
+    return 'แชร์ล่าสุด ${age.inDays} วันที่แล้ว';
+  }
+
+  static String? staleMarkerLabel(
+    DateTime? capturedAt,
+    DateTime now, {
+    double? accuracyMeters,
+  }) {
+    if (capturedAt == null) return '⚠ ยังไม่มีตำแหน่ง';
+    if (freshness(capturedAt, now) == LocationFreshness.fresh) {
+      return null;
+    }
+    if (accuracyMeters != null &&
+        NearbyLocationQuality.confidence(accuracyMeters) ==
+            LocationConfidence.low) {
+      return '${NearbyLocationQuality.accuracyLabel(accuracyMeters)} • ${freshnessLabel(capturedAt, now)}';
+    }
+    return freshnessLabel(capturedAt, now);
   }
 
   static double? distanceMeters({
@@ -110,4 +159,58 @@ class NearbyMapCalculations {
   }
 
   static double _radians(double degrees) => degrees * math.pi / 180;
+}
+
+/// ลดการแกว่งของเข็มทิศและคง heading ล่าสุดไว้เพียงช่วงสั้น ๆ/// Smooths compass jitter and holds the last good heading only briefly.
+class NearbyHeadingFilter {
+  static const staleAfter = Duration(seconds: 3);
+  static const _smoothing = 0.25;
+
+  double? _heading;
+  DateTime? _lastReliableAt;
+  NearbyHeadingConfidence _confidence = NearbyHeadingConfidence.provisional;
+
+  NearbyHeadingConfidence get confidence => _confidence;
+
+  double? update(
+    double? degrees, {
+    required double? accuracyDegrees,
+    required DateTime now,
+  }) {
+    expire(now);
+    final valid = NearbyMapCalculations.validCompassHeading(
+      degrees,
+      accuracyDegrees: accuracyDegrees,
+    );
+    if (valid == null) return expire(now);
+
+    _confidence = accuracyDegrees == null
+        ? NearbyHeadingConfidence.provisional
+        : NearbyHeadingConfidence.reliable;
+
+    final previous = _heading;
+    if (previous == null || _lastReliableAt == null) {
+      _heading = valid;
+    } else {
+      final delta = ((valid - previous + 540) % 360) - 180;
+      _heading = (previous + delta * _smoothing + 360) % 360;
+    }
+    _lastReliableAt = now;
+    return _heading;
+  }
+
+  double? expire(DateTime now) {
+    final last = _lastReliableAt;
+    if (last == null || now.difference(last) >= staleAfter) {
+      _heading = null;
+      _confidence = NearbyHeadingConfidence.provisional;
+    }
+    return _heading;
+  }
+
+  void clear() {
+    _heading = null;
+    _lastReliableAt = null;
+    _confidence = NearbyHeadingConfidence.provisional;
+  }
 }

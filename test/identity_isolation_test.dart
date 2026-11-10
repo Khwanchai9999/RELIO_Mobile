@@ -501,11 +501,12 @@ void main() {
       );
       pair.transportB.holdFiles = true;
       await pair.serviceB.sendMediaMessage(message, attachment);
-      await waitFor(
-        () async => (await readEvents(
-          pair.logsA,
-        )).any((e) => e['event'] == 'media_metadata_received'),
-      );
+      await waitFor(() {
+        final received = pair.serviceA.lastReceivedPacket;
+        return received != null &&
+            (jsonDecode(received) as Map<String, dynamic>)['type'] ==
+                RelioPacketType.mediaMetadata.name;
+      });
       active = 'b';
       changes.add(null);
       await pair.identityA.setDisplayName('B');
@@ -685,7 +686,7 @@ void main() {
           .getSingle();
       expect(legacy.read<String>('display_name'), 'Legacy Jane');
       expect(legacy.read<String>('avatar_path'), '/keep/avatar.png');
-      expect(db.schemaVersion, 11);
+      expect(db.schemaVersion, 14);
     },
   );
 }

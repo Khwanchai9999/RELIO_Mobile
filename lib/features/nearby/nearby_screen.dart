@@ -1,3 +1,4 @@
+// หน้าค้นหาและแสดงอุปกรณ์ Nearby จริง พร้อมตัวกรอง สถานะ SOS/Rescue และทางลัดการสื่อสาร
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,8 +6,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../core/connectivity/runtime_connectivity.dart';
+import '../../core/device/battery_info_service.dart';
+import '../../core/nearby/nearby_reachability.dart';
 import '../../core/domain/relio_entities.dart';
 import '../../core/location/nearby_map_calculations.dart';
+import '../../core/location/nearby_location_quality.dart';
 import '../../core/location/location_service.dart';
 import '../../core/nearby/nearby_service.dart';
 import '../../core/nearby/nearby_readiness.dart';
@@ -17,10 +21,13 @@ import '../../core/feature_flags/feature_flags.dart';
 import '../../data/mock_data.dart';
 import '../../data/models/prototype_models.dart';
 import 'nearby_map_canvas.dart';
+import 'nearby_location_consent_dialog.dart';
 import 'nearby_peer_detail_sheet.dart';
 import 'nearby_route_preview_card.dart';
+import 'current_nearby_map_peers.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// ชนิดตัวเลือกที่ระบุสถานะหรือโหมดซึ่งส่วนอื่นของโมดูลนำไปใช้: Nearby Filter
 enum NearbyFilter { all, sos, rescue, normal }
 
 bool isFreshNearbyBattery(
@@ -29,35 +36,65 @@ bool isFreshNearbyBattery(
   DateTime? now,
 }) {
   final updatedAt = device.batteryUpdatedAt;
-  if (!connected || device.batteryLevel == null || updatedAt == null) {
+  final level = device.batteryLevel;
+  if (!connected ||
+      level == null ||
+      level < 0 ||
+      level > 100 ||
+      updatedAt == null) {
     return false;
   }
-  final age = (now ?? DateTime.now()).difference(updatedAt);
-  return !age.isNegative && age <= const Duration(minutes: 2);
+  final age = NearbyLocationQuality.effectiveAge(
+    updatedAt,
+    now ?? DateTime.now(),
+  );
+  return age != null && age <= const BatteryPublishPolicy().maxDisplayAge;
 }
 
 Iterable<NearbyPeer> visibleNearbyPeers(NearbyService nearby) =>
     nearby.currentPeers;
 
+// หน้ารวมการค้นหาและเชื่อมต่ออุปกรณ์ Nearby พร้อมแสดง peer จริงแยกจากข้อมูลตัวอย่าง
+// การคุยส่วนตัวต้อง resolve endpoint จาก principal/conversation ที่ตรวจสอบแล้ว
 class NearbyScreen extends StatefulWidget {
-  const NearbyScreen({super.key});
+  const NearbyScreen({
+    this.initialTargetId,
+    this.initialTargetLatitude,
+    this.initialTargetLongitude,
+    this.initialTargetAccuracy,
+    this.initialTargetHistorical = false,
+    this.initialTargetSharedLocation = false,
+    this.initialTargetCapturedAt,
+    super.key,
+  });
+
+  final String? initialTargetId;
+  final double? initialTargetLatitude;
+  final double? initialTargetLongitude;
+  final double? initialTargetAccuracy;
+  final bool initialTargetHistorical;
+  final bool initialTargetSharedLocation;
+  final DateTime? initialTargetCapturedAt;
 
   @override
   State<NearbyScreen> createState() => _NearbyScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Nearby Screen State)
 class _NearbyScreenState extends State<NearbyScreen> {
   NearbyFilter _filter = NearbyFilter.all;
   bool _loaded = false;
   bool _panelExpanded = true;
   bool _listMode = false;
-  bool _sharingLocation = false;
+  bool _locating = false;
+  bool _locationConsentPromptPending = false;
+  int _locationFocusRequest = 0;
   LocationData? _myLocation;
+  LocationData? _targetLocationOverride;
   String? _navigationTargetId;
   late RelioDependencies _dependencies;
   late NearbyService _nearby;
   List<RelioNearbyDevice> _savedDevices = const [];
-  List<BondedBluetoothDevice> _bondedDevices = const [];
 
   bool get _mapEnabled =>
       _dependencies.featureFlags.isEnabled(RelioFeatureFlag.nearbyMapUi);
@@ -74,19 +111,65 @@ class _NearbyScreenState extends State<NearbyScreen> {
     _listMode = !_dependencies.featureFlags.isEnabled(
       RelioFeatureFlag.nearbyMapUi,
     );
+    _navigationTargetId = widget.initialTargetId;
+    _targetLocationOverride = _locationFromRoute();
+    if (widget.initialTargetId != null && !_listMode) _listMode = false;
     _nearby = _dependencies.nearbyService;
     _dependencies.featureFlags.addListener(_onFeatureFlagsChanged);
+    _dependencies.internalExperience.addListener(_onDemoModeChanged);
     _nearby.addListener(_onNearbyChanged);
     _nearby.startBatteryMetadataUpdates();
     _dependencies.connectivityStatus.addListener(_onNearbyChanged);
     unawaited(_dependencies.startNearbySessionIfPermitted());
+    _myLocation = _nearby.lastLiveLocation;
     unawaited(_loadSavedDevices());
+    _maybePromptForLocationConsent();
+  }
+
+  @override
+  void didUpdateWidget(covariant NearbyScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTargetId != widget.initialTargetId ||
+        oldWidget.initialTargetLatitude != widget.initialTargetLatitude ||
+        oldWidget.initialTargetLongitude != widget.initialTargetLongitude ||
+        oldWidget.initialTargetAccuracy != widget.initialTargetAccuracy ||
+        oldWidget.initialTargetCapturedAt != widget.initialTargetCapturedAt ||
+        oldWidget.initialTargetHistorical != widget.initialTargetHistorical ||
+        oldWidget.initialTargetSharedLocation !=
+            widget.initialTargetSharedLocation) {
+      _navigationTargetId = widget.initialTargetId;
+      _targetLocationOverride = _locationFromRoute();
+      if (widget.initialTargetId != null && _mapEnabled) _listMode = false;
+    }
+  }
+
+  LocationData? _locationFromRoute() {
+    if (!NearbyMapCalculations.isValidPoint(
+      widget.initialTargetLatitude,
+      widget.initialTargetLongitude,
+    )) {
+      return null;
+    }
+    return LocationData(
+      latitude: widget.initialTargetLatitude!,
+      longitude: widget.initialTargetLongitude!,
+      accuracyMeters: widget.initialTargetAccuracy,
+      capturedAt:
+          widget.initialTargetCapturedAt ??
+          DateTime.fromMillisecondsSinceEpoch(0),
+      source: widget.initialTargetSharedLocation
+          ? 'chat_shared_location'
+          : widget.initialTargetHistorical
+          ? 'sos_history'
+          : 'sos',
+    );
   }
 
   @override
   void dispose() {
     _nearby.removeListener(_onNearbyChanged);
     _dependencies.featureFlags.removeListener(_onFeatureFlagsChanged);
+    _dependencies.internalExperience.removeListener(_onDemoModeChanged);
     _nearby.stopBatteryMetadataUpdates();
     _dependencies.connectivityStatus.removeListener(_onNearbyChanged);
     super.dispose();
@@ -94,8 +177,59 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   void _onNearbyChanged() {
     if (!mounted) return;
-    setState(() {});
+    setState(() {
+      _myLocation = _nearby.lastLiveLocation ?? _myLocation;
+    });
+    _maybePromptForLocationConsent();
     unawaited(_loadSavedDevices());
+  }
+
+  void _maybePromptForLocationConsent() {
+    if (!_nearby.locationSettingsLoaded ||
+        _nearby.liveLocationSharingConsent != null ||
+        _locationConsentPromptPending) {
+      return;
+    }
+    _locationConsentPromptPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _locationConsentPromptPending = false;
+        return;
+      }
+      unawaited(_showLocationConsent(firstUse: true));
+    });
+  }
+
+  Future<void> _showLocationConsent({required bool firstUse}) async {
+    final approved = await showNearbyLiveLocationConsentDialog(
+      context,
+      firstUse: firstUse,
+    );
+    _locationConsentPromptPending = false;
+    if (approved == null) return;
+
+    var permissionGranted = true;
+    if (approved) {
+      try {
+        permissionGranted = await _dependencies.permissionService
+            .requestLiveLocationPermission();
+      } on Object {
+        permissionGranted = false;
+      }
+    }
+    await _nearby.setLiveLocationConsent(approved);
+    if (approved) {
+      await _nearby.locationCoordinator?.onPermissionOrReadinessChanged();
+    }
+    if (approved && !permissionGranted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'ยังไม่ได้รับอนุญาต Location • ตรวจสอบสิทธิ์ได้ในตั้งค่า Android',
+          ),
+        ),
+      );
+    }
   }
 
   void _onFeatureFlagsChanged() {
@@ -111,6 +245,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
     setState(() {});
   }
 
+  void _onDemoModeChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Future<void> _loadSavedDevices() async {
     final devices = await _dependencies.repositories.nearbyDevices
         .listDevices();
@@ -118,46 +257,70 @@ class _NearbyScreenState extends State<NearbyScreen> {
     setState(() => _savedDevices = devices);
   }
 
-  Future<void> _shareCurrentLocation() async {
-    if (_sharingLocation) return;
-    setState(() => _sharingLocation = true);
+  Future<void> _locateCurrentPosition() async {
+    if (_locating) return;
+    setState(() => _locating = true);
     try {
-      final result = await _dependencies.locationService
-          .getCurrentOrLastKnown();
-      if (!mounted) return;
+      final result = await _dependencies.locationService.getFreshLocation();
       final location = result.location;
-      if (location == null) {
-        final detail = switch (result.failure) {
-          LocationFailure.permissionDenied => 'ต้องอนุญาตตำแหน่งก่อน',
-          LocationFailure.permissionDeniedForever =>
-            'เปิดสิทธิ์ตำแหน่งจากการตั้งค่า Android',
-          LocationFailure.serviceDisabled => 'เปิด Location/GPS ก่อน',
-          _ => 'ยังอ่านตำแหน่งไม่ได้ ลองอีกครั้งภายหลัง',
-        };
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(detail)));
+      if (!mounted) return;
+      if (location == null ||
+          !NearbyLocationQuality.isEligibleForCurrentSharing(
+            location,
+            now: DateTime.now(),
+          )) {
+        final failure = result.failure;
+        final mayNeedSettings =
+            failure == LocationFailure.approximatePermission ||
+            failure == LocationFailure.permissionDeniedForever;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_nearbyLocationFailureText(failure)),
+            action: mayNeedSettings
+                ? SnackBarAction(
+                    label: 'ตั้งค่า',
+                    onPressed: () => unawaited(
+                      _dependencies.locationService.openAppSettings(),
+                    ),
+                  )
+                : null,
+          ),
+        );
         return;
       }
-      setState(() => _myLocation = location);
-      await _nearby.publishMapLocation(location);
-      if (!mounted) return;
-      final count = _nearby.connectedPeers
-          .where((peer) => _nearby.deviceIdForEndpoint(peer.endpointId) != null)
-          .length;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            count == 0
-                ? 'แสดงตำแหน่งของคุณบนเครื่องนี้แล้ว ยังไม่มี peer ที่ยืนยันและเชื่อมต่อ'
-                : 'แชร์ตำแหน่งล่าสุดให้ peer ที่ยืนยันแล้ว $count เครื่อง',
+      setState(() {
+        _myLocation = location;
+        _locationFocusRequest++;
+      });
+      if (NearbyLocationQuality.confidence(location.accuracyMeters) ==
+          LocationConfidence.low) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'ตำแหน่งเป็นค่าโดยประมาณ: ${NearbyLocationQuality.accuracyLabel(location.accuracyMeters)}',
+            ),
           ),
-        ),
-      );
+        );
+      }
     } finally {
-      if (mounted) setState(() => _sharingLocation = false);
+      if (mounted) setState(() => _locating = false);
     }
   }
+
+  String _nearbyLocationFailureText(LocationFailure? failure) =>
+      switch (failure) {
+        LocationFailure.permissionDenied => 'กรุณาอนุญาต Location ขณะใช้แอป',
+        LocationFailure.permissionDeniedForever =>
+          'สิทธิ์ Location ถูกปิดไว้ เปิด Precise Location ในการตั้งค่า',
+        LocationFailure.approximatePermission =>
+          'อนุญาตเฉพาะตำแหน่งคร่าว ๆ กรุณาเลือก Precise Location',
+        LocationFailure.serviceDisabled => 'กรุณาเปิด Location/GPS ของเครื่อง',
+        LocationFailure.timeout => 'ยังหา GPS สดไม่พบ ลองอีกครั้งกลางแจ้ง',
+        LocationFailure.staleFix => 'GPS ส่งตำแหน่งเก่าหรือเวลาไม่ถูกต้อง',
+        LocationFailure.invalidFix => 'ข้อมูลพิกัดไม่ถูกต้อง',
+        LocationFailure.unavailable ||
+        null => 'ยังรับตำแหน่งปัจจุบันไม่ได้ กรุณาตรวจสอบ GPS',
+      };
 
   void _showPeerDetails(String deviceId) {
     final device = _mapPeers.where((peer) => peer.id == deviceId).firstOrNull;
@@ -166,6 +329,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
       showNearbyPeerDetailSheet(
         context: context,
         device: device,
+        nearby: _nearby,
         myLocation: _myLocation,
         showBattery: _dependencies.featureFlags.isEnabled(
           RelioFeatureFlag.peerBatteryUi,
@@ -204,52 +368,54 @@ class _NearbyScreenState extends State<NearbyScreen> {
     );
   }
 
-  List<RelioDevice> get _mapPeers => _savedDevices
-      .where(
-        (saved) =>
-            !RelioMockData.isDemoId(saved.deviceId) &&
-            _matches(_nearby.peerStatuses[saved.deviceId] ?? saved.status),
-      )
-      .map((saved) {
-        final status = _nearby.peerStatuses[saved.deviceId] ?? saved.status;
-        return RelioDevice(
-          id: saved.deviceId,
-          name: saved.displayName,
-          status: status,
-          signalQuality: 0,
-          isConnected: _nearby.isDeviceConnected(saved.deviceId),
-          isDemo: false,
-          presence: _nearby.isDeviceConnected(saved.deviceId)
-              ? PeerPresence.connected
-              : PeerPresence.stale,
-          lastSeenAt: saved.lastSeenAt,
-          batteryLevel:
-              isFreshNearbyBattery(
-                saved,
-                connected: _nearby.isDeviceConnected(saved.deviceId),
-              )
-              ? saved.batteryLevel
-              : null,
-          isCharging:
-              isFreshNearbyBattery(
-                saved,
-                connected: _nearby.isDeviceConnected(saved.deviceId),
-              )
-              ? saved.isCharging
-              : null,
-          peerDeviceModel: saved.peerDeviceModel,
-          locationLatitude: saved.peerLatitude,
-          locationLongitude: saved.peerLongitude,
-          locationAccuracyMeters: saved.peerLocationAccuracy,
-          locationCapturedAt: saved.peerLocationCapturedAt,
-        );
-      })
-      .toList(growable: false);
-
-  Future<void> _loadBondedDevices() async {
-    final devices = await _nearby.bondedBluetoothDevices();
-    if (!mounted) return;
-    setState(() => _bondedDevices = devices);
+  List<RelioDevice> get _mapPeers {
+    final currentIds = currentNearbyMapPeerIds(
+      savedDevices: _savedDevices,
+      authenticatedPeers: _nearby.authenticatedConnectedPeers,
+      now: DateTime.now(),
+    );
+    return _savedDevices
+        .where(
+          (saved) =>
+              currentIds.contains(saved.deviceId) &&
+              !RelioMockData.isDemoId(saved.deviceId) &&
+              _matches(_nearby.peerStatuses[saved.deviceId] ?? saved.status),
+        )
+        .map((saved) {
+          final status = _nearby.peerStatuses[saved.deviceId] ?? saved.status;
+          return RelioDevice(
+            id: saved.deviceId,
+            name: saved.displayName,
+            status: status,
+            signalQuality: 0,
+            isConnected: _nearby.isDeviceConnected(saved.deviceId),
+            isDemo: false,
+            presence: _nearby.isDeviceConnected(saved.deviceId)
+                ? PeerPresence.connected
+                : PeerPresence.stale,
+            lastSeenAt: saved.lastSeenAt,
+            batteryLevel:
+                isFreshNearbyBattery(
+                  saved,
+                  connected: _nearby.isDeviceConnected(saved.deviceId),
+                )
+                ? saved.batteryLevel
+                : null,
+            isCharging:
+                isFreshNearbyBattery(
+                  saved,
+                  connected: _nearby.isDeviceConnected(saved.deviceId),
+                )
+                ? saved.isCharging
+                : null,
+            peerDeviceModel: saved.peerDeviceModel,
+            locationLatitude: saved.peerLatitude,
+            locationLongitude: saved.peerLongitude,
+            locationAccuracyMeters: saved.peerLocationAccuracy,
+            locationCapturedAt: saved.peerLocationCapturedAt,
+          );
+        })
+        .toList(growable: false);
   }
 
   Future<void> _startSearching() async {
@@ -292,19 +458,28 @@ class _NearbyScreenState extends State<NearbyScreen> {
   Future<void> _openPeerChat(
     String deviceId,
     String displayName,
-    DeviceStatus status,
-  ) async {
+    DeviceStatus status, {
+    bool viaRelay = false,
+  }) async {
     try {
       // device ID ไม่ใช่ conversation ID; ให้ Repository เลือกคู่ principal ปัจจุบันก่อน
-      final conversation = await _dependencies.repositories.ownerContext.run(
-        () => _dependencies.repositories.conversations.ensureConversation(
-          id: deviceId,
-          participantId: deviceId,
-          displayName: displayName,
-          participantStatus: status,
-        ),
-      );
-      if (mounted) context.push('/chat/${conversation.id}');
+      final repositories = _dependencies.repositories;
+      final conversation = viaRelay
+          ? await _nearby.openRemoteTextConversation(deviceId)
+          : await repositories.ownerContext.run(
+              () => repositories.conversations.ensureConversation(
+                id: deviceId,
+                participantId: deviceId,
+                displayName: displayName,
+                participantStatus: status,
+              ),
+            );
+      if (!mounted) return;
+      if (conversation == null) {
+        _showSnack('ยังยืนยันผู้รับผ่านรีเลย์ QA ไม่ได้ กรุณาลองอีกครั้ง');
+        return;
+      }
+      context.push('/chat/${conversation.id}');
     } on Object {
       if (mounted) _showSnack('เปิดแชทไม่สำเร็จ กรุณาลองอีกครั้ง');
     }
@@ -448,6 +623,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
             locationLongitude: device.peerLongitude,
             locationAccuracyMeters: device.peerLocationAccuracy,
             locationCapturedAt: device.peerLocationCapturedAt,
+            avatarPath: _nearby.avatarPathFor(device.deviceId),
           );
         })
         .toList(growable: false);
@@ -462,6 +638,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
 
   RelioDevice _toLiveDevice(NearbyPeer peer) {
     final state = _nearby.peerStates[peer.endpointId];
+    final verified =
+        peer.deviceId != null &&
+        _nearby.isEndpointVerifiedConnected(peer.endpointId);
     final status = _nearby.peerStatuses[peer.deviceId] ?? DeviceStatus.normal;
     final saved = _savedDevice(peer.deviceId);
     final freshBattery =
@@ -475,17 +654,14 @@ class _NearbyScreenState extends State<NearbyScreen> {
       name: peer.name,
       status: status,
       signalQuality: 0,
-      isConnected:
-          state == NearbyConnectionState.connected && peer.deviceId != null,
+      isConnected: verified,
       isDemo: false,
       presence: _nearby.peerErrors.containsKey(peer.endpointId)
           ? PeerPresence.failed
           : switch (state) {
               NearbyConnectionState.connecting => PeerPresence.connecting,
               NearbyConnectionState.connected =>
-                peer.deviceId == null
-                    ? PeerPresence.connecting
-                    : PeerPresence.connected,
+                verified ? PeerPresence.connected : PeerPresence.connecting,
               NearbyConnectionState.incomingRequest => PeerPresence.connecting,
               NearbyConnectionState.disconnected ||
               null => PeerPresence.discovered,
@@ -498,6 +674,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
       locationLongitude: saved?.peerLongitude,
       locationAccuracyMeters: saved?.peerLocationAccuracy,
       locationCapturedAt: saved?.peerLocationCapturedAt,
+      avatarPath: peer.deviceId == null
+          ? null
+          : _nearby.avatarPathFor(peer.deviceId!),
     );
   }
 
@@ -512,18 +691,32 @@ class _NearbyScreenState extends State<NearbyScreen> {
     final status = _dependencies.connectivityStatus.status;
     final readiness = _nearby.readiness ?? status.runtime.nearbyReadiness;
     final livePeers = _livePeers;
-    final realDevices = [
-      ...livePeers
-          .map(_toLiveDevice)
-          .where((device) => _matches(device.status)),
-      ..._stalePeers.where((device) => _matches(device.status)),
-    ];
-    final demoDevices = RelioMockData.devices
+    final reachableCount = _nearby.reachablePeerCount;
+    final remotePeers = _nearby.remoteReachablePeers;
+    final remoteIds = remotePeers.map((peer) => peer.deviceId).toSet();
+    final knownDevices = [
+      ...livePeers.map(_toLiveDevice),
+      ..._stalePeers,
+    ].where((device) => !remoteIds.contains(device.id)).toList();
+    final realDevices = knownDevices
+        .where((device) => _matches(device.status))
+        .toList();
+    final demoEnabled = _dependencies.internalExperience.demoEnabled;
+    final effectiveDemoDevices = demoEnabled
+        ? RelioMockData.devices
+        : const <RelioDevice>[];
+    final demoDevices = effectiveDemoDevices
         .where((device) => _matches(device.status))
         .toList(growable: false);
-    final urgentCount = _savedDevices
-        .where((device) => device.status == DeviceStatus.sos)
-        .length;
+    final realSosCount = [
+      ...livePeers.map(_toLiveDevice),
+      ..._stalePeers,
+    ].where((device) => device.status == DeviceStatus.sos).length;
+    final urgentCount =
+        realSosCount +
+        effectiveDemoDevices
+            .where((device) => device.status == DeviceStatus.sos)
+            .length;
     final mapEnabled = _dependencies.featureFlags.isEnabled(
       RelioFeatureFlag.nearbyMapUi,
     );
@@ -540,10 +733,17 @@ class _NearbyScreenState extends State<NearbyScreen> {
               peers: _mapPeers,
               myLocation: _myLocation,
               navigationTargetId: _navigationTargetId,
+              targetLocationOverride: _targetLocationOverride,
+              targetLocationHistorical: widget.initialTargetHistorical,
+              targetLocationShared: widget.initialTargetSharedLocation,
               onPeerSelected: _showPeerDetails,
               showBattery: batteryEnabled,
+              locationFocusRequest: _locationFocusRequest,
             ),
-          if (mapEnabled && _navigationTargetId != null) _routePreviewCard(),
+          if (mapEnabled && _targetLocationOverride != null)
+            _selectedLocationCard()
+          else if (mapEnabled && _navigationTargetId != null)
+            _routePreviewCard(),
           SafeArea(
             child: Align(
               alignment: Alignment.topCenter,
@@ -552,8 +752,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 child: _nearbyPanel(
                   status: status,
                   readiness: readiness,
-                  peerCount: realDevices.length,
+                  peerCount: reachableCount,
                   urgentCount: urgentCount,
+                  knownDevices: knownDevices,
+                  remoteCount: remotePeers.length,
+                  demoDevices: effectiveDemoDevices,
                 ),
               ),
             ),
@@ -576,6 +779,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                 children: [
                   const SizedBox(height: 10),
                   Container(
+                    key: const ValueKey('nearby-sheet-handle'),
                     width: 42,
                     height: 4,
                     decoration: BoxDecoration(
@@ -589,7 +793,7 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         onTap: () => setState(() => _listMode = true),
                         child: Center(
                           child: Text(
-                            'อุปกรณ์ที่พบจริง • ${realDevices.length} เครื่อง  ดูรายการ',
+                            'อุปกรณ์ที่เข้าถึงได้ • $reachableCount เครื่อง  ดูรายการ',
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                         ),
@@ -601,6 +805,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
                         scrollController: scrollController,
                         realDevices: realDevices,
                         livePeers: livePeers,
+                        remotePeers: _matches(DeviceStatus.normal)
+                            ? remotePeers
+                            : const [],
+                        reachableCount: reachableCount,
                         demoDevices: demoDevices,
                         readiness: readiness,
                       ),
@@ -614,10 +822,10 @@ class _NearbyScreenState extends State<NearbyScreen> {
               right: 16,
               bottom: 160,
               child: FloatingActionButton.small(
-                heroTag: 'nearby-share-location',
-                onPressed: _sharingLocation ? null : _shareCurrentLocation,
-                tooltip: 'แชร์ตำแหน่งล่าสุดกับ peer ที่เชื่อมต่อ',
-                child: _sharingLocation
+                heroTag: 'nearby-locate',
+                onPressed: _locating ? null : _locateCurrentPosition,
+                tooltip: 'ไปยังตำแหน่งของฉัน',
+                child: _locating
                     ? const SizedBox(
                         width: 20,
                         height: 20,
@@ -643,11 +851,64 @@ class _NearbyScreenState extends State<NearbyScreen> {
     );
   }
 
+  Widget _selectedLocationCard() {
+    final location = _targetLocationOverride!;
+    final capturedAt = widget.initialTargetCapturedAt;
+    final updated = capturedAt == null
+        ? 'ไม่ทราบเวลาอัปเดต'
+        : 'บันทึกเมื่อ ${capturedAt.year}-${capturedAt.month.toString().padLeft(2, '0')}-${capturedAt.day.toString().padLeft(2, '0')} ${capturedAt.hour.toString().padLeft(2, '0')}:${capturedAt.minute.toString().padLeft(2, '0')}';
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: 104,
+      child: Card(
+        child: ListTile(
+          leading: Icon(
+            widget.initialTargetSharedLocation
+                ? Icons.location_on_outlined
+                : Icons.location_history_rounded,
+            color: widget.initialTargetSharedLocation
+                ? RelioColors.primary
+                : RelioColors.rescue,
+          ),
+          title: Text(
+            widget.initialTargetSharedLocation
+                ? 'ตำแหน่งที่แชร์'
+                : widget.initialTargetHistorical
+                ? 'ตำแหน่ง SOS ที่บันทึกไว้'
+                : 'ตำแหน่งจากคำขอ SOS',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            '${location.latitude.toStringAsFixed(widget.initialTargetSharedLocation ? 6 : 5)}, ${location.longitude.toStringAsFixed(widget.initialTargetSharedLocation ? 6 : 5)}'
+            '${location.accuracyMeters == null ? '' : ' • ±${location.accuracyMeters!.round()} ม.'}\n'
+            '$updated • ไม่ใช่ตำแหน่งสด',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: IconButton(
+            tooltip: widget.initialTargetSharedLocation
+                ? 'ปิดตำแหน่งที่แชร์'
+                : 'ปิดตำแหน่ง SOS',
+            onPressed: () => setState(() {
+              _targetLocationOverride = null;
+              _navigationTargetId = null;
+            }),
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _nearbyPanel({
     required InternetStatus status,
     required NearbyReadiness readiness,
     required int peerCount,
     required int urgentCount,
+    required List<RelioDevice> knownDevices,
+    required int remoteCount,
+    required List<RelioDevice> demoDevices,
   }) {
     final colors = Theme.of(context).colorScheme;
     return Material(
@@ -764,10 +1025,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
                             label: Text(
                               _filterLabel(
                                 filter,
-                                _livePeers
-                                    .map(_toLiveDevice)
-                                    .toList(growable: false),
-                                RelioMockData.devices,
+                                knownDevices,
+                                demoDevices,
+                                remoteCount,
                               ),
                             ),
                             selected: _filter == filter,
@@ -797,6 +1057,8 @@ class _NearbyScreenState extends State<NearbyScreen> {
     required ScrollController scrollController,
     required List<RelioDevice> realDevices,
     required List<NearbyPeer> livePeers,
+    required List<NearbyReachablePeer> remotePeers,
+    required int reachableCount,
     required List<RelioDevice> demoDevices,
     required NearbyReadiness readiness,
   }) {
@@ -805,11 +1067,11 @@ class _NearbyScreenState extends State<NearbyScreen> {
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
       children: [
         Text(
-          'อุปกรณ์ที่พบจริง • ${realDevices.length} เครื่อง',
+          'อุปกรณ์ที่เข้าถึงได้ • $reachableCount เครื่อง',
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
-        if (realDevices.isEmpty)
+        if (realDevices.isEmpty && remotePeers.isEmpty)
           const Card(
             child: ListTile(
               leading: Icon(Icons.radar_outlined),
@@ -829,10 +1091,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
               orElse: () => null,
             );
             final saved = _savedDevice(device.id);
-            final noLocation = !NearbyMapCalculations.isValidPoint(
-              device.locationLatitude,
-              device.locationLongitude,
-            );
             return Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Row(
@@ -853,23 +1111,6 @@ class _NearbyScreenState extends State<NearbyScreen> {
                                     : () => _showPeerDetails(saved.deviceId))
                               : () => _openRealPeer(peer),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 12, bottom: 4),
-                          child: Text(
-                            noLocation
-                                ? 'ยังไม่มีตำแหน่ง • peer ยังอยู่ในรายการ'
-                                : NearbyMapCalculations.freshnessLabel(
-                                    device.locationCapturedAt,
-                                    DateTime.now(),
-                                  ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                        ),
-                        if (saved?.isTrusted == true)
-                          const Padding(
-                            padding: EdgeInsets.only(left: 12, bottom: 4),
-                            child: Text('อุปกรณ์ที่เชื่อถือแล้ว'),
-                          ),
                       ],
                     ),
                   ),
@@ -910,84 +1151,48 @@ class _NearbyScreenState extends State<NearbyScreen> {
               ),
             );
           }),
-        const SizedBox(height: 8),
-        Text('ข้อมูลตัวอย่าง', style: Theme.of(context).textTheme.titleMedium),
-        Text(
-          'ข้อมูล DEMO แยกจากอุปกรณ์จริงและไม่แสดงเป็น marker',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        ...demoDevices.map(
-          (device) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: RelioDeviceCard(
-              device: device,
-              showBattery: _batteryEnabled,
-              onTap: () => context.push('/chat/${device.id}'),
+        for (final peer in remotePeers)
+          Card(
+            key: ValueKey('nearby-remote-${peer.deviceId}'),
+            child: ListTile(
+              leading: const Icon(Icons.alt_route),
+              title: Text(peer.name),
+              subtitle: Text('เข้าถึงผ่านรีเลย์ • ${peer.hops} ทอด'),
+              trailing: _nearby.canOpenRemoteTextChat
+                  ? const Icon(Icons.chat_bubble_outline)
+                  : null,
+              onTap: _nearby.canOpenRemoteTextChat
+                  ? () => _openPeerChat(
+                      peer.deviceId,
+                      peer.name,
+                      DeviceStatus.normal,
+                      viaRelay: true,
+                    )
+                  : null,
             ),
           ),
-        ),
-        ExpansionTile(
-          leading: const Icon(Icons.build_circle_outlined),
-          title: const Text('เครื่องมือ QA / Diagnostics'),
-          subtitle: const Text('ใช้เฉพาะการทดสอบ Bluetooth Classic'),
-          children: [
-            if (_nearby.compatibilityFallbackAvailable &&
-                !_nearby.compatibilityModeActive)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () async {
-                          await _nearby.activateCompatibilityMode(
-                            serverRole: true,
-                          );
-                          if (mounted) {
-                            _showSnack('RFCOMM listener พร้อมรับการเชื่อมต่อ');
-                          }
-                        },
-                        child: const Text('Listener'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () async {
-                          await _nearby.activateCompatibilityMode(
-                            serverRole: false,
-                            bondedOnly: true,
-                          );
-                          await _loadBondedDevices();
-                          if (mounted) _showSnack('โหลดอุปกรณ์ที่จับคู่แล้ว');
-                        },
-                        child: const Text('อุปกรณ์ที่จับคู่'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (_nearby.compatibilityModeActive)
-              const ListTile(
-                leading: Icon(Icons.bluetooth_connected),
-                title: Text('Bluetooth Classic QA ทำงานอยู่'),
-                subtitle: Text('ใช้หน้า Diagnostics เพื่อเปลี่ยนโหมด'),
-              ),
-            ..._bondedDevices.map(
-              (device) => ListTile(
-                leading: const Icon(Icons.bluetooth_connected),
-                title: Text(device.name),
-                subtitle: Text(
-                  'Paired • ${bluetoothClassicAddressSuffix(device.endpointId)}',
-                ),
-                onTap: () => _openRealPeer(
-                  NearbyPeer(id: device.endpointId, name: device.name),
-                ),
+        if (demoDevices.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'ข้อมูลตัวอย่าง',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          Text(
+            'ข้อมูล DEMO แยกจากอุปกรณ์จริงและไม่แสดงเป็น marker',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          ...demoDevices.map(
+            (device) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: RelioDeviceCard(
+                device: device,
+                showBattery: _batteryEnabled,
+                onTap: () => context.push('/chat/${device.id}'),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ],
     );
   }
@@ -1000,8 +1205,9 @@ class _NearbyScreenState extends State<NearbyScreen> {
     NearbyFilter filter,
     List<RelioDevice> real,
     List<RelioDevice> demo,
+    int remoteCount,
   ) {
-    final total = real.length + demo.length;
+    final total = real.length + demo.length + remoteCount;
     return switch (filter) {
       NearbyFilter.all => 'ทั้งหมด ($total)',
       NearbyFilter.sos =>

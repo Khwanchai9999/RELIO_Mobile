@@ -1,3 +1,4 @@
+// หน้าขอส่งลิงก์กู้คืนรหัสผ่าน และแสดงผลการส่งคำขอจาก AuthService
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +7,7 @@ import '../../core/relio_dependencies.dart';
 import 'auth_screens.dart' show AuthScaffold;
 import 'register_validation.dart';
 
+// รับคำขอกู้รหัสผ่านและส่งผ่าน AuthService โดยไม่เปิดเผยว่ามีอีเมลในระบบหรือไม่
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
 
@@ -13,6 +15,7 @@ class ForgotPasswordScreen extends StatefulWidget {
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Forgot Password Screen State)
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _form = GlobalKey<FormState>();
   final _email = TextEditingController();

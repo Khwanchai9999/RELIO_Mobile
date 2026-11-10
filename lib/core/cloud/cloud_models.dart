@@ -1,5 +1,7 @@
 import '../../data/models/prototype_models.dart';
 
+// แบบจำลองสถานะและ DTO ที่ใช้ข้าม CloudDataSource boundary
+// แยก Cloud session, ข้อมูลข้อความ และ cursor ของ server ออกจาก model ฝั่ง UI
 enum CloudState { notConfigured, signedOut, ready, offline, error }
 
 enum AuthState {
@@ -16,10 +18,24 @@ class CloudIdentity {
     required this.userId,
     required this.email,
     this.displayName,
+    this.isAnonymous = false,
+    this.pendingEmail,
   });
   final String userId;
   final String email;
   final String? displayName;
+  final bool isAnonymous;
+  final String? pendingEmail;
+}
+
+class CloudEmailChangeResult {
+  const CloudEmailChangeResult({
+    required this.identity,
+    required this.verified,
+  });
+
+  final CloudIdentity identity;
+  final bool verified;
 }
 
 class CloudProfile {
@@ -27,6 +43,20 @@ class CloudProfile {
 
   final String userId;
   final String displayName;
+}
+
+class CloudPrivateBackupRecord {
+  const CloudPrivateBackupRecord({
+    required this.recordType,
+    required this.sourceId,
+    required this.payload,
+    this.revision = 1,
+  });
+
+  final String recordType;
+  final String sourceId;
+  final Map<String, dynamic> payload;
+  final int revision;
 }
 
 class SupabaseConfig {
@@ -119,6 +149,20 @@ class CloudMessagePage {
   final bool hasMore;
 }
 
+class CloudAttachmentCursor {
+  const CloudAttachmentCursor({required this.createdAt, required this.id});
+
+  final DateTime createdAt;
+  final String id;
+}
+
+class CloudAttachmentPage {
+  const CloudAttachmentPage({required this.attachments, required this.hasMore});
+
+  final List<CloudAttachmentDto> attachments;
+  final bool hasMore;
+}
+
 class CloudReadReceipt {
   const CloudReadReceipt({
     required this.messageId,
@@ -165,6 +209,9 @@ class CloudAttachmentDto {
     required this.fileName,
     required this.byteSize,
     required this.transferStatus,
+    this.ownerUserId,
+    this.createdAt,
+    this.sha256,
   });
   final String id;
   final String messageId;
@@ -174,6 +221,9 @@ class CloudAttachmentDto {
   final String fileName;
   final int byteSize;
   final String transferStatus;
+  final String? ownerUserId;
+  final DateTime? createdAt;
+  final String? sha256;
   Map<String, dynamic> toJson() => {
     'id': id,
     'message_id': messageId,
@@ -183,6 +233,9 @@ class CloudAttachmentDto {
     'file_name': fileName,
     'byte_size': byteSize,
     'transfer_status': transferStatus,
+    if (ownerUserId != null) 'owner_user_id': ownerUserId,
+    if (createdAt != null) 'created_at': createdAt!.toUtc().toIso8601String(),
+    if (sha256 != null) 'sha256': sha256,
   };
   factory CloudAttachmentDto.fromJson(Map<String, dynamic> json) =>
       CloudAttachmentDto(
@@ -194,6 +247,11 @@ class CloudAttachmentDto {
         fileName: json['file_name'] as String,
         byteSize: (json['byte_size'] as num).toInt(),
         transferStatus: json['transfer_status'] as String,
+        ownerUserId: json['owner_user_id'] as String?,
+        createdAt: json['created_at'] == null
+            ? null
+            : DateTime.parse(json['created_at'] as String),
+        sha256: json['sha256'] as String?,
       );
 }
 

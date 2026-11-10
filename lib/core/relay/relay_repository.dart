@@ -5,6 +5,8 @@ import 'package:drift/drift.dart';
 import '../database/app_database.dart';
 import 'relay_models.dart';
 
+// สัญญาสำหรับบันทึกและค้น envelope/ผลการส่งต่อใน SQLite
+// การแยก interface ช่วยให้ RelayEngine ใช้ repository จริงหรือ test double ได้
 abstract interface class RelayRepository {
   Future<RelayPacketRecord?> getPacket(String packetId);
   Future<RelayPacketRecord?> getForPayload(

@@ -1,3 +1,4 @@
+// กฎตรวจสอบข้อมูลสมัครสมาชิกที่ใช้ร่วมกัน เพื่อให้เงื่อนไขไม่กระจายอยู่ในวิดเจ็ต
 abstract final class RegisterValidation {
   static String normalizeEmail(String value) => value.trim();
 
@@ -7,6 +8,7 @@ abstract final class RegisterValidation {
     return isValidEmail(email) ? null : 'รูปแบบอีเมลไม่ถูกต้อง';
   }
 
+  // ตรวจรูปแบบและความยาวอีเมลในเครื่องก่อนส่งแบบฟอร์ม ไม่ได้ยืนยันว่า mailbox มีอยู่จริง
   static bool isValidEmail(String email) {
     if (email.length > 254 || email.contains(RegExp(r'\s'))) return false;
     final parts = email.split('@');

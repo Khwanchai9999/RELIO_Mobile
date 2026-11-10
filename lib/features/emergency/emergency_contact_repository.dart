@@ -1,3 +1,4 @@
+// Repository สำหรับข้อมูลผู้ติดต่อฉุกเฉินใน SQLite โดยผูกการอ่านและแก้ไขกับเจ้าของข้อมูล
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -5,6 +6,7 @@ import '../../core/database/app_database.dart';
 import '../../core/identity/owner_context.dart';
 import '../../core/repositories/principal_profile_repository.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Emergency Contact Entry
 class EmergencyContactEntry {
   const EmergencyContactEntry({
     required this.id,
@@ -21,6 +23,7 @@ class EmergencyContactEntry {
   final String? note;
 }
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Emergency Contact Repository
 class EmergencyContactRepository {
   const EmergencyContactRepository(this.db, this.profiles);
 
@@ -52,6 +55,7 @@ class EmergencyContactRepository {
         .toList(growable: false);
   }
 
+  // ตรวจรูปแบบข้อมูลก่อนบันทึก และตรวจ owner ซ้ำใน transaction เพื่อไม่ให้รายชื่อข้ามบัญชี
   Future<void> save({
     String? id,
     required String name,

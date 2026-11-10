@@ -40,6 +40,8 @@ class MediaTransferPolicy {
       mediaType == 'video' ? maxVideoBytes : maxImageBytes;
 }
 
+// จัดการไฟล์แนบภายใต้ managed directory พร้อมตรวจชนิดและขนาดข้อมูล
+// Repository/SyncEngine ใช้ผลตรวจนี้ก่อนคัดลอกหรือส่งไฟล์; UI ไม่จัดการ path เอง
 class MediaStorageService {
   MediaStorageService({
     this.rootDirectory,
@@ -131,33 +133,65 @@ class MediaStorageService {
   Future<String> sha256ForFile(String filePath) async =>
       (await sha256.bind(File(filePath).openRead()).first).toString();
 
-  /// Stores bytes returned by a cloud adapter without exposing filesystem
+  /// บันทึก bytes ที่ได้จาก Cloud adapter โดยซ่อนรายละเอียด filesystem
+  /// จาก UI และ implementation ของ Cloud  /// Stores bytes returned by a cloud adapter without exposing filesystem
   /// details to the UI or cloud implementation.
   Future<String> storeDownloadedBytes({
     required Uint8List bytes,
     required String fileName,
     required String mimeType,
+    required int expectedByteSize,
+    String? expectedSha256,
   }) async {
+    if (expectedByteSize <= 0 || bytes.length != expectedByteSize) {
+      throw const MediaStorageException(
+        'ขนาดไฟล์ที่ดาวน์โหลดไม่ตรงกับ metadata',
+      );
+    }
     if (bytes.isEmpty) {
       throw const MediaStorageException('ไฟล์ที่ดาวน์โหลดว่างเปล่า');
     }
     final mediaType = _mediaTypeFor(mimeType);
-    if (mediaType == null || bytes.length > policy.maxFor(mediaType)) {
+    if (mediaType == null ||
+        bytes.length > policy.maxFor(mediaType) ||
+        !_matchesSignature(
+          mediaType,
+          mimeType,
+          Uint8List.sublistView(
+            bytes,
+            0,
+            bytes.length < 64 ? bytes.length : 64,
+          ),
+        )) {
       throw const MediaStorageException(
         'ไฟล์ที่ดาวน์โหลดไม่รองรับหรือมีขนาดเกินกำหนด',
       );
     }
+    final actualSha256 = sha256.convert(bytes).toString();
+    if (expectedSha256 != null && actualSha256 != expectedSha256) {
+      throw const MediaStorageException(
+        'SHA-256 ของไฟล์ Cloud ไม่ตรงกับ metadata',
+      );
+    }
     final root = await _root();
-    final destination = File(
-      path.join(root.path, '${_uuid.v4()}${_extensionFor(mimeType, fileName)}'),
-    );
-    await destination.writeAsBytes(bytes, flush: true);
+    final extension = _extensionFor(mimeType, fileName);
+    final stem = _uuid.v4();
+    final temporary = File(path.join(root.path, '$stem.part'));
+    final destination = File(path.join(root.path, '$stem$extension'));
+    try {
+      await temporary.writeAsBytes(bytes, flush: true);
+      await temporary.rename(destination.path);
+    } on Object {
+      if (await temporary.exists()) await temporary.delete();
+      rethrow;
+    }
     return destination.path;
   }
 
   Future<bool> fileExists(String filePath) => File(filePath).exists();
 
-  /// Cloud uploads may read only files RELIO copied into its managed root.
+  /// อนุญาตให้อัปโหลดเฉพาะไฟล์ที่ RELIO คัดลอกไว้ใน managed root
+  /// เพื่อไม่ให้แถวคิวชี้ path ใดก็ได้ในเครื่องแล้วกลายเป็น Cloud upload  /// Cloud uploads may read only files RELIO copied into its managed root.
   /// This prevents a queue row from turning an arbitrary local path into a
   /// Cloud upload.
   Future<bool> isManagedFile(String filePath) async {

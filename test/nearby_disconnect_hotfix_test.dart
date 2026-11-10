@@ -401,6 +401,60 @@ void main() {
     await establish(pair, approve: false);
   });
 
+  test(
+    'secondary peer takes one bounded turn when elected initiator is never rediscovered',
+    () async {
+      final pair = await HandshakePair.create(
+        requireBothNativeAccepts: true,
+        connectionAttemptTimeout: const Duration(milliseconds: 40),
+      );
+      addTearDown(pair.close);
+      await establish(pair);
+      await pair.serviceA.disconnect('endpoint-b');
+      await cleanBoth(pair);
+
+      final aIsPrimary =
+          (await pair.cryptoA.getPublicIdentity()).fingerprint.compareTo(
+            (await pair.cryptoB.getPublicIdentity()).fingerprint,
+          ) <
+          0;
+      final secondaryService = aIsPrimary ? pair.serviceB : pair.serviceA;
+      final secondaryTransport = aIsPrimary ? pair.transportB : pair.transportA;
+      final primaryTransport = aIsPrimary ? pair.transportA : pair.transportB;
+      final requestsBefore = secondaryTransport.requestCalls;
+      final primaryRequestsBefore = primaryTransport.requestCalls;
+
+      // Only the secondary sees the peer again; the elected initiator never
+      // receives a rediscovery callback in this one-sided radio scenario.
+      secondaryTransport.discoverPeer();
+      secondaryTransport.discoverPeer();
+      secondaryTransport.discoverPeer();
+      await waitFor(
+        () =>
+            secondaryService
+                .transientConnectionCounts['secondaryInitiatorFallbackTimers'] ==
+            1,
+      );
+      expect(secondaryTransport.requestCalls, requestsBefore);
+
+      await connected(pair);
+      expect(secondaryTransport.requestCalls, requestsBefore + 1);
+      secondaryTransport.discoverPeer();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(secondaryTransport.requestCalls, requestsBefore + 1);
+      expect(primaryTransport.requestCalls, primaryRequestsBefore);
+      expect(
+        secondaryService
+            .transientConnectionCounts['secondaryInitiatorFallbackTimers'],
+        0,
+      );
+      expect(
+        secondaryService.transientConnectionCounts['completedHandshakes'],
+        1,
+      );
+    },
+  );
+
   test('hard timeout cleans state and a new attempt succeeds', () async {
     final pair = await HandshakePair.create(
       requireBothNativeAccepts: true,

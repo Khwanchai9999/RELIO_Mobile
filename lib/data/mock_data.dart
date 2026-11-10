@@ -1,9 +1,11 @@
 import 'models/prototype_models.dart';
 
+// รวมข้อมูลตัวอย่างไว้ที่เดียว ค่าอุปกรณ์ ระยะทาง และสัญญาณชุดนี้ไม่ใช่ผลค้นหา Nearby จริง
 abstract final class RelioMockData {
   static const demoIds = {'somchai', 'rescue-team-a', 'mint', 'james', 'aom'};
 
-  static bool isDemoId(String id) => demoIds.contains(id.split(':').last);
+  static bool isDemoId(String id) =>
+      id.startsWith('demo:') || demoIds.contains(id.split(':').last);
 
   static const devices = [
     RelioDevice(

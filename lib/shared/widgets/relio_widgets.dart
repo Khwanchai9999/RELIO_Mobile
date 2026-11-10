@@ -1,14 +1,19 @@
 import 'dart:io';
+import 'dart:collection';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/theme/relio_colors.dart';
 import '../../app/theme/relio_spacing.dart';
-import '../../core/sync/sync_types.dart';
+import '../../core/media/media_preview_layout.dart';
+import '../../core/presentation/avatar_appearance.dart';
+import '../../core/presentation/peer_connection_presence.dart';
 import '../../core/relio_dependencies.dart';
 import '../../data/models/prototype_models.dart';
 
+// รวม widget ที่ใช้ซ้ำและผูกกับ semantic tokens ของ RELIO
+// หน้าฟีเจอร์จึงใช้รูปแบบและสถานะที่เข้าถึงได้อย่างสม่ำเสมอ
 class RelioAppBar extends StatelessWidget implements PreferredSizeWidget {
   const RelioAppBar({
     required this.title,
@@ -129,22 +134,23 @@ class RelioUserAvatar extends StatelessWidget {
     required this.name,
     this.size = 46,
     this.status,
+    this.identityKey = '',
+    this.imagePath,
+    this.presence = PeerConnectionPresence.unknown,
     super.key,
   });
 
   final String name;
   final double size;
   final DeviceStatus? status;
+  final String identityKey;
+  final String? imagePath;
+  final PeerConnectionPresence presence;
 
   @override
   Widget build(BuildContext context) {
-    final palette = [
-      RelioColors.primary,
-      RelioColors.rescue,
-      const Color(0xFFF97316),
-      const Color(0xFF8B5CF6),
-    ];
-    final color = palette[name.codeUnitAt(0) % palette.length];
+    final baseColor = AvatarAppearanceResolver.colorFor(identityKey);
+    final color = AvatarAppearanceResolver.displayColor(baseColor, presence);
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -156,7 +162,29 @@ class RelioUserAvatar extends StatelessWidget {
             color: color.withValues(alpha: 0.14),
             border: Border.all(color: color, width: 1.5),
           ),
-          child: Icon(Icons.person_rounded, size: size * 0.62, color: color),
+          child: ClipOval(
+            child: imagePath == null || imagePath!.isEmpty
+                ? Semantics(
+                    image: true,
+                    label: name,
+                    child: Icon(
+                      Icons.person_rounded,
+                      size: size * 0.62,
+                      color: color,
+                    ),
+                  )
+                : Image.file(
+                    File(imagePath!),
+                    width: size,
+                    height: size,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Icon(
+                      Icons.person_rounded,
+                      size: size * 0.62,
+                      color: color,
+                    ),
+                  ),
+          ),
         ),
         if (status == DeviceStatus.sos || status == DeviceStatus.rescue)
           Positioned(
@@ -342,13 +370,12 @@ class RelioDeviceCard extends StatelessWidget {
     final color = device.status.color;
     final stateLabel = switch (device.presence) {
       PeerPresence.demo => 'ตัวอย่าง • ${device.approximateDistance}',
-      PeerPresence.discovered => 'REAL • ค้นพบ',
-      PeerPresence.connecting => 'REAL • กำลังเชื่อมต่อ',
-      PeerPresence.connected => 'REAL • เชื่อมต่อแล้ว',
-      PeerPresence.disconnected => 'REAL • ขาดการเชื่อมต่อ',
-      PeerPresence.failed => 'REAL • เชื่อมต่อไม่สำเร็จ',
-      PeerPresence.stale =>
-        'REAL • พบล่าสุด ${_lastSeenLabel(device.lastSeenAt)}',
+      PeerPresence.discovered => 'ค้นพบ Nearby',
+      PeerPresence.connecting => 'กำลังเชื่อมต่อ',
+      PeerPresence.connected => 'เชื่อมต่อแล้ว',
+      PeerPresence.disconnected => 'ขาดการเชื่อมต่อ',
+      PeerPresence.failed => 'เชื่อมต่อไม่สำเร็จ',
+      PeerPresence.stale => 'พบล่าสุด ${_lastSeenLabel(device.lastSeenAt)}',
     };
     final stableDeviceId = RegExp(r'^[0-9a-fA-F-]{16,}$').hasMatch(device.id)
         ? 'RELIO-${device.id.replaceAll('-', '').substring(device.id.replaceAll('-', '').length - 4).toUpperCase()}'
@@ -362,7 +389,13 @@ class RelioDeviceCard extends StatelessWidget {
           padding: const EdgeInsets.all(RelioSpacing.md),
           child: Row(
             children: [
-              RelioUserAvatar(name: device.name, status: device.status),
+              RelioUserAvatar(
+                name: device.name,
+                identityKey: device.id,
+                status: device.status,
+                presence: device.connectionPresence,
+                imagePath: device.avatarPath,
+              ),
               const SizedBox(width: RelioSpacing.md),
               Expanded(
                 child: Column(
@@ -378,9 +411,17 @@ class RelioDeviceCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        RelioStatusChip(status: device.status, compact: true),
-                        const SizedBox(width: 6),
-                        _SourceBadge(label: device.isDemo ? 'DEMO' : 'REAL'),
+                        if (device.isDemo ||
+                            device.status == DeviceStatus.sos ||
+                            device.status == DeviceStatus.rescue)
+                          RelioStatusChip(status: device.status, compact: true),
+                        const Spacer(),
+                        if (device.isDemo)
+                          const _SourceBadge(label: 'DEMO')
+                        else
+                          RelioPresenceChip(
+                            presence: device.connectionPresence,
+                          ),
                       ],
                     ),
                     const SizedBox(height: 3),
@@ -449,6 +490,36 @@ class _SourceBadge extends StatelessWidget {
       ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w800),
     ),
   );
+}
+
+class RelioPresenceChip extends StatelessWidget {
+  const RelioPresenceChip({required this.presence, super.key});
+
+  final PeerConnectionPresence presence;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (presence) {
+      PeerConnectionPresence.online => ('ออนไลน์', RelioColors.success),
+      PeerConnectionPresence.offline => ('ออฟไลน์', RelioColors.offline),
+      PeerConnectionPresence.unknown => ('ยังไม่ทราบสถานะ', RelioColors.muted),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
 }
 
 class _SignalBars extends StatelessWidget {
@@ -540,7 +611,13 @@ class RelioChatListTile extends StatelessWidget {
           padding: const EdgeInsets.all(RelioSpacing.md),
           child: Row(
             children: [
-              RelioUserAvatar(name: chat.name, status: chat.status),
+              RelioUserAvatar(
+                name: chat.name,
+                identityKey: chat.identityKey,
+                status: chat.status,
+                presence: chat.presence,
+                imagePath: chat.avatarPath,
+              ),
               const SizedBox(width: RelioSpacing.md),
               Expanded(
                 child: Column(
@@ -557,8 +634,8 @@ class RelioChatListTile extends StatelessWidget {
                       spacing: 6,
                       runSpacing: 3,
                       children: [
-                        RelioStatusChip(status: chat.status, compact: true),
-                        _SourceBadge(label: chat.isDemo ? 'DEMO' : 'REAL'),
+                        RelioPresenceChip(presence: chat.presence),
+                        if (chat.isDemo) const _SourceBadge(label: 'DEMO'),
                       ],
                     ),
                     const SizedBox(height: 2),
@@ -605,9 +682,14 @@ class RelioChatListTile extends StatelessWidget {
 }
 
 class RelioMessageBubble extends StatelessWidget {
-  const RelioMessageBubble({required this.message, super.key});
+  const RelioMessageBubble({
+    required this.message,
+    this.onOpenLocation,
+    super.key,
+  });
 
   final RelioMessage message;
+  final VoidCallback? onOpenLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -622,9 +704,10 @@ class RelioMessageBubble extends StatelessWidget {
         ),
       );
     }
+    final colors = Theme.of(context).colorScheme;
     final bubbleColor = message.outgoing
-        ? RelioColors.primary.withValues(alpha: 0.18)
-        : Theme.of(context).colorScheme.surface;
+        ? const Color(0xFFD9F7F1)
+        : const Color(0xFFF0F3F7);
     final icon = switch (message.type) {
       MessageType.image => Icons.image_outlined,
       MessageType.video => Icons.videocam_outlined,
@@ -632,22 +715,27 @@ class RelioMessageBubble extends StatelessWidget {
       MessageType.text => null,
       MessageType.system => Icons.info_outline,
     };
-    final cloudStatus = CloudSyncStatus.parse(message.cloudSyncStatus);
     return Align(
       alignment: message.outgoing
           ? Alignment.centerRight
           : Alignment.centerLeft,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 310),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
+        ),
         margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: bubbleColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: message.outgoing
+                ? RelioColors.primary.withValues(alpha: 0.32)
+                : colors.outlineVariant.withValues(alpha: 0.48),
+          ),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (message.type == MessageType.image)
               _ImageMessagePreview(filePath: message.localFilePath),
@@ -667,7 +755,22 @@ class RelioMessageBubble extends StatelessWidget {
                       : 'ตำแหน่งที่แชร์\n${message.latitude!.toStringAsFixed(6)}, ${message.longitude!.toStringAsFixed(6)}',
                 ),
               ),
-            if (icon != null)
+            if (message.type == MessageType.location)
+              Semantics(
+                button: true,
+                label: 'เปิดดูตำแหน่งที่แชร์ในแผนที่',
+                child: TextButton.icon(
+                  onPressed: onOpenLocation,
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('เปิดดูตำแหน่ง'),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(48, 44),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            if (icon != null && message.type == MessageType.location)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Row(
@@ -687,38 +790,35 @@ class RelioMessageBubble extends StatelessWidget {
                   ],
                 ),
               ),
-            Align(alignment: Alignment.centerLeft, child: Text(message.text)),
+            if (message.type == MessageType.text ||
+                message.type == MessageType.location)
+              Text(message.text),
             const SizedBox(height: 3),
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 6,
-              runSpacing: 2,
-              children: [
-                Text(
-                  message.time,
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-                if (message.status != null) ...[
+            Align(
+              alignment: Alignment.centerRight,
+              widthFactor: 1,
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 4,
+                runSpacing: 2,
+                children: [
                   Text(
-                    message.status!.label,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: message.status!.color,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    message.time,
+                    style: Theme.of(context).textTheme.labelSmall,
                   ),
+                  if (message.outgoing && message.readAt != null)
+                    _MessageStatus(
+                      label: 'อ่านแล้ว',
+                      color: RelioColors.success,
+                      icon: Icons.done_all_rounded,
+                    )
+                  else if (message.outgoing &&
+                      message.status != null &&
+                      message.status != DeliveryStatus.synced)
+                    _deliveryStatus(message.status!),
                 ],
-                if (message.outgoing &&
-                    cloudStatus != CloudSyncStatus.notQueued)
-                  _CloudSyncStatusLabel(status: cloudStatus),
-                if (message.outgoing && message.readAt != null)
-                  Text(
-                    'อ่านแล้ว',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: RelioColors.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-              ],
+              ),
             ),
           ],
         ),
@@ -727,15 +827,158 @@ class RelioMessageBubble extends StatelessWidget {
   }
 }
 
-class _VideoMessagePreview extends StatelessWidget {
+Widget _deliveryStatus(DeliveryStatus status) {
+  final (label, color, icon) = switch (status) {
+    DeliveryStatus.pending => (
+      'รอส่ง',
+      RelioColors.warning,
+      Icons.schedule_rounded,
+    ),
+    DeliveryStatus.nearbySent => (
+      'ส่งออกแล้ว',
+      RelioColors.rescue,
+      Icons.done_rounded,
+    ),
+    DeliveryStatus.delivered => (
+      'ถึงผู้รับแล้ว',
+      RelioColors.rescue,
+      Icons.done_all_rounded,
+    ),
+    DeliveryStatus.synced => (
+      'ซิงก์แล้ว',
+      RelioColors.muted,
+      Icons.cloud_done_outlined,
+    ),
+    DeliveryStatus.failed => (
+      'ส่งไม่สำเร็จ',
+      RelioColors.sos,
+      Icons.error_outline_rounded,
+    ),
+  };
+  return _MessageStatus(label: label, color: color, icon: icon);
+}
+
+class _MessageStatus extends StatelessWidget {
+  const _MessageStatus({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, size: 15, color: color),
+      const SizedBox(width: 2),
+      Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  );
+}
+
+class _VideoMessagePreview extends StatefulWidget {
   const _VideoMessagePreview({required this.filePath});
 
   final String? filePath;
 
+  @override
+  State<_VideoMessagePreview> createState() => _VideoMessagePreviewState();
+}
+
+class _VideoMessagePreviewState extends State<_VideoMessagePreview> {
   static const _channel = MethodChannel('relio/media');
+  static const _cacheLimit = 64;
+  static final LinkedHashMap<String, Future<Map<Object?, Object?>?>> _pending =
+      LinkedHashMap();
+  Future<Map<Object?, Object?>?>? _thumbnail;
+
+  Future<Map<Object?, Object?>?> _loadThumbnail(BuildContext context) async {
+    final path = widget.filePath;
+    if (path == null || path.isEmpty) return null;
+    final dependencies = context
+        .getInheritedWidgetOfExactType<RelioDependencyScope>()
+        ?.dependencies;
+    final file = File(path);
+    late final int sizeBytes;
+    late final DateTime modifiedAt;
+    try {
+      sizeBytes = await file.length();
+      modifiedAt = await file.lastModified();
+    } on FileSystemException {
+      return null;
+    }
+    final cacheKey = '$path:$sizeBytes:${modifiedAt.microsecondsSinceEpoch}';
+    final cached = _pending.remove(cacheKey);
+    if (cached != null) {
+      _pending[cacheKey] = cached;
+      dependencies?.diagnostics.record(
+        'media',
+        'video_thumbnail_cache_hit',
+        fields: {'requestCacheHit': true, 'sizeBytes': sizeBytes},
+      );
+      return cached;
+    }
+    final clock = Stopwatch()..start();
+    dependencies?.diagnostics.record(
+      'media',
+      'video_thumbnail_generation_started',
+      fields: {'requestCacheHit': false, 'sizeBytes': sizeBytes},
+    );
+    final future = (() async {
+      try {
+        final result = await _channel.invokeMapMethod<Object?, Object?>(
+          'videoThumbnail',
+          {'path': path, 'cacheKey': cacheKey},
+        );
+        dependencies?.diagnostics.record(
+          'media',
+          'video_thumbnail_generation_completed',
+          fields: {
+            'durationMs': clock.elapsedMilliseconds,
+            'cacheHit': result?['cacheHit'] == true,
+            'sizeBytes': sizeBytes,
+            'resultAvailable': result != null,
+          },
+        );
+        if (result == null) _pending.remove(cacheKey);
+        return result;
+      } on PlatformException {
+        dependencies?.diagnostics.record(
+          'media',
+          'video_thumbnail_generation_failed',
+          fields: {'durationMs': clock.elapsedMilliseconds},
+        );
+        _pending.remove(cacheKey);
+        return null;
+      }
+    })();
+    _pending[cacheKey] = future;
+    while (_pending.length > _cacheLimit) {
+      _pending.remove(_pending.keys.first);
+    }
+    return future;
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoMessagePreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.filePath != widget.filePath) {
+      _thumbnail = null;
+    }
+  }
 
   Future<void> _open(BuildContext context) async {
-    final path = filePath;
+    final path = widget.filePath;
     if (path == null || path.isEmpty || !await File(path).exists()) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -756,84 +999,70 @@ class _VideoMessagePreview extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Tooltip(
-    message: 'เล่นวิดีโอ',
-    child: InkWell(
-      onTap: () => _open(context),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        width: 230,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(Icons.play_circle_outline, size: 48),
-      ),
-    ),
-  );
-}
-
-class _CloudSyncStatusLabel extends StatelessWidget {
-  const _CloudSyncStatusLabel({required this.status});
-
-  final CloudSyncStatus status;
-
-  @override
   Widget build(BuildContext context) {
-    final (label, icon, color) = switch (status) {
-      CloudSyncStatus.notQueued => (
-        '',
-        Icons.cloud_queue_outlined,
-        RelioColors.muted,
-      ),
-      CloudSyncStatus.pending => (
-        'รอซิงก์',
-        Icons.cloud_upload_outlined,
-        RelioColors.warning,
-      ),
-      CloudSyncStatus.syncing => (
-        'กำลังซิงก์',
-        Icons.sync_rounded,
-        RelioColors.primary,
-      ),
-      CloudSyncStatus.synced => (
-        'ซิงก์แล้ว',
-        Icons.cloud_done_outlined,
-        RelioColors.success,
-      ),
-      CloudSyncStatus.failed => (
-        'ซิงก์ไม่สำเร็จ',
-        Icons.cloud_off_outlined,
-        RelioColors.sos,
-      ),
-    };
-    if (status == CloudSyncStatus.notQueued) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 13, color: color),
-        const SizedBox(width: 2),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: color,
-            fontWeight: FontWeight.w600,
-          ),
+    _thumbnail ??= _loadThumbnail(context);
+    return Tooltip(
+      message: 'เล่นวิดีโอ',
+      child: InkWell(
+        onTap: () => _open(context),
+        borderRadius: BorderRadius.circular(12),
+        child: FutureBuilder<Map<Object?, Object?>?>(
+          future: _thumbnail,
+          builder: (context, snapshot) {
+            final data = snapshot.data;
+            final thumbPath = data?['path'] as String?;
+            final width = (data?['width'] as num?)?.toDouble() ?? 5.0;
+            final height = (data?['height'] as num?)?.toDouble() ?? 3.0;
+            final size = fitMediaPreviewSize(
+              Size(width, height),
+              const Size(280, 360),
+            );
+            return ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ColoredBox(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                    ),
+                    if (thumbPath != null)
+                      Image.file(
+                        File(thumbPath),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      ),
+                    const Center(
+                      child: Icon(Icons.play_circle_outline, size: 58),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
-      ],
+      ),
     );
   }
 }
 
-class _ImageMessagePreview extends StatelessWidget {
+class _ImageMessagePreview extends StatefulWidget {
   const _ImageMessagePreview({required this.filePath});
 
   final String? filePath;
 
   @override
+  State<_ImageMessagePreview> createState() => _ImageMessagePreviewState();
+}
+
+class _ImageMessagePreviewState extends State<_ImageMessagePreview> {
+  @override
   Widget build(BuildContext context) {
-    final path = filePath;
+    final path = widget.filePath;
     if (path == null || path.isEmpty) return _missingImage();
     return Tooltip(
       message: 'เปิดรูปภาพเต็มจอ',
@@ -842,12 +1071,38 @@ class _ImageMessagePreview extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.file(
-            File(path),
-            width: 230,
-            height: 170,
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => _missingImage(),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final maxWidth = constraints.maxWidth.isFinite
+                  ? constraints.maxWidth.clamp(1.0, 280.0).toDouble()
+                  : 280.0;
+              final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: 360),
+                child: Image.file(
+                  File(path),
+                  fit: BoxFit.contain,
+                  cacheWidth: (560 * pixelRatio).round(),
+                  cacheHeight: (720 * pixelRatio).round(),
+                  frameBuilder:
+                      (context, child, frame, wasSynchronouslyLoaded) {
+                        if (frame != null || wasSynchronouslyLoaded) {
+                          return child;
+                        }
+                        return SizedBox(
+                          width: 180,
+                          height: 108,
+                          child: ColoredBox(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerHighest,
+                          ),
+                        );
+                      },
+                  errorBuilder: (_, _, _) => _missingImage(),
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -855,8 +1110,8 @@ class _ImageMessagePreview extends StatelessWidget {
   }
 
   Widget _missingImage() => const SizedBox(
-    width: 230,
-    height: 100,
+    width: 180,
+    height: 108,
     child: Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -874,6 +1129,9 @@ class _ImageMessagePreview extends StatelessWidget {
         .repositories
         .ownerContext;
     final owner = owners?.capture();
+    final fileExists = await File(path).exists();
+    if (!context.mounted) return;
+    if (owners != null && !owners.isCurrent(owner!)) return;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => StreamBuilder<Object?>(
@@ -891,16 +1149,21 @@ class _ImageMessagePreview extends StatelessWidget {
                     maxWidth: MediaQuery.sizeOf(dialogContext).width - 32,
                     maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.8,
                   ),
-                  child: InteractiveViewer(
-                    child: Image.file(
-                      File(path),
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Padding(
-                        padding: EdgeInsets.all(32),
-                        child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
-                      ),
-                    ),
-                  ),
+                  child: fileExists
+                      ? InteractiveViewer(
+                          child: Image.file(
+                            File(path),
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Padding(
+                              padding: EdgeInsets.all(32),
+                              child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
+                            ),
+                          ),
+                        )
+                      : const Padding(
+                          padding: EdgeInsets.all(32),
+                          child: Text('ไม่สามารถเปิดรูปภาพนี้ได้'),
+                        ),
                 ),
                 Positioned(
                   top: 4,
@@ -926,6 +1189,7 @@ class RelioLocationCard extends StatelessWidget {
     this.latitude,
     this.longitude,
     this.updatedAt,
+    this.freshnessLabel,
     this.accuracyMeters,
     super.key,
   });
@@ -934,6 +1198,7 @@ class RelioLocationCard extends StatelessWidget {
   final double? latitude;
   final double? longitude;
   final DateTime? updatedAt;
+  final String? freshnessLabel;
   final double? accuracyMeters;
 
   @override
@@ -978,9 +1243,10 @@ class RelioLocationCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              updatedAt == null
-                  ? 'พิกัดเป็นข้อมูลเสริมและอาจไม่มีในโหมดออฟไลน์'
-                  : 'อัปเดตเมื่อ ${updatedAt!.hour.toString().padLeft(2, '0')}:${updatedAt!.minute.toString().padLeft(2, '0')}',
+              freshnessLabel ??
+                  (updatedAt == null
+                      ? 'พิกัดเป็นข้อมูลเสริมและอาจไม่มีในโหมดออฟไลน์'
+                      : 'อัปเดตเมื่อ ${updatedAt!.hour.toString().padLeft(2, '0')}:${updatedAt!.minute.toString().padLeft(2, '0')}'),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],

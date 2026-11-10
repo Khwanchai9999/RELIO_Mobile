@@ -78,6 +78,29 @@ void main() {
     expect(auth.message, 'อีเมลหรือรหัสผ่านไม่ถูกต้อง');
     expect(auth.message, isNot(contains('sensitive')));
 
+    final anonymousProviderDisabled = CloudErrorMapper.map(
+      const AuthException(
+        'anonymous sign-ins disabled',
+        statusCode: '422',
+        code: 'anonymous_provider_disabled',
+      ),
+    );
+    expect(anonymousProviderDisabled.code, 'anonymousProviderDisabled');
+    expect(
+      anonymousProviderDisabled.message,
+      'ระบบบัญชี Guest บน Cloud ยังไม่เปิดใช้งาน ข้อมูลออฟไลน์ในเครื่องยังคงอยู่',
+    );
+
+    final expiredSession = CloudErrorMapper.map(
+      const AuthException(
+        'sensitive refresh detail',
+        statusCode: '401',
+        code: 'refresh_token_not_found',
+      ),
+    );
+    expect(expiredSession.code, 'sessionExpired');
+    expect(expiredSession.message, 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบอีกครั้ง');
+
     final network = CloudErrorMapper.map(
       TimeoutException('private request detail'),
     );

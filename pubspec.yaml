@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.9.0+45
+version: 0.9.0+84
 
 environment:
   sdk: ^3.12.2
@@ -53,6 +53,7 @@ dependencies:
   convert: ^3.1.2
   archive: ^4.0.7
   battery_plus: ^7.1.2
+  flutter_compass: ^0.8.1
   maplibre_gl: ^0.27.1
 
 dev_dependencies:
@@ -79,8 +80,32 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  fonts:
+    - family: Prompt
+      fonts:
+        - asset: assets/fonts/prompt/Prompt-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/prompt/Prompt-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/prompt/Prompt-Bold.ttf
+          weight: 700
+
   assets:
     - assets/branding/relio-logo-master.png
+    - assets/branding/relio_wordmark.png
+    - assets/branding/relio_wordmark_dark_final.png
+    - assets/maps/
+    - assets/maps/fonts/noto/
+    - assets/maps/sprites/
+    - assets/maps/fonts/Noto Sans Regular/
+    - assets/maps/fonts/Noto Sans Medium/
+    - assets/maps/fonts/Noto Sans Italic/
+    - assets/maps/
+    - assets/maps/fonts/noto/
+    - assets/maps/sprites/
+    - assets/maps/fonts/Noto Sans Regular/
+    - assets/maps/fonts/Noto Sans Medium/
+    - assets/maps/fonts/Noto Sans Italic/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

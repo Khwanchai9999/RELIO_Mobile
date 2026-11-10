@@ -1,3 +1,4 @@
+// การ์ดสรุป Internet, วิทยุ Nearby และ Cloud แยกสถานะออกจากกันตามความหมาย
 import 'package:flutter/material.dart';
 
 import '../../app/environment.dart';
@@ -8,6 +9,7 @@ import '../../core/connectivity/runtime_connectivity.dart';
 import '../../core/relio_dependencies.dart';
 import '../../core/sync/sync_engine.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Connectivity Diagnostics Card
 class ConnectivityDiagnosticsCard extends StatefulWidget {
   const ConnectivityDiagnosticsCard({super.key});
 
@@ -16,6 +18,7 @@ class ConnectivityDiagnosticsCard extends StatefulWidget {
       _ConnectivityDiagnosticsCardState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Connectivity Diagnostics Card State)
 class _ConnectivityDiagnosticsCardState
     extends State<ConnectivityDiagnosticsCard> {
   late RelioDependencies _dependencies;
@@ -159,6 +162,7 @@ class _ConnectivityDiagnosticsCardState
   }
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Status Row)
 class _StatusRow extends StatelessWidget {
   const _StatusRow({required this.label, required this.value, this.color});
 

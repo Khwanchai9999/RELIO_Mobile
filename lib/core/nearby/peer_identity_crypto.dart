@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 
+// เก็บข้อมูล public identity ที่ใช้ตรวจ peer โดยไม่เปิดเผย private key
+// การ reconnect อัตโนมัติต้องอาศัย proof ที่ตรวจด้วย crypto provider จริง
 class PeerPublicIdentity {
   const PeerPublicIdentity({
     required this.publicKey,

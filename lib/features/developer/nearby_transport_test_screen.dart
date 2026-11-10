@@ -1,3 +1,4 @@
+// หน้าทดลองการทำงานของ transport ในสภาพแวดล้อมพัฒนา โดยไม่แทนผลทดสอบวิทยุจริง
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../core/nearby/nearby_transport.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Nearby Transport Test Screen
 class NearbyTransportTestScreen extends StatefulWidget {
   const NearbyTransportTestScreen({super.key});
 
@@ -15,6 +17,7 @@ class NearbyTransportTestScreen extends StatefulWidget {
       _NearbyTransportTestScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Nearby Transport Test Screen State)
 class _NearbyTransportTestScreenState extends State<NearbyTransportTestScreen> {
   late NearbyService _nearby;
   String? _selectedEndpoint;

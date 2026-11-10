@@ -2,6 +2,8 @@ import 'cloud_data_source.dart';
 import 'cloud_models.dart';
 import '../identity/owner_context.dart';
 
+// สัญญา Auth ที่หน้าจอและ SyncEngine ใช้ โดยไม่ผูกกับชนิดของ Supabase SDK
+// guest/offline เป็นสถานะที่รองรับ และการ sign out ไม่ลบข้อมูล SQLite
 abstract interface class AuthService {
   AuthState get state;
   CloudIdentity? get identity;
@@ -15,6 +17,13 @@ abstract interface class AuthService {
     required String email,
     required String password,
   });
+  Future<CloudIdentity> signInAnonymously();
+  Future<CloudIdentity> requestEmailChange({required String email});
+  Future<CloudEmailChangeResult> verifyEmailChange({
+    required String email,
+    required String token,
+  });
+  Future<CloudIdentity> setAccountPassword({required String password});
   Future<void> signOut();
   Future<void> requestPasswordReset({required String email});
   Future<void> completePasswordReset({required String password});
@@ -28,10 +37,12 @@ class CloudAuthService implements AuthService {
     this.source, {
     this.rebind,
     this.onAuthenticated,
+    this.onRestored,
     this.onSignOut,
   });
   final Future<void> Function()? rebind;
   final Future<void> Function(String userId)? onAuthenticated;
+  final Future<void> Function(String userId)? onRestored;
   final Future<void> Function()? onSignOut;
   final CloudDataSource source;
 
@@ -82,6 +93,23 @@ class CloudAuthService implements AuthService {
   }
 
   @override
+  Future<CloudIdentity> signInAnonymously() => source.signInAnonymously();
+
+  @override
+  Future<CloudIdentity> requestEmailChange({required String email}) =>
+      source.requestEmailChange(email: email.trim());
+
+  @override
+  Future<CloudEmailChangeResult> verifyEmailChange({
+    required String email,
+    required String token,
+  }) => source.verifyEmailChange(email: email.trim(), token: token.trim());
+
+  @override
+  Future<CloudIdentity> setAccountPassword({required String password}) =>
+      source.setAccountPassword(password: password);
+
+  @override
   Future<void> signOut() async {
     await onSignOut?.call();
     await source.signOut();
@@ -91,7 +119,9 @@ class CloudAuthService implements AuthService {
   @override
   Future<CloudIdentity?> restoreSession() async {
     final result = await source.restoreSession();
-    if (result != null) await onAuthenticated?.call(result.userId);
+    if (result != null && !result.isAnonymous) {
+      await onRestored?.call(result.userId);
+    }
     await _rebind(result?.userId);
     return result;
   }

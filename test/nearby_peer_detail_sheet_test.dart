@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:relio_mobile/core/domain/relio_entities.dart';
+import 'package:relio_mobile/core/database/app_database.dart';
+import 'package:relio_mobile/core/nearby/nearby_transport.dart';
+import 'package:relio_mobile/core/relio_dependencies.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 import 'package:relio_mobile/features/nearby/nearby_peer_detail_sheet.dart';
 
@@ -9,6 +12,11 @@ void main() {
 
   for (final size in sizes) {
     testWidgets('peer details scroll and actions fit at $size', (tester) async {
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: MockNearbyTransport(),
+      );
+      addTearDown(dependencies.dispose);
       tester.view.physicalSize = size;
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -43,6 +51,7 @@ void main() {
                         onPressed: () => showNearbyPeerDetailSheet(
                           context: context,
                           device: _longContentPeer,
+                          nearby: dependencies.nearbyService,
                           myLocation: _myLocation,
                           onChat: () => chatTaps++,
                           onNavigate: () => navigateTaps++,
@@ -79,17 +88,13 @@ void main() {
       expect(scrollable, findsOneWidget);
       await tester.drag(scrollable, const Offset(0, -700));
       await tester.pumpAndSettle();
-      final staleWarning = find.text('ตำแหน่งเก่าอาจไม่ตรงกับตำแหน่งปัจจุบัน');
-      await tester.scrollUntilVisible(
-        staleWarning,
-        180,
-        scrollable: scrollable,
-        maxScrolls: 12,
+      expect(
+        find.textContaining('ตำแหน่งอาจไม่ใช่ตำแหน่งปัจจุบัน'),
+        findsNothing,
       );
-      expect(staleWarning, findsOneWidget);
 
       final chat = find.text('แชท');
-      final navigate = find.text('ดูเส้นทาง');
+      final navigate = find.text('ดูตำแหน่ง');
       await tester.scrollUntilVisible(
         chat,
         240,
@@ -169,6 +174,11 @@ void main() {
   testWidgets('route action stays tappable without a peer location', (
     tester,
   ) async {
+    final dependencies = RelioDependencies(
+      database: AppDatabase.memory(),
+      transport: MockNearbyTransport(),
+    );
+    addTearDown(dependencies.dispose);
     var routeTaps = 0;
     await tester.pumpWidget(
       MaterialApp(
@@ -178,6 +188,7 @@ void main() {
               onPressed: () => showNearbyPeerDetailSheet(
                 context: context,
                 device: _peerWithoutLocation,
+                nearby: dependencies.nearbyService,
                 myLocation: null,
                 onChat: () {},
                 onNavigate: () => routeTaps++,
@@ -191,20 +202,26 @@ void main() {
 
     await tester.tap(find.text('Open peer'));
     await tester.pumpAndSettle();
-    expect(find.text('ยังไม่มีตำแหน่ง peer'), findsOneWidget);
+    expect(find.text('ยังไม่มีตำแหน่งที่แชร์'), findsOneWidget);
+    expect(find.text('กำลังค้นหาเส้นทาง…'), findsOneWidget);
     final routeButton = find.ancestor(
-      of: find.text('ดูเส้นทาง'),
+      of: find.text('ดูตำแหน่ง'),
       matching: find.byType(FilledButton),
     );
-    expect(tester.widget<FilledButton>(routeButton).onPressed, isNotNull);
+    expect(tester.widget<FilledButton>(routeButton).onPressed, isNull);
     await tester.tap(routeButton);
     await tester.pumpAndSettle();
-    expect(routeTaps, 1);
+    expect(routeTaps, 0);
   });
 
   testWidgets('feature flags hide battery and route while keeping chat', (
     tester,
   ) async {
+    final dependencies = RelioDependencies(
+      database: AppDatabase.memory(),
+      transport: MockNearbyTransport(),
+    );
+    addTearDown(dependencies.dispose);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -213,6 +230,7 @@ void main() {
               onPressed: () => showNearbyPeerDetailSheet(
                 context: context,
                 device: _longContentPeer,
+                nearby: dependencies.nearbyService,
                 myLocation: _myLocation,
                 onChat: () {},
                 onNavigate: () {},
@@ -229,7 +247,7 @@ void main() {
     await tester.tap(find.text('Open peer'));
     await tester.pumpAndSettle();
     expect(find.text('แชท'), findsOneWidget);
-    expect(find.text('ดูเส้นทาง'), findsNothing);
+    expect(find.text('ดูตำแหน่ง'), findsNothing);
     expect(find.textContaining('แบตเตอรี่'), findsNothing);
     expect(tester.takeException(), isNull);
   });

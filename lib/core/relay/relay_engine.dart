@@ -13,9 +13,17 @@ import 'relay_repository.dart';
 
 typedef RelayPeers = Iterable<NearbyPeer> Function();
 typedef RelayEndpointDeviceId = String? Function(String endpointId);
+typedef RelayNextHopReachability =
+    Future<bool> Function(
+      String nextHopDeviceId,
+      String destinationDeviceId,
+      int maxHops,
+    );
 
 enum RelayResult { stored, forwarded, delivered, duplicate, blocked, expired }
 
+// ประสานการรับซอง relay-v1 กับการจัดเก็บซ้ำ การส่งต่อแบบจำกัด hop และ ACK
+// Repository เก็บสถานะที่อยู่รอดหลังปิดแอป; ผลส่งต่อหนึ่ง hop ยังไม่ใช่ ACK ส่งถึงผู้รับสุดท้าย
 class RelayEngine {
   RelayEngine({
     required this.transport,
@@ -27,11 +35,25 @@ class RelayEngine {
     this.connectedPeers,
     this.receiptPeers,
     this.deviceIdForEndpoint,
+    this.nextHopHasRoute,
     this.diagnostics,
     this.forwardingAllowed,
+    this.relayParticipationAllowed,
+    this.secureRelayEnabled,
+    this.qaPlaintextTextAllowed,
     this.qaTextForwardingPaused,
+    this.verifyRelayedOrigin,
+    this.receiveRelayedSos,
+    this.receiveRelayedRescue,
     RelayPolicy? policy,
-  }) : policy = policy ?? const RelayPolicy();
+  }) : policy =
+           policy ??
+           (RelioBuildInfo.isTest
+               ? const RelayPolicy(
+                   maxHops: RelayPolicy.qaAutomaticTextMaxHops,
+                   maxTextHops: RelayPolicy.qaAutomaticTextMaxHops,
+                 )
+               : const RelayPolicy());
 
   final NearbyTransport transport;
   final RelioDeviceIdentityRepository identity;
@@ -42,15 +64,44 @@ class RelayEngine {
   final RelayPeers? connectedPeers;
   final RelayPeers? receiptPeers;
   final RelayEndpointDeviceId? deviceIdForEndpoint;
+  final RelayNextHopReachability? nextHopHasRoute;
   final DiagnosticsLogService? diagnostics;
   final bool Function()? forwardingAllowed;
+  final Future<bool> Function()? relayParticipationAllowed;
+  final bool Function()? secureRelayEnabled;
+  final bool Function()? qaPlaintextTextAllowed;
   final bool Function()? qaTextForwardingPaused;
+  final Future<bool> Function(RelayEnvelope envelope, RelioPacket packet)?
+  verifyRelayedOrigin;
+  final Future<void> Function(String endpointId, RelioPacket packet)?
+  receiveRelayedSos;
+  final Future<void> Function(String endpointId, RelioPacket packet)?
+  receiveRelayedRescue;
   final RelayPolicy policy;
   final _subscriptions = <StreamSubscription<Object?>>[];
   Future<void>? _forwardOperation;
+  bool _forwardRequested = false;
   bool _initialized = false;
   bool _disposed = false;
   final _receiptEndpoints = <String, String>{};
+
+  bool _isText(RelayEnvelope envelope) =>
+      envelope.payloadType == RelioPacketType.textMessage.name;
+
+  bool get _qaPlaintextEnabled =>
+      RelioBuildInfo.isTest && qaPlaintextTextAllowed?.call() == true;
+
+  bool _plaintextBlocked(RelayEnvelope envelope) =>
+      _isText(envelope) &&
+      qaPlaintextTextAllowed != null &&
+      !_qaPlaintextEnabled;
+
+  Future<bool> _mayForwardThirdParty(RelayEnvelope envelope) async =>
+      (secureRelayEnabled?.call() != false ||
+          envelope.payloadType == RelioPacketType.sos.name ||
+          envelope.payloadType == RelioPacketType.rescueStatus.name ||
+          (_isText(envelope) && _qaPlaintextEnabled)) &&
+      (relayParticipationAllowed == null || await relayParticipationAllowed!());
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -87,7 +138,9 @@ class RelayEngine {
     return enqueueEnvelope(envelope);
   }
 
+  // บันทึกซองและตรวจซ้ำจาก Repository ก่อนส่งต่อ เพื่อให้คิวอยู่ต่อได้เมื่อการเชื่อมต่อหาย
   Future<RelayResult> enqueueEnvelope(RelayEnvelope envelope) async {
+    if (_plaintextBlocked(envelope)) return RelayResult.blocked;
     final invalid = policy.validate(envelope);
     if (invalid != null) {
       await repository.storePacket(envelope);
@@ -106,8 +159,8 @@ class RelayEngine {
     return RelayResult.stored;
   }
 
-  /// QA-only entry point for a probe that must begin through one selected hop.
-  /// The constraint belongs to this envelope and is cleared on its first send.
+  /// จุดเริ่ม QA สำหรับ probe ที่บังคับ hop แรกตามเส้นทางที่เลือก
+  /// ค่า firstHop ผูกกับซองนี้และถูกล้างหลังส่ง hop แรก
   Future<RelayResult> enqueueQaEnvelopeVia(
     RelayEnvelope envelope, {
     required String firstHopDeviceId,
@@ -147,6 +200,18 @@ class RelayEngine {
     final envelope = RelayEnvelope.fromJson(
       packet.payload.cast<String, dynamic>(),
     );
+    if (_plaintextBlocked(envelope)) {
+      if (RelioBuildInfo.isTest) {
+        await _sendRelayAck(endpointId, envelope.packetId, 'deferred');
+      }
+      return RelayResult.blocked;
+    }
+    if (qaPlaintextTextAllowed != null &&
+        _isText(envelope) &&
+        (envelope.previousHopDeviceId != packet.senderDeviceId ||
+            envelope.visitedDeviceIds.lastOrNull != packet.senderDeviceId)) {
+      return RelayResult.blocked;
+    }
     final invalid = policy.validate(envelope);
     if (invalid != null) {
       await repository.storePacket(envelope);
@@ -159,6 +224,16 @@ class RelayEngine {
       await _sendRelayAck(endpointId, envelope.packetId, invalid);
       return invalid == 'expired' ? RelayResult.expired : RelayResult.blocked;
     }
+    if (envelope.payloadType == RelioPacketType.sos.name ||
+        envelope.payloadType == RelioPacketType.rescueStatus.name) {
+      final payloadPacket = envelope.toPayloadPacket();
+      final verify = verifyRelayedOrigin;
+      if (verify == null || !await verify(envelope, payloadPacket)) {
+        await _sendRelayAck(endpointId, envelope.packetId, 'blocked');
+        _recordRelay('sos_origin_proof_rejected', envelope);
+        return RelayResult.blocked;
+      }
+    }
 
     // ใช้ sender จาก transport เป็น previous hop สำหรับ routing เท่านั้น
     // ไม่เปลี่ยน origin หรือ identity ของ payload เดิม
@@ -167,6 +242,28 @@ class RelayEngine {
           envelope.previousHopDeviceId ?? packet.senderDeviceId,
       clearFirstHopDeviceId: true,
     );
+    final localDeviceId = await identity.getDeviceId();
+    if (storedEnvelope.destinationDeviceId != localDeviceId &&
+        !await _mayForwardThirdParty(storedEnvelope)) {
+      // Do not accept a new third-party store-and-forward job without consent.
+      await _sendRelayAck(
+        endpointId,
+        storedEnvelope.packetId,
+        _isText(storedEnvelope) && _qaPlaintextEnabled ? 'deferred' : 'blocked',
+      );
+      return RelayResult.blocked;
+    }
+    if (storedEnvelope.visitedDeviceIds.contains(localDeviceId) &&
+        await repository.getPacket(storedEnvelope.packetId) == null) {
+      await repository.storePacket(storedEnvelope);
+      await repository.updatePacketState(
+        storedEnvelope.packetId,
+        RelayPacketState.blocked,
+      );
+      _recordRelay('route_loop_rejected', storedEnvelope);
+      await _sendRelayAck(endpointId, storedEnvelope.packetId, 'blocked');
+      return RelayResult.blocked;
+    }
     final inserted = await repository.storePacket(storedEnvelope);
     if (!inserted) {
       _recordRelay('duplicate_suppressed', storedEnvelope);
@@ -194,10 +291,21 @@ class RelayEngine {
             : 'relay',
       },
     );
-    final localDeviceId = await identity.getDeviceId();
     if (storedEnvelope.destinationDeviceId == localDeviceId) {
       try {
-        await _materialize(storedEnvelope);
+        final payload = storedEnvelope.toPayloadPacket();
+        if (payload.type == RelioPacketType.sos &&
+            receiveRelayedSos != null) {
+          await receiveRelayedSos!(endpointId, payload);
+        } else if (payload.type == RelioPacketType.rescueStatus) {
+          final receive = receiveRelayedRescue;
+          if (receive == null) {
+            throw StateError('Rescue status receive handler is unavailable.');
+          }
+          await receive(endpointId, payload);
+        } else {
+          await _materialize(storedEnvelope);
+        }
         await repository.updatePacketState(
           storedEnvelope.packetId,
           RelayPacketState.delivered,
@@ -215,14 +323,28 @@ class RelayEngine {
       }
     }
 
-    // SOS is safety-visible at a relay node, while private text/location stay
-    // in the relay store until the destination consumes them.
-    if (storedEnvelope.payloadType == RelioPacketType.sos.name) {
+    if (storedEnvelope.payloadType == RelioPacketType.sos.name ||
+        storedEnvelope.payloadType == RelioPacketType.rescueStatus.name) {
+      final receive = storedEnvelope.payloadType == RelioPacketType.sos.name
+          ? receiveRelayedSos
+          : receiveRelayedRescue;
+      if (receive == null) {
+        await repository.updatePacketState(
+          storedEnvelope.packetId,
+          RelayPacketState.blocked,
+        );
+        await _sendRelayAck(endpointId, storedEnvelope.packetId, 'blocked');
+        return RelayResult.blocked;
+      }
       try {
-        await _materialize(storedEnvelope);
+        await receive(endpointId, storedEnvelope.toPayloadPacket());
       } on Object {
-        // Forwarding remains possible even when local SOS presentation is not
-        // available; the destination still receives the original envelope.
+        await repository.updatePacketState(
+          storedEnvelope.packetId,
+          RelayPacketState.blocked,
+        );
+        await _sendRelayAck(endpointId, storedEnvelope.packetId, 'blocked');
+        return RelayResult.blocked;
       }
     }
     await _sendRelayAck(endpointId, storedEnvelope.packetId, 'stored');
@@ -233,16 +355,29 @@ class RelayEngine {
       );
       return RelayResult.blocked;
     }
-    await forwardPending();
+    if (_isText(storedEnvelope) && _qaPlaintextEnabled) {
+      // ปล่อยคิวรับแพ็กเก็ตให้ประมวลผล ACK/probe ระหว่างส่งต่อ
+      unawaited(forwardPending().catchError((Object _) {}));
+    } else {
+      await forwardPending();
+    }
     return RelayResult.stored;
   }
 
   Future<void> forwardPending() {
     if (_disposed) return Future<void>.value();
+    _forwardRequested = true;
     if (_forwardOperation != null) return _forwardOperation!;
-    final operation = _forwardAll();
-    _forwardOperation = operation;
-    return operation.whenComplete(() => _forwardOperation = null);
+    return _forwardOperation = _drainForwardRequests().whenComplete(
+      () => _forwardOperation = null,
+    );
+  }
+
+  Future<void> _drainForwardRequests() async {
+    while (_forwardRequested && !_disposed) {
+      _forwardRequested = false;
+      await _forwardAll();
+    }
   }
 
   Future<void> _forwardAll() async {
@@ -272,7 +407,14 @@ class RelayEngine {
     for (final record in await repository.listForwardable(
       DateTime.now().toUtc(),
     )) {
+      if (_disposed) return;
       final envelope = record.envelope;
+      if (_plaintextBlocked(envelope)) continue;
+      if (envelope.originDeviceId != self &&
+          !await _mayForwardThirdParty(envelope)) {
+        // Keep already stored work pending until consent returns or TTL expires.
+        continue;
+      }
       // QA พักเฉพาะ Text ที่รับฝาก ไม่พัก SOS และไม่เปลี่ยน policy ของ PROD
       if (RelioBuildInfo.isTest &&
           qaTextForwardingPaused?.call() == true &&
@@ -298,7 +440,7 @@ class RelayEngine {
         );
         continue;
       }
-      final candidate = _choosePeer(envelope, self, peers);
+      final candidate = await _choosePeer(envelope, self, peers);
       if (candidate == null) continue;
       final targetDeviceId = _deviceId(candidate);
       if (targetDeviceId == null) continue;
@@ -306,6 +448,11 @@ class RelayEngine {
         envelope.packetId,
         targetDeviceId,
       );
+      if (existing?.status == 'deferred' &&
+          DateTime.now().toUtc().difference(existing!.updatedAt) <
+              const Duration(seconds: 3)) {
+        continue;
+      }
       if (existing != null &&
           (existing.status == 'sent' ||
               existing.status == 'stored' ||
@@ -315,14 +462,16 @@ class RelayEngine {
             envelope.payloadType == 'textMessage' &&
             existing.status != 'delivered' &&
             existing.attemptCount < 3 &&
-            DateTime.now().toUtc().difference(existing.updatedAt) >=
-                const Duration(seconds: 30);
+            (existing.targetEndpointId != candidate.endpointId ||
+                DateTime.now().toUtc().difference(existing.updatedAt) >=
+                    const Duration(seconds: 30));
         if (!retryReceipt) continue;
       }
       final forwarded = envelope.copyWith(
         hopCount: envelope.hopCount + 1,
         previousHopDeviceId: self,
         clearFirstHopDeviceId: true,
+        visitedDeviceIds: _routePathForForward(envelope, self),
       );
       final packet = RelioPacket.relayEnvelope(
         senderDeviceId: self,
@@ -347,6 +496,11 @@ class RelayEngine {
             envelope.originDeviceId == self &&
             envelope.payloadType == 'textMessage') {
           identity.profiles.owners.requireCurrent(forwardingOwner);
+        }
+        if (_plaintextBlocked(envelope) ||
+            (envelope.originDeviceId != self &&
+                !await _mayForwardThirdParty(envelope))) {
+          continue;
         }
         // บันทึก SQLite และ forward history ก่อนส่ง Nearby เพื่อให้ crash แล้วกู้ต่อได้
         await transport.sendBytes(
@@ -395,26 +549,37 @@ class RelayEngine {
     }
   }
 
-  NearbyPeer? _choosePeer(
+  // เลือกเพียงหนึ่ง peer ต่อซอง โดยเคารพ first-hop ของต้นทางก่อนพิจารณาปลายทางที่เชื่อมตรง
+  Future<NearbyPeer?> _choosePeer(
     RelayEnvelope envelope,
     String self,
     List<NearbyPeer> peers,
-  ) {
-    final eligible = peers
-        .where((peer) {
-          final deviceId = _deviceId(peer);
-          if (deviceId == null || deviceId == self) return false;
-          if (deviceId == envelope.originDeviceId ||
-              deviceId == envelope.previousHopDeviceId) {
-            return false;
-          }
-          if (peer.capabilities.isNotEmpty &&
-              !peer.capabilities.contains('relay-v1')) {
-            return false;
-          }
-          return true;
-        })
-        .toList(growable: false);
+  ) async {
+    final eligible =
+        peers
+            .where((peer) {
+              final deviceId = _deviceId(peer);
+              if (deviceId == null || deviceId == self) return false;
+              if (deviceId == envelope.originDeviceId ||
+                  deviceId == envelope.previousHopDeviceId ||
+                  envelope.visitedDeviceIds.contains(deviceId)) {
+                return false;
+              }
+              if (peer.capabilities.isNotEmpty &&
+                  !peer.capabilities.contains('relay-v1')) {
+                return false;
+              }
+              if (_isText(envelope) &&
+                  qaPlaintextTextAllowed != null &&
+                  !peer.capabilities.contains(
+                    RelayPolicy.qaPlaintextTextCapability,
+                  )) {
+                return false;
+              }
+              return true;
+            })
+            .toList(growable: false)
+          ..sort((a, b) => _deviceId(a)!.compareTo(_deviceId(b)!));
     if (envelope.originDeviceId == self && envelope.hopCount == 0) {
       final firstHop = envelope.firstHopDeviceId;
       if (firstHop != null) {
@@ -427,11 +592,41 @@ class RelayEngine {
       if (_deviceId(peer) == envelope.destinationDeviceId) return peer;
     }
     if (envelope.hopCount + 1 >= envelope.maxHops) return null;
+    final hasRoute = nextHopHasRoute;
+    if (RelioBuildInfo.isTest &&
+        envelope.payloadType == RelioPacketType.textMessage.name &&
+        hasRoute != null) {
+      final remainingHops = envelope.maxHops - envelope.hopCount - 1;
+      if (remainingHops < 1) return null;
+      for (final peer in eligible) {
+        final deviceId = _deviceId(peer)!;
+        try {
+          if (await hasRoute(
+            deviceId,
+            envelope.destinationDeviceId,
+            remainingHops,
+          )) {
+            return peer;
+          }
+        } on Object {
+          // Route probe failure keeps the message queued for a later check.
+        }
+      }
+      return null;
+    }
     return eligible.isEmpty ? null : eligible.first;
   }
 
   String? _deviceId(NearbyPeer peer) =>
       peer.deviceId ?? deviceIdForEndpoint?.call(peer.endpointId);
+
+  List<String> _routePathForForward(RelayEnvelope envelope, String self) {
+    final path = envelope.visitedDeviceIds.isEmpty
+        ? <String>[envelope.originDeviceId]
+        : List<String>.of(envelope.visitedDeviceIds);
+    if (!path.contains(self)) path.add(self);
+    return path;
+  }
 
   void _recordRelay(
     String event,
@@ -548,7 +743,12 @@ class RelayEngine {
               : DateTime.parse(packet.payload['locationCapturedAt']! as String),
           createdAt: DateTime.parse(packet.payload['createdAt']! as String),
           isActive: packet.payload['isActive']! as bool,
+          requesterDisplayName:
+              packet.payload['displayName'] as String? ??
+              envelope.originDeviceId,
         );
+      case RelioPacketType.rescueStatus:
+        throw StateError('Rescue status must use the validated receive path.');
       case RelioPacketType.hello ||
           RelioPacketType.identityChallenge ||
           RelioPacketType.identityProof ||
@@ -558,6 +758,7 @@ class RelayEngine {
           RelioPacketType.mediaMetadata ||
           RelioPacketType.mediaAck ||
           RelioPacketType.relayEnvelope ||
+          RelioPacketType.reachabilitySnapshot ||
           RelioPacketType.relayAck:
         throw StateError('Unsupported relay payload.');
     }
@@ -606,6 +807,7 @@ class RelayEngine {
       status: status,
     );
     await _recordRelayAck('ack_received', packetId, status, endpointId);
+    if (status == 'deferred') return RelayResult.stored;
     if (status == 'delivered') {
       await repository.updatePacketState(packetId, RelayPacketState.delivered);
       if (record.envelope.originDeviceId == local) {
@@ -732,5 +934,6 @@ class RelayEngine {
     await Future.wait(
       _subscriptions.map((subscription) => subscription.cancel()),
     );
+    await _forwardOperation?.catchError((Object _) {});
   }
 }

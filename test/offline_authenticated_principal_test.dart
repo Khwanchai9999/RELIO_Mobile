@@ -8,6 +8,7 @@ import 'package:relio_mobile/core/connectivity/qa_internet_simulator.dart';
 import 'package:relio_mobile/core/connectivity/runtime_connectivity.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
+import 'package:relio_mobile/core/repositories/local_repositories.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
 
 class _FixedRuntimeConnectivitySource implements RuntimeConnectivitySource {
@@ -25,6 +26,14 @@ class _FixedRuntimeConnectivitySource implements RuntimeConnectivitySource {
 class _OfflineProbe implements InternetReachabilityProbe {
   @override
   Future<int> reachableEndpointCount() async => 0;
+}
+
+class _TransientInitializeCloud extends FakeCloudDataSource {
+  @override
+  Future<void> initialize() async {
+    initializeCalls++;
+    throw const CloudException('Cloud ไม่พร้อมใช้งาน', code: 'offline');
+  }
 }
 
 void main() {
@@ -155,6 +164,94 @@ void main() {
         List.filled(64, 'a').join(),
       );
       await offline.dispose();
+    },
+  );
+
+  test(
+    'opted-in Guest gets one anonymous Cloud identity and stays Guest',
+    () async {
+      final cloud = FakeCloudDataSource(backend: backend);
+      final dependencies = createDependencies(
+        offline: false,
+        cloud: cloud,
+        runtimeConnectivitySource: const _FixedRuntimeConnectivitySource(
+          RuntimeConnectivitySnapshot(
+            hasInternetRoute: true,
+            internetValidated: true,
+          ),
+        ),
+      );
+      var firstDisposed = false;
+      addTearDown(() async {
+        if (!firstDisposed) await dependencies.dispose();
+      });
+      await dependencies.resumeGuestMode();
+      await dependencies.repositories.settings.setBool(
+        RelioSettingsRepository.automaticPrivateBackupKey,
+        true,
+      );
+      final guestPrincipal =
+          (await dependencies.repositories.profiles.current()).principalId;
+      final localConversation = await dependencies.repositories.conversations
+          .ensureConversation(
+            id: 'persisted-guest-cloud-chat',
+            participantId: 'offline-peer',
+            displayName: 'Offline peer',
+            participantStatus: DeviceStatus.normal,
+          );
+      await dependencies.repositories.messages.createIncomingText(
+        conversationId: localConversation.id,
+        senderId: 'offline-peer',
+        senderDeviceId: 'offline-peer-device',
+        messageId: 'persisted-guest-cloud-message',
+        text: 'Local Guest history survives Cloud auth',
+        createdAt: DateTime.utc(2026, 11, 2),
+      );
+      await dependencies.initializeAuth();
+
+      final identity = await dependencies.ensureGuestCloudIdentity();
+      expect(identity?.isAnonymous, isTrue);
+      expect(cloud.backend.anonymousUsers, hasLength(1));
+      expect(dependencies.isGuestApplicationMode, isTrue);
+      expect(dependencies.isGuestCloudBackupSession, isTrue);
+      expect(dependencies.repositories.ownerContext.capture().userId, isNull);
+      final reused = await dependencies.ensureGuestCloudIdentity();
+      expect(reused?.userId, identity?.userId);
+      expect(cloud.backend.anonymousIdentityCounter, 1);
+      await dependencies.dispose();
+      firstDisposed = true;
+
+      final restoredCloud = FakeCloudDataSource(
+        backend: backend,
+        restoreIdentityOnInitialize: identity,
+      );
+      final restarted = createDependencies(
+        offline: false,
+        cloud: restoredCloud,
+        runtimeConnectivitySource: const _FixedRuntimeConnectivitySource(
+          RuntimeConnectivitySnapshot(
+            hasInternetRoute: true,
+            internetValidated: true,
+          ),
+        ),
+      );
+      addTearDown(restarted.dispose);
+      await restarted.initializeAuth();
+      final restoredIdentity = await restarted.ensureGuestCloudIdentity();
+      expect(restoredIdentity?.userId, identity?.userId);
+      expect(backend.anonymousIdentityCounter, 1);
+      expect(restarted.isGuestApplicationMode, isTrue);
+      expect(restarted.repositories.ownerContext.capture().userId, isNull);
+      expect(
+        (await restarted.repositories.profiles.current()).principalId,
+        guestPrincipal,
+      );
+      expect(
+        (await restarted.repositories.messages.listMessages(
+          'persisted-guest-cloud-chat',
+        )).single.text,
+        'Local Guest history survives Cloud auth',
+      );
     },
   );
 
@@ -402,4 +499,42 @@ void main() {
     );
     await restarted.dispose();
   });
+
+  test(
+    'transient online auth failure retains the cached local owner',
+    () async {
+      final seed = createDependencies(
+        offline: false,
+        cloud: FakeCloudDataSource(backend: backend),
+      );
+      await seed.repositories.settings.setValue(
+        'offline_authenticated_principal',
+        'fake-1',
+      );
+      await seed.repositories.settings.setValue(
+        'selected_user_mode',
+        'account',
+      );
+      await seed.dispose();
+
+      final cloud = _TransientInitializeCloud();
+      final restarted = createDependencies(
+        offline: false,
+        cloud: cloud,
+        runtimeConnectivitySource: const _FixedRuntimeConnectivitySource(
+          RuntimeConnectivitySnapshot(
+            hasInternetRoute: true,
+            internetValidated: true,
+          ),
+        ),
+      );
+      await restarted.initializeAuth();
+
+      expect(restarted.hasOfflineAuthenticatedPrincipal, isTrue);
+      expect(restarted.hasSelectedUserSession, isTrue);
+      expect(restarted.repositories.ownerContext.capture().userId, 'fake-1');
+      expect(cloud.initializeCalls, greaterThan(0));
+      await restarted.dispose();
+    },
+  );
 }

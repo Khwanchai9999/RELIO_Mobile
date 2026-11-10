@@ -20,16 +20,16 @@ void main() {
       cloudSyncStatus: 'pending',
     );
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(body: RelioMessageBubble(message: message)),
       ),
     );
 
-    expect(find.text('ส่งแล้ว'), findsOneWidget);
-    expect(find.text('รอซิงก์'), findsOneWidget);
+    expect(find.text('ถึงผู้รับแล้ว'), findsOneWidget);
+    expect(find.text('รอซิงก์'), findsNothing);
 
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(
           body: RelioMessageBubble(
             message: RelioMessage(
@@ -46,8 +46,8 @@ void main() {
       ),
     );
 
-    expect(find.text('ส่งแล้ว'), findsOneWidget);
-    expect(find.text('ซิงก์แล้ว'), findsOneWidget);
+    expect(find.text('ถึงผู้รับแล้ว'), findsOneWidget);
+    expect(find.text('ซิงก์แล้ว'), findsNothing);
   });
 
   testWidgets('image message opens a viewer and handles a missing local file', (
@@ -77,7 +77,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('ไม่พบไฟล์รูปภาพ'), findsOneWidget);
+    expect(find.text('photo.png'), findsNothing);
     await tester.tap(find.byTooltip('เปิดรูปภาพเต็มจอ'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('ไม่สามารถเปิดรูปภาพนี้ได้'), findsOneWidget);
@@ -104,6 +109,7 @@ void main() {
       );
 
       expect(find.text('ไม่พบไฟล์รูปภาพ'), findsOneWidget);
+      expect(find.text('photo.png'), findsNothing);
       expect(find.byTooltip('เปิดรูปภาพเต็มจอ'), findsNothing);
     },
   );
@@ -143,15 +149,25 @@ void main() {
       ),
     );
 
+    for (var i = 0; i < 10; i++) {
+      if (calls.any((call) => call.method == 'videoThumbnail')) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byTooltip('เล่นวิดีโอ'));
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 20)),
     );
     await tester.pump();
 
-    expect(calls, hasLength(1));
-    expect(calls.single.method, 'playLocalVideo');
-    expect(calls.single.arguments, {'path': file.path});
+    expect(calls, hasLength(2));
+    expect(calls.first.method, 'videoThumbnail');
+    expect(calls.last.method, 'playLocalVideo');
+    expect(calls.last.arguments, {'path': file.path});
   });
 
   testWidgets('video message reports when its local attachment is missing', (
@@ -181,5 +197,49 @@ void main() {
     await tester.pump();
 
     expect(find.text('ไม่พบไฟล์วิดีโอในเครื่อง'), findsOneWidget);
+  });
+
+  testWidgets('only a real readAt shows the green read receipt label', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RelioMessageBubble(
+            message: RelioMessage(
+              id: 'read-message',
+              text: 'ข้อความ',
+              time: '10:00',
+              outgoing: true,
+              type: MessageType.text,
+              status: DeliveryStatus.delivered,
+              readAt: null,
+              cloudSyncStatus: 'synced',
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('อ่านแล้ว'), findsNothing);
+    expect(find.text('ซิงก์แล้ว'), findsNothing);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: RelioMessageBubble(
+            message: RelioMessage(
+              id: 'read-message',
+              text: 'ข้อความ',
+              time: '10:00',
+              outgoing: true,
+              type: MessageType.text,
+              status: DeliveryStatus.delivered,
+              readAt: DateTime.utc(2026, 10, 31),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('อ่านแล้ว'), findsOneWidget);
   });
 }

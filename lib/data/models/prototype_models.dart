@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/presentation/peer_connection_presence.dart';
 
 enum DeviceStatus { normal, sos, rescue, offline }
 
@@ -38,6 +39,7 @@ class RelioDevice {
     this.isConnected = true,
     this.isDemo = true,
     this.presence = PeerPresence.demo,
+    this.reportedConnectionPresence,
     this.lastSeenAt,
     this.batteryLevel,
     this.isCharging,
@@ -46,6 +48,7 @@ class RelioDevice {
     this.locationLongitude,
     this.locationAccuracyMeters,
     this.locationCapturedAt,
+    this.avatarPath,
   });
 
   final String id;
@@ -59,6 +62,7 @@ class RelioDevice {
   final bool isConnected;
   final bool isDemo;
   final PeerPresence presence;
+  final PeerConnectionPresence? reportedConnectionPresence;
   final DateTime? lastSeenAt;
   final int? batteryLevel;
   final bool? isCharging;
@@ -67,6 +71,19 @@ class RelioDevice {
   final double? locationLongitude;
   final double? locationAccuracyMeters;
   final DateTime? locationCapturedAt;
+  final String? avatarPath;
+
+  PeerConnectionPresence get connectionPresence =>
+      reportedConnectionPresence ??
+      switch (presence) {
+        PeerPresence.connected => PeerConnectionPresence.online,
+        PeerPresence.discovered ||
+        PeerPresence.disconnected ||
+        PeerPresence.failed ||
+        PeerPresence.stale => PeerConnectionPresence.offline,
+        PeerPresence.demo ||
+        PeerPresence.connecting => PeerConnectionPresence.unknown,
+      };
 
   String get approximateDistance => distanceMetersApprox == null
       ? 'อยู่ใกล้เคียง'
@@ -82,6 +99,9 @@ class RelioChatPreview {
     required this.status,
     required this.unread,
     this.isDemo = false,
+    this.identityKey = '',
+    this.presence = PeerConnectionPresence.unknown,
+    this.avatarPath,
   });
 
   final String id;
@@ -91,6 +111,9 @@ class RelioChatPreview {
   final DeviceStatus status;
   final int unread;
   final bool isDemo;
+  final String identityKey;
+  final PeerConnectionPresence presence;
+  final String? avatarPath;
 }
 
 enum DeliveryStatus { pending, nearbySent, delivered, synced, failed }

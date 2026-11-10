@@ -202,7 +202,8 @@ void main() {
     await tester.enterText(find.byType(TextFormField).last, 'NewSecret!123');
     await tester.ensureVisible(find.text('บันทึกรหัสผ่านใหม่'));
     await tester.tap(find.text('บันทึกรหัสผ่านใหม่'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(setup.cloud.authState, AuthState.authenticated);
     expect(find.text('ตั้งรหัสผ่านใหม่'), findsNothing);
   });

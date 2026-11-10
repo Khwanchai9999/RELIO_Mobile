@@ -100,6 +100,12 @@ class PermissionService {
     return readNearbyPermissions();
   }
 
+  /// Requests foreground Location only after the user approves live sharing.
+  Future<bool> requestLiveLocationPermission() async {
+    if (!_isAndroid) return true;
+    return (await ph.Permission.locationWhenInUse.request()).isGranted;
+  }
+
   Future<void> openNearbySettings(String action) =>
       _channel.invokeMethod<void>('openNearbySettings', action);
 

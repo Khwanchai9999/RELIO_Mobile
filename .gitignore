@@ -32,7 +32,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+build/
 /coverage/
 dist/
 /public_update/
@@ -78,3 +78,27 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local QA data and generated artifacts
+/.task_appdata/
+/qa_logs/
+/docs/evidence/
+/test/failures/
+/.codex-runtime/
+/.tmp_*
+*.apk
+*.aab
+*.apks
+*.xapk
+*.sqlite
+*.sqlite3
+*.db
+*-wal
+*-shm
+*.wal
+*.shm
+*.logcat
+*.hprof
+*service-account*.json
+*service_account*.json
+**/local.properties

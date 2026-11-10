@@ -394,12 +394,19 @@ void main() {
       ),
     );
     await settle();
+    final locationCapturedAt = DateTime.now().subtract(
+      const Duration(minutes: 11),
+    );
     final packet = RelioPacket.sos(
       senderDeviceId: 'device-sos',
       senderUserId: 'sos-user',
       displayName: 'SOS Peer',
       sosId: 'sos-1',
       message: 'need help',
+      latitude: 13.75,
+      longitude: 100.5,
+      accuracyMeters: 10,
+      locationCapturedAt: locationCapturedAt,
       createdAt: DateTime.now(),
       isActive: true,
       stateRevision: 1,
@@ -414,8 +421,20 @@ void main() {
     );
     await settle();
 
-    expect((await repositories.sos.getById('sos-1'))?.isActive, isTrue);
-    expect((await repositories.sos.getById('sos-1'))?.message, 'need help');
+    final receivedSos = await repositories.sos.getById('sos-1');
+    expect(receivedSos?.isActive, isTrue);
+    expect(receivedSos?.message, 'need help');
+    expect(receivedSos?.latitude, 13.75);
+    expect(receivedSos?.longitude, 100.5);
+    expect(receivedSos?.locationAccuracy, 10);
+    expect(
+      receivedSos?.locationCapturedAt
+          ?.difference(locationCapturedAt)
+          .inMilliseconds
+          .abs(),
+      lessThan(1000),
+    );
+    expect(receivedSos?.updatedAt.isAfter(locationCapturedAt), isTrue);
     expect(
       notifications.shown.where((item) => item.id == 'sos-1'),
       hasLength(1),

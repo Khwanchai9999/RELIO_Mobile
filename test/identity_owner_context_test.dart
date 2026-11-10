@@ -71,6 +71,7 @@ void main() {
       );
     },
   );
+  // ป้องกันงาน async เก่ากลับมาใช้ได้เมื่อสลับ A ไป B แล้วกลับ A แม้ชื่อ owner จะตรงอีกครั้ง
   test('owner epoch rejects A to B to A async work', () async {
     var active = 'a';
     final changes = StreamController<Object?>.broadcast(sync: true);

@@ -54,7 +54,14 @@ class PayloadTransferUpdate {
 class ConnectionInfo {
   String endpointName, authenticationToken;
   bool isIncomingConnection;
+  String? connectionTraceId, callbackOperation, strategy;
 
   ConnectionInfo(
-      this.endpointName, this.authenticationToken, this.isIncomingConnection);
+    this.endpointName,
+    this.authenticationToken,
+    this.isIncomingConnection, {
+    this.connectionTraceId,
+    this.callbackOperation,
+    this.strategy,
+  });
 }

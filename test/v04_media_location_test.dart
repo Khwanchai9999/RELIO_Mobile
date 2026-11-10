@@ -113,7 +113,7 @@ void main() {
         bytesTransferred: 42,
       );
 
-      expect(db.schemaVersion, 11);
+      expect(db.schemaVersion, 14);
       expect(
         (await repos.messages.getMessage(message.id))?.text,
         'before attachment',
@@ -167,6 +167,29 @@ void main() {
         () => storage.copySelectedFile(source.path),
         throwsA(isA<MediaStorageException>()),
       );
+    },
+  );
+
+  test(
+    'Cloud media download rejects a corrupt checksum before storing it',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'relio-cloud-media-integrity-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final managed = Directory('${directory.path}/managed');
+      final storage = MediaStorageService(rootDirectory: managed);
+      await expectLater(
+        storage.storeDownloadedBytes(
+          bytes: Uint8List.fromList([0xff, 0xd8, 0xff]),
+          fileName: 'shared.jpg',
+          mimeType: 'image/jpeg',
+          expectedByteSize: 3,
+          expectedSha256: List<String>.filled(64, '0').join(),
+        ),
+        throwsA(isA<MediaStorageException>()),
+      );
+      expect(await managed.exists(), isFalse);
     },
   );
 

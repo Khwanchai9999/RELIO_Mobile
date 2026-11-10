@@ -39,12 +39,12 @@ void main() {
       ),
     );
 
-    expect(find.text('ดูเส้นทาง • RELIO Samsung QA'), findsOneWidget);
+    expect(find.text('ดูตำแหน่ง • RELIO Samsung QA'), findsOneWidget);
     expect(find.textContaining('1.1 กม.'), findsOneWidget);
     expect(find.textContaining('ประมาณ ตะวันออก'), findsOneWidget);
-    expect(find.textContaining('⚠ อัปเดต'), findsOneWidget);
+    expect(find.textContaining('แชร์ล่าสุด 8 นาทีที่แล้ว'), findsOneWidget);
     expect(find.text('เส้นตรงโดยประมาณ ไม่ใช่เส้นทางถนน'), findsOneWidget);
-    await tester.tap(find.byTooltip('ปิดดูเส้นทาง'));
+    await tester.tap(find.byTooltip('ปิดดูตำแหน่ง'));
     expect(closed, isTrue);
   });
 

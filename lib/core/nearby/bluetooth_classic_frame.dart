@@ -31,6 +31,7 @@ final class BluetoothClassicFrame {
     return bytes;
   }
 
+  // CRC32 ใช้ตรวจความเสียหายของ frame ไม่ใช่หลักฐานยืนยันตัวตนของ peer
   static int crc32(Uint8List bytes) {
     var crc = 0xffffffff;
     for (final byte in bytes) {

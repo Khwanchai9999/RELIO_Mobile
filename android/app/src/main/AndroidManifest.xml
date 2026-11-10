@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <!-- อ่านสถานะ Wi-Fi ได้ทุก API โดยไม่สแกน access point หรืออนุมานพิกัด -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Nearby Connections API 35 ตอบ 8033 หาก permission นี้ถูกตัดออกจาก manifest -->
@@ -22,6 +24,11 @@
         android:label="${appLabel}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <service
+            android:name=".EmergencyModeForegroundService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="connectedDevice" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

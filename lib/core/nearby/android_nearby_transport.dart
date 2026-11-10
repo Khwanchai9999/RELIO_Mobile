@@ -7,8 +7,11 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../app/environment.dart';
 import 'nearby_transport.dart';
 
+// เชื่อม interface กลางของ NearbyTransport กับปลั๊กอิน Android ผ่าน MethodChannel
+// รายละเอียด endpoint และ native payload ถูกแปลงที่ขอบเขตนี้ ไม่ส่งชนิดปลั๊กอินขึ้นไปยัง UI
 class AndroidNearbyTransport
     implements NearbyTransport, NearbyIdleSessionRecovery {
   AndroidNearbyTransport({this.serviceId = relioNearbyServiceId}) {
@@ -108,6 +111,11 @@ class AndroidNearbyTransport
   }) async {
     if (_disposed || _advertising || _advertisingStarting) return;
     final endpointName = _endpointName(displayName, identityFingerprint);
+    _recordQaTransportDiagnostic('nearby_advertising_start_requested', {
+      'serviceId': serviceId,
+      'strategy': strategyName,
+      'role': 'advertiser',
+    });
     _advertisingStarting = true;
     try {
       final started = await _nearby.startAdvertising(
@@ -120,6 +128,13 @@ class AndroidNearbyTransport
         onDisconnected: _disconnected,
       );
       if (!started) {
+        _recordQaTransportDiagnostic('nearby_advertising_task_failed', {
+          'serviceId': serviceId,
+          'strategy': strategyName,
+          'role': 'advertiser',
+          'result': false,
+          'failureCode': 'start_returned_false',
+        });
         throw const NearbyTransportException(
           'Android startAdvertising returned false.',
           code: 'start_returned_false',
@@ -129,11 +144,24 @@ class AndroidNearbyTransport
         );
       }
       _advertising = true;
+      _recordQaTransportDiagnostic('nearby_advertising_task_succeeded', {
+        'serviceId': serviceId,
+        'strategy': strategyName,
+        'role': 'advertiser',
+        'result': true,
+      });
     } on NearbyTransportException {
       rethrow;
     } on PlatformException catch (error) {
+      _recordQaTransportFailure('nearby_advertising_task_failed', error);
       throw _platformFailure('startAdvertising', error);
     } on Object catch (error) {
+      _recordQaTransportDiagnostic('nearby_advertising_task_failed', {
+        'serviceId': serviceId,
+        'strategy': strategyName,
+        'role': 'advertiser',
+        'exceptionClass': error.runtimeType.toString(),
+      });
       throw NearbyTransportException(
         'Unable to start advertising: $error',
         code: _failureCode(error),
@@ -161,8 +189,15 @@ class AndroidNearbyTransport
         serviceId,
         _strategy,
         serviceId: serviceId,
-        onEndpointFound: (id, name, _) {
+        onEndpointFound: (id, name, reportedServiceId) {
           if (callbackEpoch != _discoveryEpoch) return;
+          _recordQaEndpointDiagnostic(
+            'nearby_endpoint_found',
+            id,
+            callbackEpoch,
+            serviceId: reportedServiceId,
+            role: 'discoverer',
+          );
           final now = DateTime.now().toUtc();
           _peerNames[id] = name;
           final hint = _identityFingerprintHint(name);
@@ -188,6 +223,13 @@ class AndroidNearbyTransport
         },
         onEndpointLost: (id) {
           if (id != null && callbackEpoch == _discoveryEpoch) {
+            _recordQaEndpointDiagnostic(
+              'nearby_endpoint_lost',
+              id,
+              callbackEpoch,
+              serviceId: serviceId,
+              role: 'discoverer',
+            );
             final name = _peerNames.remove(id) ?? id;
             final hint =
                 _peerFingerprintHints.remove(id) ??
@@ -211,6 +253,14 @@ class AndroidNearbyTransport
         },
       );
       if (!started) {
+        _recordQaTransportDiagnostic('nearby_discovery_task_failed', {
+          'serviceId': serviceId,
+          'strategy': strategyName,
+          'role': 'discoverer',
+          'discoveryEpoch': callbackEpoch,
+          'result': false,
+          'failureCode': 'start_returned_false',
+        });
         throw const NearbyTransportException(
           'Android startDiscovery returned false.',
           code: 'start_returned_false',
@@ -220,11 +270,26 @@ class AndroidNearbyTransport
         );
       }
       _discovering = true;
+      _recordQaTransportDiagnostic('nearby_discovery_task_succeeded', {
+        'serviceId': serviceId,
+        'strategy': strategyName,
+        'role': 'discoverer',
+        'discoveryEpoch': callbackEpoch,
+        'result': true,
+      });
     } on NearbyTransportException {
       rethrow;
     } on PlatformException catch (error) {
+      _recordQaTransportFailure('nearby_discovery_task_failed', error);
       throw _platformFailure('startDiscovery', error);
     } on Object catch (error) {
+      _recordQaTransportDiagnostic('nearby_discovery_task_failed', {
+        'serviceId': serviceId,
+        'strategy': strategyName,
+        'role': 'discoverer',
+        'discoveryEpoch': callbackEpoch,
+        'exceptionClass': error.runtimeType.toString(),
+      });
       throw NearbyTransportException(
         'Unable to start discovery: $error',
         code: _failureCode(error),
@@ -508,6 +573,18 @@ class AndroidNearbyTransport
       _peerNames[endpointId] = info.endpointName;
     }
     if (!_pendingConnectionRequests.add(endpointId)) return;
+    _recordQaEndpointDiagnostic(
+      'nearby_connection_initiated',
+      endpointId,
+      _discoveryEpoch,
+      serviceId: serviceId,
+      role: info.isIncomingConnection ? 'responder' : 'initiator',
+      connectionTraceId: info.connectionTraceId,
+      fields: {
+        'isIncomingConnection': info.isIncomingConnection,
+        'callbackOperation': info.callbackOperation,
+      },
+    );
     _connections.add(
       NearbyConnectionEvent(
         peer: NearbyPeer(
@@ -520,6 +597,62 @@ class AndroidNearbyTransport
         state: NearbyConnectionState.incomingRequest,
         authenticationToken: info.authenticationToken,
         isIncomingRequest: info.isIncomingConnection,
+        operation: info.callbackOperation,
+        role: info.isIncomingConnection ? 'responder' : 'initiator',
+        strategy: strategyName,
+        connectionTraceId: info.connectionTraceId,
+      ),
+    );
+  }
+
+  void _recordQaTransportFailure(String name, PlatformException error) {
+    final details = error.details;
+    final fields = <String, Object?>{
+      'serviceId': serviceId,
+      'strategy': strategyName,
+      'exceptionClass': error.runtimeType.toString(),
+      'platformCode': error.code,
+      if (details is Map) ...{
+        if (details['rawStatusCode'] != null)
+          'rawStatusCode': details['rawStatusCode'],
+        if (details['rawStatusName'] != null)
+          'rawStatusName': details['rawStatusName'],
+      },
+    };
+    _recordQaTransportDiagnostic(name, fields);
+  }
+
+  void _recordQaTransportDiagnostic(String name, Map<String, Object?> fields) {
+    if (!RelioBuildInfo.isTest) return;
+    _nativeDiagnostics.add(NearbyNativeDiagnostic(name: name, fields: fields));
+  }
+
+  void _recordQaEndpointDiagnostic(
+    String name,
+    String endpointId,
+    int epoch, {
+    required String serviceId,
+    required String role,
+    String? connectionTraceId,
+    Map<String, Object?> fields = const {},
+  }) {
+    if (!RelioBuildInfo.isTest) return;
+    _nativeDiagnostics.add(
+      NearbyNativeDiagnostic(
+        name: name,
+        fields: {
+          'endpointId': endpointId,
+          'discoveryEpoch': epoch,
+          'serviceId': serviceId,
+          'configuredServiceId': this.serviceId,
+          'serviceIdMatches': serviceId == this.serviceId,
+          'strategy': strategyName,
+          'role': role,
+          ...?(connectionTraceId == null
+              ? null
+              : {'connectionTraceId': connectionTraceId}),
+          ...fields,
+        },
       ),
     );
   }

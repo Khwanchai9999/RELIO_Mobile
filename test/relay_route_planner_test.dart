@@ -32,7 +32,7 @@ void main() {
   });
 
   test(
-    'automatic route selects one verified middle when direct is absent',
+    'automatic route selects a connected peer that verifies a path to destination',
     () async {
       final checked = <String>[];
       final plan = await planner.plan(
@@ -62,8 +62,41 @@ void main() {
       );
 
       expect(plan.kind, RelayRouteKind.relay);
-      expect(plan.middleDeviceId, 'd');
+      expect(plan.firstHopDeviceId, 'd');
       expect(checked, ['b', 'd']);
+    },
+  );
+
+  test(
+    'automatic fallback can prefer relay after a failed direct send',
+    () async {
+      final plan = await planner.plan(
+        mode: RelayTextRouteMode.automatic,
+        sourceDeviceId: 'a',
+        destinationDeviceId: 'c',
+        connectedPeers: const [
+          NearbyPeer(
+            id: 'endpoint-c',
+            name: 'C',
+            connected: true,
+            deviceId: 'c',
+            capabilities: ['relay-v1'],
+          ),
+          NearbyPeer(
+            id: 'endpoint-b',
+            name: 'B',
+            connected: true,
+            deviceId: 'b',
+            capabilities: ['relay-v1'],
+          ),
+        ],
+        preferRelay: true,
+        verifyRelay: (middle, destination) async =>
+            middle == 'b' && destination == 'c',
+      );
+
+      expect(plan.kind, RelayRouteKind.relay);
+      expect(plan.middleDeviceId, 'b');
     },
   );
 

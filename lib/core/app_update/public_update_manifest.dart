@@ -1,5 +1,7 @@
 import 'public_update_errors.dart';
 
+// ตรวจ manifest และ URL ของ public QA updater ตาม allowlist ที่กำหนด
+// การมี manifest เพียงอย่างเดียวไม่พอ ต้องตรวจ asset, version และ hash ก่อนส่งให้ installer
 class PublicUpdateValidationException implements Exception {
   const PublicUpdateValidationException(this.code);
 

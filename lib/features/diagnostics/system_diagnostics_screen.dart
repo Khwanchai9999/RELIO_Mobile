@@ -1,3 +1,4 @@
+// หน้าสรุปข้อมูลวินิจฉัยระบบที่ผู้ใช้ใช้ตรวจสอบสภาพแอปและการเชื่อมต่อ
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../core/nearby/nearby_transport.dart';
 import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย System Diagnostics Screen
 class SystemDiagnosticsScreen extends StatefulWidget {
   const SystemDiagnosticsScreen({super.key});
 
@@ -15,6 +17,7 @@ class SystemDiagnosticsScreen extends StatefulWidget {
       _SystemDiagnosticsScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (System Diagnostics Screen State)
 class _SystemDiagnosticsScreenState extends State<SystemDiagnosticsScreen> {
   late RelioDependencies _dependencies;
   Map<String, Object?> _device = const {};

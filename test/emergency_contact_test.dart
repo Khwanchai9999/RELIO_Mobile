@@ -243,7 +243,7 @@ void main() {
   );
 
   test(
-    'schema 10 to 11 adds contacts and preserves existing local rows',
+    'schema 10 to 13 adds emergency data and preserves existing local rows',
     () async {
       final dir = await Directory.systemTemp.createTemp(
         'relio-emergency-migration-',
@@ -345,6 +345,8 @@ void main() {
       final upgraded = AppDatabase.withExecutor(NativeDatabase(file));
       addTearDown(upgraded.close);
       expect(await upgraded.select(upgraded.emergencyContacts).get(), isEmpty);
+      expect(await upgraded.select(upgraded.emergencyProfiles).get(), isEmpty);
+      expect(upgraded.schemaVersion, 14);
       expect(
         (await upgraded.select(upgraded.conversations).get()).single.id,
         'conversation',

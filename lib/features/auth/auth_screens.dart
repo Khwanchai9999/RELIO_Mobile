@@ -1,3 +1,4 @@
+// รวมหน้าลงชื่อเข้าใช้ สมัครสมาชิก และขอสิทธิ์เริ่มต้น โดยเรียกใช้บริการของแอปผ่านชั้นที่กำหนด
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import '../../core/relio_dependencies.dart';
 import '../../shared/widgets/relio_widgets.dart';
 import 'register_validation.dart';
 
+// หน้าจอ Auth ส่งข้อมูลผ่าน AuthService และแสดงผลสถานะที่ได้กลับมา
+// การตรวจแบบฟอร์มใน UI ไม่ใช้แทนการยืนยันตัวตนจาก Cloud
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -17,6 +20,7 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Login Screen State)
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
@@ -143,6 +147,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Register Screen
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
 
@@ -150,6 +155,7 @@ class RegisterScreen extends StatefulWidget {
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Register Screen State)
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
@@ -332,6 +338,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Password Requirement)
 class _PasswordRequirement extends StatelessWidget {
   const _PasswordRequirement({required this.label, required this.satisfied});
 
@@ -361,6 +368,7 @@ class _PasswordRequirement extends StatelessWidget {
   }
 }
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Permissions Screen
 class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
 
@@ -379,7 +387,8 @@ class PermissionsScreen extends StatefulWidget {
     (
       Icons.location_on_outlined,
       'ตำแหน่ง',
-      'แชร์ตำแหน่งล่าสุดเมื่อเกิดเหตุฉุกเฉิน',
+      'เปิดแชร์สดได้จากแผง Nearby เพื่อแชร์ให้อุปกรณ์ที่ยืนยันแล้วขณะเปิดแอป '
+          'และหยุดแชร์ได้ทุกเมื่อ',
     ),
     (
       Icons.photo_library_outlined,
@@ -397,6 +406,7 @@ class PermissionsScreen extends StatefulWidget {
   State<PermissionsScreen> createState() => _PermissionsScreenState();
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Permissions Screen State)
 class _PermissionsScreenState extends State<PermissionsScreen> {
   bool _startedReading = false;
   bool _checking = true;
@@ -557,6 +567,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> {
   }
 }
 
+// องค์ประกอบหลักของโมดูลนี้ รับผิดชอบข้อมูลหรือส่วนติดต่อที่ระบุโดย Auth Scaffold
 class AuthScaffold extends StatelessWidget {
   const AuthScaffold({
     required this.title,
@@ -588,6 +599,7 @@ class AuthScaffold extends StatelessWidget {
   }
 }
 
+// รายละเอียดภายในสำหรับประกอบหน้าจอหรือจัดรูปข้อมูลของโมดูลนี้ (Auth Intro)
 class _AuthIntro extends StatelessWidget {
   const _AuthIntro({required this.title, required this.subtitle});
 

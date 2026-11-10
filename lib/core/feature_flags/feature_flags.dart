@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../../app/environment.dart';
 import '../repositories/local_repositories.dart';
 
+// กำหนด flags สำหรับการนำเสนอ UI โดยไม่เปลี่ยน transport หรือการเก็บ metadata
+// ค่าเริ่มต้นมาจาก build; QA override ถูกจัดเก็บแยกใน app_settings
 enum RelioFeatureFlag { nearbyMapUi, peerBatteryUi, routePreview }
 
 abstract final class FeatureFlagDefaults {

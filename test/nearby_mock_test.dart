@@ -80,6 +80,8 @@ void main() {
       );
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
+      await repositories.settings.setBool('notification_preview', false);
+
       transport.simulateIncoming(
         peerId: 'preview-endpoint',
         bytes: await applicationBytes(
@@ -483,6 +485,8 @@ class _RecordingNotifications implements LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   }) async {
     calls.add((title: title, body: body, route: route, urgent: urgent));
   }

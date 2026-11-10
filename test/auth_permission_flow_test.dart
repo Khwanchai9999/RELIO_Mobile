@@ -91,6 +91,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> pumpPastHomeTransition(WidgetTester tester) async {
+    await tester.pump();
+    if (find.text('สวัสดี 👋').evaluate().isNotEmpty) {
+      // The Home CHECKING indicator is intentionally continuous.
+      await tester.pump(const Duration(milliseconds: 500));
+    } else {
+      await tester.pumpAndSettle();
+    }
+  }
+
   Future<void> signIn(
     WidgetTester tester, {
     String password = 'password',
@@ -104,7 +114,7 @@ void main() {
     final button = find.widgetWithText(FilledButton, 'เข้าสู่ระบบ').last;
     await tester.ensureVisible(button);
     await tester.tap(button);
-    await tester.pumpAndSettle();
+    await pumpPastHomeTransition(tester);
   }
 
   testWidgets('login with all required permissions opens Home directly', (
@@ -157,7 +167,7 @@ void main() {
     await pumpApp(tester, permissions: permissions, createLoginAccount: false);
     await openLogin(tester);
     await tester.tap(find.text('ยังไม่มีบัญชี? สร้างบัญชีใหม่'));
-    await tester.pumpAndSettle();
+    await pumpPastHomeTransition(tester);
 
     final fields = find.byType(TextFormField);
     final registrationValues = [
@@ -174,7 +184,7 @@ void main() {
     final consent = find.byType(CheckboxListTile);
     await tester.ensureVisible(consent);
     await tester.tap(consent);
-    await tester.pumpAndSettle();
+    await pumpPastHomeTransition(tester);
     final createAccount = find.widgetWithText(FilledButton, 'สร้างบัญชี');
     await tester.ensureVisible(createAccount);
     await tester.tap(createAccount);
@@ -198,7 +208,7 @@ void main() {
     final allowButton = find.text('อนุญาตทั้งหมด');
     await tester.ensureVisible(allowButton);
     await tester.tap(allowButton);
-    await tester.pumpAndSettle();
+    await pumpPastHomeTransition(tester);
 
     expect(permissions.requestCalls, 1);
     expect(permissions.allGranted, isTrue);
@@ -228,7 +238,7 @@ void main() {
     final skipButton = find.text('ข้ามขั้นตอนนี้');
     await tester.ensureVisible(skipButton);
     await tester.tap(skipButton);
-    await tester.pumpAndSettle();
+    await pumpPastHomeTransition(tester);
     expect(findGeneratedName(), findsOneWidget);
   });
 

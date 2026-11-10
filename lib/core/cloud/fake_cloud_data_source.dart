@@ -16,10 +16,17 @@ enum FakeCloudFailure {
   unauthenticated,
   permissionDenied,
   uploadFailure,
+  downloadFailure,
 }
 
+// Backend จำลองนี้แชร์ state ระหว่าง adapter หลายบัญชีใน tests
+// ใช้ตรวจ authorization, deduplication และ owner isolation โดยไม่เรียกอินเทอร์เน็ต
 class FakeCloudBackend {
   final users = <String, ({String password, CloudIdentity identity})>{};
+  final anonymousUsers = <String, CloudIdentity>{};
+  final pendingEmails = <String, String>{};
+  final emailChangeConfirmations = <String, Set<String>>{};
+  final verifiedEmails = <String>{};
   final profiles = <String, CloudProfile>{};
   final pushTokens = <String, String>{};
   final messages = <String, CloudMessageDto>{};
@@ -34,10 +41,15 @@ class FakeCloudBackend {
   final conversationMembers = <String, Set<String>>{};
   final directConversationIds = <String, String>{};
   final readReceipts = <String, CloudReadReceipt>{};
+  final privateBackupRecords = <String, CloudPrivateBackupRecord>{};
   DateTime? lastMessageServerTime;
+  int anonymousIdentityCounter = 0;
+  bool requireBothEmailConfirmations = false;
 }
 
 // ใช้ backend จำลองใน test โดยคงกฎ ownership เดียวกับ Cloud จริง
+// จำลองสัญญา CloudDataSource ให้ชุดทดสอบใช้แทน Supabase adapter
+// การตรวจเจ้าของและ path ของ Storage ต้องเข้มงวดเทียบเท่ากับ adapter จริง
 class FakeCloudDataSource implements CloudDataSource {
   FakeCloudDataSource({
     this.configured = true,
@@ -83,6 +95,8 @@ class FakeCloudDataSource implements CloudDataSource {
   Map<String, String> get _directConversationIds =>
       backend.directConversationIds;
   Map<String, CloudReadReceipt> get readReceipts => backend.readReceipts;
+  Map<String, CloudPrivateBackupRecord> get privateBackupRecords =>
+      backend.privateBackupRecords;
 
   CloudIdentity createTestIdentity({
     required String email,
@@ -121,7 +135,8 @@ class FakeCloudDataSource implements CloudDataSource {
     }
     final failure = offline ? FakeCloudFailure.offline : failureMode;
     if (failure != FakeCloudFailure.none &&
-        failure != FakeCloudFailure.uploadFailure) {
+        failure != FakeCloudFailure.uploadFailure &&
+        failure != FakeCloudFailure.downloadFailure) {
       final (message, code) = switch (failure) {
         FakeCloudFailure.offline => (
           'ออฟไลน์ ไม่สามารถเชื่อมต่อคลาวด์ได้',
@@ -141,7 +156,9 @@ class FakeCloudDataSource implements CloudDataSource {
           'ไม่มีสิทธิ์เขียน Cloud',
           'permissionDenied',
         ),
-        FakeCloudFailure.none || FakeCloudFailure.uploadFailure => ('', ''),
+        FakeCloudFailure.none ||
+        FakeCloudFailure.uploadFailure ||
+        FakeCloudFailure.downloadFailure => ('', ''),
       };
       throw CloudException(message, code: code);
     }
@@ -155,6 +172,53 @@ class FakeCloudDataSource implements CloudDataSource {
         code: 'signedOut',
       );
     }
+  }
+
+  @override
+  Future<void> upsertPrivateBackupRecord(
+    CloudPrivateBackupRecord record,
+  ) async {
+    _requireAuth();
+    if (!const {'conversation', 'message'}.contains(record.recordType) ||
+        record.sourceId.isEmpty ||
+        record.sourceId.length > 200 ||
+        record.revision < 1) {
+      throw const CloudException('ข้อมูลสำรองไม่ถูกต้อง', code: 'invalidInput');
+    }
+    privateBackupRecords['${_identity!.userId}:${record.recordType}:${record.sourceId}'] =
+        record;
+  }
+
+  @override
+  Future<List<CloudPrivateBackupRecord>> fetchPrivateBackupRecords({
+    required String recordType,
+    String? afterSourceId,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    if (!const {'conversation', 'message'}.contains(recordType) ||
+        limit < 1 ||
+        limit > 100) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    final rows =
+        privateBackupRecords.entries
+            .where(
+              (entry) =>
+                  entry.key.startsWith('${_identity!.userId}:$recordType:'),
+            )
+            .map((entry) => entry.value)
+            .where(
+              (record) =>
+                  afterSourceId == null ||
+                  record.sourceId.compareTo(afterSourceId) > 0,
+            )
+            .toList()
+          ..sort((a, b) => a.sourceId.compareTo(b.sourceId));
+    return rows.take(limit).toList(growable: false);
   }
 
   @override
@@ -216,6 +280,157 @@ class FakeCloudDataSource implements CloudDataSource {
     _cloudStates.add(_state);
     _authStates.add(_authState);
     return _identity!;
+  }
+
+  @override
+  Future<CloudIdentity> signInAnonymously() async {
+    _check();
+    if (_identity != null) return _identity!;
+    final id = 'fake-anonymous-${++backend.anonymousIdentityCounter}';
+    final identity = CloudIdentity(userId: id, email: '', isAnonymous: true);
+    backend.anonymousUsers[id] = identity;
+    _identity = identity;
+    _authState = AuthState.authenticated;
+    _state = CloudState.ready;
+    _cloudStates.add(_state);
+    _authStates.add(_authState);
+    return identity;
+  }
+
+  @override
+  Future<CloudIdentity> requestEmailChange({required String email}) async {
+    _check();
+    final current = _identity;
+    if (current == null || _authState != AuthState.authenticated) {
+      throw const CloudException('กรุณาเข้าสู่ระบบ', code: 'signedOut');
+    }
+    final normalized = email.trim().toLowerCase();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(normalized)) {
+      throw const CloudException('อีเมลไม่ถูกต้อง', code: 'invalidEmail');
+    }
+    final existing = backend.users.entries.any(
+      (entry) =>
+          entry.key.toLowerCase() == normalized &&
+          entry.value.identity.userId != current.userId,
+    );
+    if (existing) {
+      throw const CloudException(
+        'อีเมลนี้ถูกใช้งานแล้ว',
+        code: 'emailAlreadyUsed',
+      );
+    }
+    backend.pendingEmails[current.userId] = normalized;
+    backend.emailChangeConfirmations.remove(current.userId);
+    _identity = CloudIdentity(
+      userId: current.userId,
+      email: current.email,
+      displayName: current.displayName,
+      isAnonymous: current.isAnonymous,
+      pendingEmail: normalized,
+    );
+    _authStates.add(_authState);
+    return _identity!;
+  }
+
+  @override
+  Future<CloudEmailChangeResult> verifyEmailChange({
+    required String email,
+    required String token,
+  }) async {
+    _check();
+    final current = _identity;
+    if (current == null || _authState != AuthState.authenticated) {
+      throw const CloudException('กรุณาเข้าสู่ระบบ', code: 'signedOut');
+    }
+    final pending = backend.pendingEmails[current.userId];
+    if (pending == null || token.trim().length < 6) {
+      throw const CloudException(
+        'รหัสยืนยันไม่ถูกต้อง',
+        code: 'recoveryRequired',
+      );
+    }
+    if (email.trim().toLowerCase() != pending &&
+        email.trim().toLowerCase() != current.email.toLowerCase()) {
+      throw const CloudException('อีเมลไม่ตรงกับคำขอ', code: 'invalidInput');
+    }
+    if (backend.requireBothEmailConfirmations) {
+      final confirmations = backend.emailChangeConfirmations.putIfAbsent(
+        current.userId,
+        () => <String>{},
+      );
+      confirmations.add(
+        email.trim().toLowerCase() == current.email.toLowerCase()
+            ? 'current'
+            : 'pending',
+      );
+      if (!confirmations.containsAll(const {'current', 'pending'})) {
+        return CloudEmailChangeResult(
+          identity: CloudIdentity(
+            userId: current.userId,
+            email: current.email,
+            displayName: current.displayName,
+            isAnonymous: current.isAnonymous,
+            pendingEmail: pending,
+          ),
+          verified: false,
+        );
+      }
+    }
+    final existing = backend.users.entries
+        .where((entry) => entry.value.identity.userId == current.userId)
+        .firstOrNull;
+    final oldEmail = current.email.toLowerCase();
+    if (oldEmail.isNotEmpty) backend.users.remove(oldEmail);
+    final updated = CloudIdentity(
+      userId: current.userId,
+      email: pending,
+      displayName: current.displayName,
+      isAnonymous: current.isAnonymous,
+    );
+    backend.pendingEmails.remove(current.userId);
+    backend.emailChangeConfirmations.remove(current.userId);
+    backend.verifiedEmails.add(current.userId);
+    backend.anonymousUsers.remove(current.userId);
+    if (current.isAnonymous) backend.anonymousUsers[current.userId] = updated;
+    if (existing != null) {
+      backend.users[pending] = (
+        password: existing.value.password,
+        identity: updated,
+      );
+    }
+    _identity = updated;
+    _authStates.add(_authState);
+    return CloudEmailChangeResult(identity: updated, verified: true);
+  }
+
+  @override
+  Future<CloudIdentity> setAccountPassword({required String password}) async {
+    _check();
+    if (password.length < 8 || password.length > 256) {
+      throw const CloudException(
+        'รหัสผ่านไม่ตรงตามเงื่อนไข',
+        code: 'weakPassword',
+      );
+    }
+    final current = _identity;
+    if (current == null || !backend.verifiedEmails.contains(current.userId)) {
+      throw const CloudException(
+        'กรุณายืนยันอีเมลก่อนตั้งรหัสผ่าน',
+        code: 'emailConfirmationRequired',
+      );
+    }
+    final updated = CloudIdentity(
+      userId: current.userId,
+      email: current.email,
+      displayName: current.displayName,
+      isAnonymous: false,
+    );
+    backend.users[current.email] = (password: password, identity: updated);
+    backend.anonymousUsers.remove(current.userId);
+    _identity = updated;
+    _authStates.add(_authState);
+    _cloudStates.add(_state);
+    return updated;
   }
 
   @override
@@ -625,12 +840,24 @@ class FakeCloudDataSource implements CloudDataSource {
   @override
   Future<void> upsertAttachment(CloudAttachmentDto attachment) async {
     _requireAuth();
+    if (attachment.sha256 != null &&
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(attachment.sha256!)) {
+      throw const CloudException(
+        'ค่า SHA-256 ของไฟล์ไม่ถูกต้อง',
+        code: 'invalidLocalData',
+      );
+    }
+    final message = messages[attachment.messageId];
     if (!CloudStoragePathPolicy.isOwnedBy(
           attachment.storagePath,
           _identity!.userId,
         ) ||
-        (_messageOwners[attachment.messageId] != null &&
-            _messageOwners[attachment.messageId] != _identity!.userId) ||
+        message == null ||
+        message.senderId != _identity!.userId ||
+        !(_conversationMembers[message.conversationId]?.contains(
+              _identity!.userId,
+            ) ??
+            false) ||
         (_attachmentOwners[attachment.id] != null &&
             _attachmentOwners[attachment.id] != _identity!.userId)) {
       throw const CloudException(
@@ -638,15 +865,72 @@ class FakeCloudDataSource implements CloudDataSource {
         code: 'permissionDenied',
       );
     }
-    attachments[attachment.id] = attachment;
+    attachments[attachment.id] = CloudAttachmentDto(
+      id: attachment.id,
+      messageId: attachment.messageId,
+      storagePath: attachment.storagePath,
+      mediaType: attachment.mediaType,
+      mimeType: attachment.mimeType,
+      fileName: attachment.fileName,
+      byteSize: attachment.byteSize,
+      transferStatus: attachment.transferStatus,
+      ownerUserId: _identity!.userId,
+      createdAt: attachment.createdAt ?? DateTime.now().toUtc(),
+      sha256: attachment.sha256,
+    );
     _attachmentOwners[attachment.id] = _identity!.userId;
   }
 
   @override
   Future<CloudAttachmentDto?> fetchAttachment(String id) async {
     _requireAuth();
-    _requireRecordOwner(_attachmentOwners[id]);
-    return attachments[id];
+    final attachment = attachments[id];
+    if (attachment == null) return null;
+    final message = messages[attachment.messageId];
+    if (message == null) return null;
+    _requireConversationMember(message.conversationId);
+    return attachment;
+  }
+
+  @override
+  Future<CloudAttachmentPage> fetchConversationAttachmentsPage({
+    required String conversationId,
+    CloudAttachmentCursor? cursor,
+    int limit = 100,
+  }) async {
+    _requireAuth();
+    _requireConversationMember(conversationId);
+    if (limit < 1 || limit > 100) {
+      throw const CloudException(
+        'ขนาดหน้าข้อมูลไฟล์ไม่ถูกต้อง',
+        code: 'invalidInput',
+      );
+    }
+    final values =
+        attachments.values
+            .where((attachment) {
+              final message = messages[attachment.messageId];
+              if (message?.conversationId != conversationId) return false;
+              final createdAt =
+                  attachment.createdAt ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              if (cursor == null) return true;
+              final compare = createdAt.compareTo(cursor.createdAt);
+              return compare > 0 ||
+                  (compare == 0 && attachment.id.compareTo(cursor.id) > 0);
+            })
+            .toList(growable: false)
+          ..sort((a, b) {
+            final time = (a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+                .compareTo(
+                  b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+                );
+            return time == 0 ? a.id.compareTo(b.id) : time;
+          });
+    return CloudAttachmentPage(
+      attachments: values.take(limit).toList(growable: false),
+      hasMore: values.length > limit,
+    );
   }
 
   @override
@@ -709,16 +993,67 @@ class FakeCloudDataSource implements CloudDataSource {
   @override
   Future<String> downloadAttachment({
     required String storagePath,
+    required String ownerUserId,
     required MediaStorageService mediaStorage,
     required String fileName,
     required String mimeType,
+    required int expectedByteSize,
+    String? expectedSha256,
   }) async {
     _requireAuth();
-    if (!CloudStoragePathPolicy.isOwnedBy(storagePath, _identity!.userId)) {
+    if (failureMode == FakeCloudFailure.downloadFailure) {
+      throw const CloudException('Cloud download timeout', code: 'timeout');
+    }
+    if (!CloudStoragePathPolicy.isOwnedBy(storagePath, ownerUserId)) {
       throw const CloudException(
         'เส้นทางไฟล์คลาวด์ไม่ปลอดภัย',
         code: 'invalidPath',
       );
+    }
+    if (storagePath.split('/')[2] == 'private-backups') {
+      if (_identity!.userId != ownerUserId) {
+        throw const CloudException(
+          'ข้อมูลไม่ได้เป็นของบัญชีปัจจุบัน',
+          code: 'permissionDenied',
+        );
+      }
+      final segments = storagePath.split('/');
+      final backup =
+          privateBackupRecords['$ownerUserId:message:${segments[3]}'];
+      final payload = backup?.payload;
+      final metadata = (payload?['attachments'] as List?)
+          ?.map((item) => Map<String, dynamic>.from(item as Map))
+          .where((item) => item['storagePath'] == storagePath)
+          .firstOrNull;
+      if (metadata == null ||
+          metadata['byteSize'] != expectedByteSize ||
+          metadata['mimeType'] != mimeType ||
+          metadata['sha256'] != expectedSha256) {
+        throw const CloudException(
+          'metadata ไฟล์ Cloud ไม่ตรงกับข้อมูลสำรอง',
+          code: 'permissionDenied',
+        );
+      }
+    } else {
+      final attachment = attachments.values
+          .where((row) => row.storagePath == storagePath)
+          .firstOrNull;
+      final message = attachment == null
+          ? null
+          : messages[attachment.messageId];
+      if (attachment == null || message == null) {
+        throw const CloudException('ไม่พบไฟล์บนคลาวด์', code: 'notFound');
+      }
+      _requireConversationMember(message.conversationId);
+      if (attachment.ownerUserId != ownerUserId ||
+          attachment.byteSize != expectedByteSize ||
+          attachment.mimeType != mimeType ||
+          attachment.sha256 != expectedSha256) {
+        throw const CloudException(
+          'metadata ไฟล์ Cloud ไม่ตรงกับข้อความ',
+          code: 'permissionDenied',
+        );
+      }
     }
     final bytes = files[storagePath];
     if (bytes == null) {
@@ -728,6 +1063,8 @@ class FakeCloudDataSource implements CloudDataSource {
       bytes: bytes,
       fileName: fileName,
       mimeType: mimeType,
+      expectedByteSize: expectedByteSize,
+      expectedSha256: expectedSha256,
     );
   }
 
@@ -769,6 +1106,7 @@ class FakeCloudDataSource implements CloudDataSource {
     _conversationMembers.clear();
     _directConversationIds.clear();
     readReceipts.clear();
+    privateBackupRecords.clear();
     failureMode = FakeCloudFailure.none;
   }
 }

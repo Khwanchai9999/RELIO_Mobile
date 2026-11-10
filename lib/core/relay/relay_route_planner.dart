@@ -1,5 +1,6 @@
 import '../nearby/nearby_transport.dart';
 
+// รูปแบบการวางเส้นทาง Text แยกโหมดอัตโนมัติ ส่งตรง และโหมดบังคับเฉพาะ QA
 enum RelayTextRouteMode { automatic, directOnly, qaForcedRelay }
 
 enum RelayRouteKind { direct, relay, unavailable }
@@ -13,6 +14,7 @@ class RelayRoutePlan {
     required this.verifiedAt,
     this.directEndpointId,
     this.middleDeviceId,
+    this.forceFirstHop = false,
     this.reason,
   });
 
@@ -22,16 +24,22 @@ class RelayRoutePlan {
   final String destinationDeviceId;
   final DateTime verifiedAt;
   final String? directEndpointId;
+
+  /// Initial peer used by a relay route; later hops choose their own next peer.
   final String? middleDeviceId;
+
+  /// Keeps a failed direct send from immediately retrying the same direct peer.
+  final bool forceFirstHop;
   final String? reason;
 
+  String? get firstHopDeviceId => middleDeviceId;
   bool get ready => kind != RelayRouteKind.unavailable;
 }
 
 typedef RelayRouteVerifier =
     Future<bool> Function(String middleDeviceId, String destinationDeviceId);
 
-/// เลือกเพียงหนึ่งเส้นทางต่อข้อความ และไม่ broadcast ไปหลายเครื่องกลาง
+/// เลือก next hop เดียวต่อครั้ง ไม่ broadcast และให้แต่ละ relay ตัดสิน hop ถัดไป
 class RelayRoutePlanner {
   const RelayRoutePlanner();
 
@@ -42,6 +50,7 @@ class RelayRoutePlanner {
     required Iterable<NearbyPeer> connectedPeers,
     required RelayRouteVerifier verifyRelay,
     String? forcedMiddleDeviceId,
+    bool preferRelay = false,
   }) async {
     // ผู้เรียกส่ง snapshot ที่ผ่าน connection state แล้ว จึงไม่พึ่ง flag ซ้ำ
     // ซึ่งบาง transport อัปเดตช้ากว่า connection callback
@@ -53,7 +62,9 @@ class RelayRoutePlanner {
         .firstOrNull;
     final now = DateTime.now().toUtc();
 
-    if (mode != RelayTextRouteMode.qaForcedRelay && direct != null) {
+    if (!preferRelay &&
+        mode != RelayTextRouteMode.qaForcedRelay &&
+        direct != null) {
       return RelayRoutePlan(
         mode: mode,
         kind: RelayRouteKind.direct,
@@ -85,9 +96,7 @@ class RelayRoutePlanner {
             .toList(growable: false)
           ..sort((a, b) => a.deviceId!.compareTo(b.deviceId!));
     final selected = mode == RelayTextRouteMode.qaForcedRelay
-        ? candidates
-              .where((peer) => peer.deviceId == forcedMiddleDeviceId)
-              .toList(growable: false)
+        ? candidates.where((peer) => peer.deviceId == forcedMiddleDeviceId)
         : candidates;
     for (final candidate in selected) {
       if (await verifyRelay(candidate.deviceId!, destinationDeviceId)) {
@@ -97,6 +106,8 @@ class RelayRoutePlanner {
           sourceDeviceId: sourceDeviceId,
           destinationDeviceId: destinationDeviceId,
           middleDeviceId: candidate.deviceId,
+          forceFirstHop:
+              mode == RelayTextRouteMode.qaForcedRelay || preferRelay,
           verifiedAt: DateTime.now().toUtc(),
         );
       }

@@ -13,6 +13,8 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    androidResources { noCompress += "pmtiles" }
+
     flavorDimensions += "environment"
 
     compileOptions {

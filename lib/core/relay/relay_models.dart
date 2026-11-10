@@ -4,6 +4,8 @@ import 'package:uuid/uuid.dart';
 
 import '../nearby/relio_packet.dart';
 
+// โมเดลและนโยบายของซอง relay-v1 รวม TTL, hop limit และสถานะการส่งต่อ
+// สถานะ stored หมายถึงมีผู้เก็บซองไว้ ไม่ได้ยืนยันว่าไปถึงผู้รับปลายทาง
 enum RelayPacketState { stored, forwarded, delivered, expired, blocked }
 
 class RelayPolicy {
@@ -12,17 +14,29 @@ class RelayPolicy {
     this.maxTtl = const Duration(hours: 1),
     this.defaultMaxHops = 3,
     this.maxHops = 3,
+    this.maxTextHops = 3,
+    this.maxOtherPayloadHops = 3,
     this.maxPacketBytes = 64 * 1024,
   });
+
+  static const int qaAutomaticTextMaxHops = 8;
+  static const qaPlaintextTextCapability = 'qa-plaintext-text-v1';
+  static const int absoluteMaxHops = 16;
 
   final Duration defaultTtl;
   final Duration maxTtl;
   final int defaultMaxHops;
   final int maxHops;
+  final int maxTextHops;
+  final int maxOtherPayloadHops;
   final int maxPacketBytes;
 
-  bool isSupportedPayloadType(String value) =>
-      const {'textMessage', 'sos', 'locationMessage'}.contains(value);
+  bool isSupportedPayloadType(String value) => const {
+    'textMessage',
+    'sos',
+    'locationMessage',
+    'rescueStatus',
+  }.contains(value);
 
   String? validate(RelayEnvelope envelope, {DateTime? now}) {
     final current = now ?? DateTime.now().toUtc();
@@ -48,8 +62,20 @@ class RelayPolicy {
     if (envelope.hopCount < 0 ||
         envelope.maxHops < 0 ||
         envelope.hopCount > envelope.maxHops ||
-        envelope.maxHops > maxHops) {
+        envelope.maxHops > maxHops ||
+        envelope.maxHops >
+            (envelope.payloadType == RelioPacketType.textMessage.name
+                ? maxTextHops
+                : maxOtherPayloadHops)) {
       return 'invalidHopCount';
+    }
+    final route = envelope.visitedDeviceIds;
+    if (route.length > envelope.maxHops + 1 ||
+        route.length > absoluteMaxHops + 1 ||
+        (route.isNotEmpty && route.first != envelope.originDeviceId) ||
+        route.any((deviceId) => deviceId.isEmpty || deviceId.length > 128) ||
+        route.toSet().length != route.length) {
+      return 'invalidRoutePath';
     }
     if (envelope.expiresAt.isBefore(envelope.createdAt) ||
         envelope.expiresAt.isBefore(current)) {
@@ -78,6 +104,7 @@ class RelayEnvelope {
     required this.previousHopDeviceId,
     required this.payload,
     this.firstHopDeviceId,
+    this.visitedDeviceIds = const [],
     this.protocol = 'relay-v1',
   });
 
@@ -96,6 +123,9 @@ class RelayEnvelope {
 
   /// บังคับ next hop เฉพาะซองนี้ และถูกล้างเมื่อส่งออก hop แรก
   final String? firstHopDeviceId;
+
+  /// รายชื่อเครื่องที่ส่งซองนี้แล้ว ใช้กันการวนกลับไปหา peer เดิม
+  final List<String> visitedDeviceIds;
   final String protocol;
 
   factory RelayEnvelope.fromPayloadPacket({
@@ -123,6 +153,7 @@ class RelayEnvelope {
       priority: priority,
       previousHopDeviceId: null,
       firstHopDeviceId: firstHopDeviceId,
+      visitedDeviceIds: [packet.senderDeviceId],
       payload: {
         'senderDeviceId': packet.senderDeviceId,
         'senderUserId': packet.senderUserId,
@@ -157,6 +188,21 @@ class RelayEnvelope {
         (firstHopDeviceId is! String || firstHopDeviceId.length > 128)) {
       throw const FormatException('Relay first-hop field is invalid.');
     }
+    final rawVisited = json['visitedDeviceIds'];
+    if (rawVisited != null &&
+        (rawVisited is! List ||
+            rawVisited.length > RelayPolicy.absoluteMaxHops + 1)) {
+      throw const FormatException('Relay route path is invalid.');
+    }
+    final visitedDeviceIds = <String>[];
+    if (rawVisited is List) {
+      for (final deviceId in rawVisited) {
+        if (deviceId is! String) {
+          throw const FormatException('Relay route path is invalid.');
+        }
+        visitedDeviceIds.add(deviceId);
+      }
+    }
     return RelayEnvelope(
       packetId: _string(json, 'packetId'),
       originDeviceId: _string(json, 'originDeviceId'),
@@ -170,6 +216,7 @@ class RelayEnvelope {
       priority: priority,
       previousHopDeviceId: json['previousHopDeviceId'] as String?,
       firstHopDeviceId: firstHopDeviceId as String?,
+      visitedDeviceIds: visitedDeviceIds,
       payload: payload,
       protocol: _string(json, 'protocol'),
     );
@@ -193,6 +240,9 @@ class RelayEnvelope {
     ...?(firstHopDeviceId == null
         ? null
         : {'firstHopDeviceId': firstHopDeviceId}),
+    ...?(visitedDeviceIds.isEmpty
+        ? null
+        : {'visitedDeviceIds': visitedDeviceIds}),
     'payload': payload,
   };
 
@@ -203,6 +253,7 @@ class RelayEnvelope {
     String? previousHopDeviceId,
     String? firstHopDeviceId,
     bool clearFirstHopDeviceId = false,
+    List<String>? visitedDeviceIds,
   }) => RelayEnvelope(
     packetId: packetId,
     originDeviceId: originDeviceId,
@@ -218,6 +269,7 @@ class RelayEnvelope {
     firstHopDeviceId: clearFirstHopDeviceId
         ? null
         : firstHopDeviceId ?? this.firstHopDeviceId,
+    visitedDeviceIds: visitedDeviceIds ?? this.visitedDeviceIds,
     payload: payload,
     protocol: protocol,
   );
@@ -251,6 +303,7 @@ class RelayEnvelope {
       RelioPacketType.textMessage ||
       RelioPacketType.locationMessage => 'messageId',
       RelioPacketType.sos => 'sosId',
+      RelioPacketType.rescueStatus => 'rescueId',
       _ => throw ArgumentError('Packet type cannot be relayed.'),
     };
     final value = packet.payload[key];

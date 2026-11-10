@@ -7,10 +7,93 @@ import 'package:relio_mobile/core/location/nearby_map_calculations.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/nearby/relio_packet.dart';
 import 'package:relio_mobile/data/models/prototype_models.dart';
+import 'package:relio_mobile/features/nearby/nearby_screen.dart';
 
 import 'support/nearby_pair.dart';
 
 void main() {
+  group('Nearby battery freshness', () {
+    final now = DateTime.utc(2026, 11, 3, 12);
+
+    RelioNearbyDevice device(DateTime? updatedAt, {int? level = 72}) =>
+        RelioNearbyDevice(
+          deviceId: 'peer',
+          displayName: 'Peer',
+          status: DeviceStatus.normal,
+          lastSeenAt: now,
+          batteryLevel: level,
+          batteryUpdatedAt: updatedAt,
+        );
+
+    test('uses bounded clock skew and the ten-minute report cadence', () {
+      for (final secondsAhead in [0, 1, 5, 10]) {
+        expect(
+          isFreshNearbyBattery(
+            device(now.add(Duration(seconds: secondsAhead))),
+            connected: true,
+            now: now,
+          ),
+          isTrue,
+          reason: '$secondsAhead seconds of skew is within policy',
+        );
+      }
+      expect(
+        isFreshNearbyBattery(
+          device(now.add(const Duration(seconds: 11))),
+          connected: true,
+          now: now,
+        ),
+        isFalse,
+      );
+      expect(
+        isFreshNearbyBattery(
+          device(now.subtract(const Duration(minutes: 11, seconds: 59))),
+          connected: true,
+          now: now,
+        ),
+        isTrue,
+      );
+      expect(
+        isFreshNearbyBattery(
+          device(now.subtract(const Duration(minutes: 12, seconds: 1))),
+          connected: true,
+          now: now,
+        ),
+        isFalse,
+      );
+    });
+
+    test(
+      'keeps unavailable, invalid, or disconnected readings unavailable',
+      () {
+        expect(
+          isFreshNearbyBattery(device(null), connected: true, now: now),
+          isFalse,
+        );
+        expect(
+          isFreshNearbyBattery(
+            device(now, level: -1),
+            connected: true,
+            now: now,
+          ),
+          isFalse,
+        );
+        expect(
+          isFreshNearbyBattery(
+            device(now, level: 101),
+            connected: true,
+            now: now,
+          ),
+          isFalse,
+        );
+        expect(
+          isFreshNearbyBattery(device(now), connected: false, now: now),
+          isFalse,
+        );
+      },
+    );
+  });
+
   group('BatteryPublishPolicy', () {
     const policy = BatteryPublishPolicy();
     final now = DateTime.utc(2026, 10, 12, 10);
@@ -101,7 +184,7 @@ void main() {
         isCharging: true,
         latitude: 10.25,
         longitude: 101.5,
-        locationCapturedAt: DateTime.utc(2026, 10, 12),
+        locationCapturedAt: DateTime.now().toUtc(),
       );
       final decoded = RelioPacket.fromBytes(packet.toBytes());
       expect(decoded.payload['batteryLevel'], 63);
@@ -184,6 +267,50 @@ void main() {
         ),
         '⚠ ตำแหน่งอาจไม่ใช่ตำแหน่งปัจจุบัน',
       );
+      expect(
+        NearbyMapCalculations.staleMarkerLabel(
+          now.subtract(const Duration(minutes: 1)),
+          now,
+        ),
+        isNull,
+      );
+      expect(
+        NearbyMapCalculations.staleMarkerLabel(
+          now.subtract(const Duration(minutes: 8)),
+          now,
+        ),
+        startsWith('⚠ อัปเดต'),
+      );
+      expect(
+        NearbyMapCalculations.staleMarkerLabel(null, now),
+        '⚠ ยังไม่มีตำแหน่ง',
+      );
+    });
+
+    test('map freshness clamps only the accepted future skew', () {
+      for (final secondsAhead in [0, 1, 5, 10]) {
+        expect(
+          NearbyMapCalculations.freshness(
+            now.add(Duration(seconds: secondsAhead)),
+            now,
+          ),
+          LocationFreshness.fresh,
+        );
+      }
+      expect(
+        NearbyMapCalculations.freshness(
+          now.add(const Duration(seconds: 11)),
+          now,
+        ),
+        LocationFreshness.invalid,
+      );
+      expect(
+        NearbyMapCalculations.freshness(
+          now.subtract(const Duration(minutes: 11)),
+          now,
+        ),
+        LocationFreshness.veryStale,
+      );
     });
   });
 
@@ -251,7 +378,7 @@ void main() {
         latitude: 10.25,
         longitude: 101.5,
         accuracyMeters: 12,
-        capturedAt: DateTime.utc(2026, 10, 12, 10),
+        capturedAt: DateTime.now().toUtc(),
         source: 'test',
       );
       await pair.serviceA.publishMapLocation(location);
@@ -259,11 +386,15 @@ void main() {
         final capturedAt = (await pair.repositoriesB.nearbyDevices.getDevice(
           'device-a',
         ))?.peerLocationCapturedAt;
-        return capturedAt?.isAtSameMomentAs(location.capturedAt) ?? false;
+        return capturedAt != null;
       });
       final peer = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
       expect(peer?.status, DeviceStatus.normal);
       expect(peer?.peerDeviceModel, isNull);
+      expect(
+        peer?.peerLocationCapturedAt?.difference(location.capturedAt).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
       expect(peer?.peerLocationAccuracy, 12);
     },
   );
@@ -294,10 +425,10 @@ void main() {
         await handled.future.timeout(const Duration(seconds: 2));
       }
 
-      final t0 = DateTime.now().toUtc().add(const Duration(minutes: 1));
-      final t1 = t0.add(const Duration(minutes: 1));
-      final t2 = t0.add(const Duration(minutes: 2));
-      final t3 = t0.add(const Duration(minutes: 3));
+      final t0 = DateTime.now().toUtc();
+      final t1 = t0.subtract(const Duration(minutes: 1));
+      final t2 = t0.add(const Duration(seconds: 1));
+      final t3 = t0.add(const Duration(seconds: 2));
 
       final fresh = RelioPacket.deviceStatus(
         senderDeviceId: 'device-a',
@@ -341,6 +472,14 @@ void main() {
       expect(peer?.peerLongitude, 101.5);
       expect(peer?.batteryLevel, 80);
       expect(peer?.isCharging, isFalse);
+      expect(
+        peer?.peerLocationCapturedAt?.difference(t2).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
+      expect(
+        peer?.batteryUpdatedAt?.difference(t2).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
 
       await deliver(
         RelioPacket.deviceStatus(
@@ -364,6 +503,29 @@ void main() {
       expect(peer?.peerLongitude, 120);
       expect(peer?.batteryLevel, 90);
       expect(peer?.isCharging, isTrue);
+
+      await deliver(
+        RelioPacket.deviceStatus(
+          senderDeviceId: 'device-a',
+          senderUserId: 'user-a',
+          displayName: 'Newest Bob',
+          status: DeviceStatus.normal,
+          updatedAt: t3.add(const Duration(seconds: 1)),
+        ),
+      );
+      peer = await pair.repositoriesB.nearbyDevices.getDevice('device-a');
+      expect(peer?.batteryLevel, 90);
+      expect(peer?.isCharging, isTrue);
+      expect(
+        peer?.batteryUpdatedAt?.difference(t3).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
+      expect(peer?.peerLatitude, 30);
+      expect(peer?.peerLongitude, 120);
+      expect(
+        peer?.peerLocationCapturedAt?.difference(t3).abs(),
+        lessThan(const Duration(seconds: 1)),
+      );
     },
   );
 }

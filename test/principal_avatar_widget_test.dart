@@ -95,7 +95,8 @@ void main() {
           child: MaterialApp.router(routerConfig: router),
         ),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       final homeAvatar = tester.widget<RelioPrincipalAvatar>(
         find.byType(RelioPrincipalAvatar),
       );
@@ -117,7 +118,8 @@ void main() {
       );
       expect(find.text('B'), findsOneWidget);
       router.go('/home');
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
       expect(
         tester
             .widget<RelioPrincipalAvatar>(find.byType(RelioPrincipalAvatar))

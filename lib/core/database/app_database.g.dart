@@ -8150,6 +8150,1107 @@ class EmergencyContactsCompanion extends UpdateCompanion<EmergencyContact> {
   }
 }
 
+class $EmergencyProfilesTable extends EmergencyProfiles
+    with TableInfo<$EmergencyProfilesTable, EmergencyProfile> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EmergencyProfilesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _principalIdMeta = const VerificationMeta(
+    'principalId',
+  );
+  @override
+  late final GeneratedColumn<String> principalId = GeneratedColumn<String>(
+    'principal_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _medicalConditionsMeta = const VerificationMeta(
+    'medicalConditions',
+  );
+  @override
+  late final GeneratedColumn<String> medicalConditions =
+      GeneratedColumn<String>(
+        'medical_conditions',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _allergiesMeta = const VerificationMeta(
+    'allergies',
+  );
+  @override
+  late final GeneratedColumn<String> allergies = GeneratedColumn<String>(
+    'allergies',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _medicationsMeta = const VerificationMeta(
+    'medications',
+  );
+  @override
+  late final GeneratedColumn<String> medications = GeneratedColumn<String>(
+    'medications',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _careNotesMeta = const VerificationMeta(
+    'careNotes',
+  );
+  @override
+  late final GeneratedColumn<String> careNotes = GeneratedColumn<String>(
+    'care_notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _shareContactsOnSosMeta =
+      const VerificationMeta('shareContactsOnSos');
+  @override
+  late final GeneratedColumn<bool> shareContactsOnSos = GeneratedColumn<bool>(
+    'share_contacts_on_sos',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("share_contacts_on_sos" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _shareHealthOnSosMeta = const VerificationMeta(
+    'shareHealthOnSos',
+  );
+  @override
+  late final GeneratedColumn<bool> shareHealthOnSos = GeneratedColumn<bool>(
+    'share_health_on_sos',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("share_health_on_sos" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    principalId,
+    medicalConditions,
+    allergies,
+    medications,
+    careNotes,
+    shareContactsOnSos,
+    shareHealthOnSos,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'emergency_profiles';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EmergencyProfile> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('principal_id')) {
+      context.handle(
+        _principalIdMeta,
+        principalId.isAcceptableOrUnknown(
+          data['principal_id']!,
+          _principalIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_principalIdMeta);
+    }
+    if (data.containsKey('medical_conditions')) {
+      context.handle(
+        _medicalConditionsMeta,
+        medicalConditions.isAcceptableOrUnknown(
+          data['medical_conditions']!,
+          _medicalConditionsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('allergies')) {
+      context.handle(
+        _allergiesMeta,
+        allergies.isAcceptableOrUnknown(data['allergies']!, _allergiesMeta),
+      );
+    }
+    if (data.containsKey('medications')) {
+      context.handle(
+        _medicationsMeta,
+        medications.isAcceptableOrUnknown(
+          data['medications']!,
+          _medicationsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('care_notes')) {
+      context.handle(
+        _careNotesMeta,
+        careNotes.isAcceptableOrUnknown(data['care_notes']!, _careNotesMeta),
+      );
+    }
+    if (data.containsKey('share_contacts_on_sos')) {
+      context.handle(
+        _shareContactsOnSosMeta,
+        shareContactsOnSos.isAcceptableOrUnknown(
+          data['share_contacts_on_sos']!,
+          _shareContactsOnSosMeta,
+        ),
+      );
+    }
+    if (data.containsKey('share_health_on_sos')) {
+      context.handle(
+        _shareHealthOnSosMeta,
+        shareHealthOnSos.isAcceptableOrUnknown(
+          data['share_health_on_sos']!,
+          _shareHealthOnSosMeta,
+        ),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {principalId};
+  @override
+  EmergencyProfile map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EmergencyProfile(
+      principalId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}principal_id'],
+      )!,
+      medicalConditions: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}medical_conditions'],
+      ),
+      allergies: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}allergies'],
+      ),
+      medications: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}medications'],
+      ),
+      careNotes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}care_notes'],
+      ),
+      shareContactsOnSos: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}share_contacts_on_sos'],
+      )!,
+      shareHealthOnSos: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}share_health_on_sos'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $EmergencyProfilesTable createAlias(String alias) {
+    return $EmergencyProfilesTable(attachedDatabase, alias);
+  }
+}
+
+class EmergencyProfile extends DataClass
+    implements Insertable<EmergencyProfile> {
+  final String principalId;
+  final String? medicalConditions;
+  final String? allergies;
+  final String? medications;
+  final String? careNotes;
+  final bool shareContactsOnSos;
+  final bool shareHealthOnSos;
+  final DateTime updatedAt;
+  const EmergencyProfile({
+    required this.principalId,
+    this.medicalConditions,
+    this.allergies,
+    this.medications,
+    this.careNotes,
+    required this.shareContactsOnSos,
+    required this.shareHealthOnSos,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['principal_id'] = Variable<String>(principalId);
+    if (!nullToAbsent || medicalConditions != null) {
+      map['medical_conditions'] = Variable<String>(medicalConditions);
+    }
+    if (!nullToAbsent || allergies != null) {
+      map['allergies'] = Variable<String>(allergies);
+    }
+    if (!nullToAbsent || medications != null) {
+      map['medications'] = Variable<String>(medications);
+    }
+    if (!nullToAbsent || careNotes != null) {
+      map['care_notes'] = Variable<String>(careNotes);
+    }
+    map['share_contacts_on_sos'] = Variable<bool>(shareContactsOnSos);
+    map['share_health_on_sos'] = Variable<bool>(shareHealthOnSos);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  EmergencyProfilesCompanion toCompanion(bool nullToAbsent) {
+    return EmergencyProfilesCompanion(
+      principalId: Value(principalId),
+      medicalConditions: medicalConditions == null && nullToAbsent
+          ? const Value.absent()
+          : Value(medicalConditions),
+      allergies: allergies == null && nullToAbsent
+          ? const Value.absent()
+          : Value(allergies),
+      medications: medications == null && nullToAbsent
+          ? const Value.absent()
+          : Value(medications),
+      careNotes: careNotes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(careNotes),
+      shareContactsOnSos: Value(shareContactsOnSos),
+      shareHealthOnSos: Value(shareHealthOnSos),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory EmergencyProfile.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EmergencyProfile(
+      principalId: serializer.fromJson<String>(json['principalId']),
+      medicalConditions: serializer.fromJson<String?>(
+        json['medicalConditions'],
+      ),
+      allergies: serializer.fromJson<String?>(json['allergies']),
+      medications: serializer.fromJson<String?>(json['medications']),
+      careNotes: serializer.fromJson<String?>(json['careNotes']),
+      shareContactsOnSos: serializer.fromJson<bool>(json['shareContactsOnSos']),
+      shareHealthOnSos: serializer.fromJson<bool>(json['shareHealthOnSos']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'principalId': serializer.toJson<String>(principalId),
+      'medicalConditions': serializer.toJson<String?>(medicalConditions),
+      'allergies': serializer.toJson<String?>(allergies),
+      'medications': serializer.toJson<String?>(medications),
+      'careNotes': serializer.toJson<String?>(careNotes),
+      'shareContactsOnSos': serializer.toJson<bool>(shareContactsOnSos),
+      'shareHealthOnSos': serializer.toJson<bool>(shareHealthOnSos),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  EmergencyProfile copyWith({
+    String? principalId,
+    Value<String?> medicalConditions = const Value.absent(),
+    Value<String?> allergies = const Value.absent(),
+    Value<String?> medications = const Value.absent(),
+    Value<String?> careNotes = const Value.absent(),
+    bool? shareContactsOnSos,
+    bool? shareHealthOnSos,
+    DateTime? updatedAt,
+  }) => EmergencyProfile(
+    principalId: principalId ?? this.principalId,
+    medicalConditions: medicalConditions.present
+        ? medicalConditions.value
+        : this.medicalConditions,
+    allergies: allergies.present ? allergies.value : this.allergies,
+    medications: medications.present ? medications.value : this.medications,
+    careNotes: careNotes.present ? careNotes.value : this.careNotes,
+    shareContactsOnSos: shareContactsOnSos ?? this.shareContactsOnSos,
+    shareHealthOnSos: shareHealthOnSos ?? this.shareHealthOnSos,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  EmergencyProfile copyWithCompanion(EmergencyProfilesCompanion data) {
+    return EmergencyProfile(
+      principalId: data.principalId.present
+          ? data.principalId.value
+          : this.principalId,
+      medicalConditions: data.medicalConditions.present
+          ? data.medicalConditions.value
+          : this.medicalConditions,
+      allergies: data.allergies.present ? data.allergies.value : this.allergies,
+      medications: data.medications.present
+          ? data.medications.value
+          : this.medications,
+      careNotes: data.careNotes.present ? data.careNotes.value : this.careNotes,
+      shareContactsOnSos: data.shareContactsOnSos.present
+          ? data.shareContactsOnSos.value
+          : this.shareContactsOnSos,
+      shareHealthOnSos: data.shareHealthOnSos.present
+          ? data.shareHealthOnSos.value
+          : this.shareHealthOnSos,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmergencyProfile(')
+          ..write('principalId: $principalId, ')
+          ..write('medicalConditions: $medicalConditions, ')
+          ..write('allergies: $allergies, ')
+          ..write('medications: $medications, ')
+          ..write('careNotes: $careNotes, ')
+          ..write('shareContactsOnSos: $shareContactsOnSos, ')
+          ..write('shareHealthOnSos: $shareHealthOnSos, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    principalId,
+    medicalConditions,
+    allergies,
+    medications,
+    careNotes,
+    shareContactsOnSos,
+    shareHealthOnSos,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EmergencyProfile &&
+          other.principalId == this.principalId &&
+          other.medicalConditions == this.medicalConditions &&
+          other.allergies == this.allergies &&
+          other.medications == this.medications &&
+          other.careNotes == this.careNotes &&
+          other.shareContactsOnSos == this.shareContactsOnSos &&
+          other.shareHealthOnSos == this.shareHealthOnSos &&
+          other.updatedAt == this.updatedAt);
+}
+
+class EmergencyProfilesCompanion extends UpdateCompanion<EmergencyProfile> {
+  final Value<String> principalId;
+  final Value<String?> medicalConditions;
+  final Value<String?> allergies;
+  final Value<String?> medications;
+  final Value<String?> careNotes;
+  final Value<bool> shareContactsOnSos;
+  final Value<bool> shareHealthOnSos;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const EmergencyProfilesCompanion({
+    this.principalId = const Value.absent(),
+    this.medicalConditions = const Value.absent(),
+    this.allergies = const Value.absent(),
+    this.medications = const Value.absent(),
+    this.careNotes = const Value.absent(),
+    this.shareContactsOnSos = const Value.absent(),
+    this.shareHealthOnSos = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  EmergencyProfilesCompanion.insert({
+    required String principalId,
+    this.medicalConditions = const Value.absent(),
+    this.allergies = const Value.absent(),
+    this.medications = const Value.absent(),
+    this.careNotes = const Value.absent(),
+    this.shareContactsOnSos = const Value.absent(),
+    this.shareHealthOnSos = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : principalId = Value(principalId),
+       updatedAt = Value(updatedAt);
+  static Insertable<EmergencyProfile> custom({
+    Expression<String>? principalId,
+    Expression<String>? medicalConditions,
+    Expression<String>? allergies,
+    Expression<String>? medications,
+    Expression<String>? careNotes,
+    Expression<bool>? shareContactsOnSos,
+    Expression<bool>? shareHealthOnSos,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (principalId != null) 'principal_id': principalId,
+      if (medicalConditions != null) 'medical_conditions': medicalConditions,
+      if (allergies != null) 'allergies': allergies,
+      if (medications != null) 'medications': medications,
+      if (careNotes != null) 'care_notes': careNotes,
+      if (shareContactsOnSos != null)
+        'share_contacts_on_sos': shareContactsOnSos,
+      if (shareHealthOnSos != null) 'share_health_on_sos': shareHealthOnSos,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  EmergencyProfilesCompanion copyWith({
+    Value<String>? principalId,
+    Value<String?>? medicalConditions,
+    Value<String?>? allergies,
+    Value<String?>? medications,
+    Value<String?>? careNotes,
+    Value<bool>? shareContactsOnSos,
+    Value<bool>? shareHealthOnSos,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return EmergencyProfilesCompanion(
+      principalId: principalId ?? this.principalId,
+      medicalConditions: medicalConditions ?? this.medicalConditions,
+      allergies: allergies ?? this.allergies,
+      medications: medications ?? this.medications,
+      careNotes: careNotes ?? this.careNotes,
+      shareContactsOnSos: shareContactsOnSos ?? this.shareContactsOnSos,
+      shareHealthOnSos: shareHealthOnSos ?? this.shareHealthOnSos,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (principalId.present) {
+      map['principal_id'] = Variable<String>(principalId.value);
+    }
+    if (medicalConditions.present) {
+      map['medical_conditions'] = Variable<String>(medicalConditions.value);
+    }
+    if (allergies.present) {
+      map['allergies'] = Variable<String>(allergies.value);
+    }
+    if (medications.present) {
+      map['medications'] = Variable<String>(medications.value);
+    }
+    if (careNotes.present) {
+      map['care_notes'] = Variable<String>(careNotes.value);
+    }
+    if (shareContactsOnSos.present) {
+      map['share_contacts_on_sos'] = Variable<bool>(shareContactsOnSos.value);
+    }
+    if (shareHealthOnSos.present) {
+      map['share_health_on_sos'] = Variable<bool>(shareHealthOnSos.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmergencyProfilesCompanion(')
+          ..write('principalId: $principalId, ')
+          ..write('medicalConditions: $medicalConditions, ')
+          ..write('allergies: $allergies, ')
+          ..write('medications: $medications, ')
+          ..write('careNotes: $careNotes, ')
+          ..write('shareContactsOnSos: $shareContactsOnSos, ')
+          ..write('shareHealthOnSos: $shareHealthOnSos, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SosHistoryEntriesTable extends SosHistoryEntries
+    with TableInfo<$SosHistoryEntriesTable, SosHistoryEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SosHistoryEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _viewerPrincipalIdMeta = const VerificationMeta(
+    'viewerPrincipalId',
+  );
+  @override
+  late final GeneratedColumn<String> viewerPrincipalId =
+      GeneratedColumn<String>(
+        'viewer_principal_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _eventIdMeta = const VerificationMeta(
+    'eventId',
+  );
+  @override
+  late final GeneratedColumn<String> eventId = GeneratedColumn<String>(
+    'event_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requesterDeviceIdMeta = const VerificationMeta(
+    'requesterDeviceId',
+  );
+  @override
+  late final GeneratedColumn<String> requesterDeviceId =
+      GeneratedColumn<String>(
+        'requester_device_id',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _requesterDisplayNameMeta =
+      const VerificationMeta('requesterDisplayName');
+  @override
+  late final GeneratedColumn<String> requesterDisplayName =
+      GeneratedColumn<String>(
+        'requester_display_name',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _eventStartedAtMeta = const VerificationMeta(
+    'eventStartedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> eventStartedAt =
+      GeneratedColumn<DateTime>(
+        'event_started_at',
+        aliasedName,
+        false,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: true,
+      );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _isHiddenMeta = const VerificationMeta(
+    'isHidden',
+  );
+  @override
+  late final GeneratedColumn<bool> isHidden = GeneratedColumn<bool>(
+    'is_hidden',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_hidden" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _hiddenAtMeta = const VerificationMeta(
+    'hiddenAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> hiddenAt = GeneratedColumn<DateTime>(
+    'hidden_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    viewerPrincipalId,
+    eventId,
+    requesterDeviceId,
+    requesterDisplayName,
+    eventStartedAt,
+    updatedAt,
+    isHidden,
+    hiddenAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sos_history_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SosHistoryEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('viewer_principal_id')) {
+      context.handle(
+        _viewerPrincipalIdMeta,
+        viewerPrincipalId.isAcceptableOrUnknown(
+          data['viewer_principal_id']!,
+          _viewerPrincipalIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_viewerPrincipalIdMeta);
+    }
+    if (data.containsKey('event_id')) {
+      context.handle(
+        _eventIdMeta,
+        eventId.isAcceptableOrUnknown(data['event_id']!, _eventIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_eventIdMeta);
+    }
+    if (data.containsKey('requester_device_id')) {
+      context.handle(
+        _requesterDeviceIdMeta,
+        requesterDeviceId.isAcceptableOrUnknown(
+          data['requester_device_id']!,
+          _requesterDeviceIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_requesterDeviceIdMeta);
+    }
+    if (data.containsKey('requester_display_name')) {
+      context.handle(
+        _requesterDisplayNameMeta,
+        requesterDisplayName.isAcceptableOrUnknown(
+          data['requester_display_name']!,
+          _requesterDisplayNameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_requesterDisplayNameMeta);
+    }
+    if (data.containsKey('event_started_at')) {
+      context.handle(
+        _eventStartedAtMeta,
+        eventStartedAt.isAcceptableOrUnknown(
+          data['event_started_at']!,
+          _eventStartedAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_eventStartedAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('is_hidden')) {
+      context.handle(
+        _isHiddenMeta,
+        isHidden.isAcceptableOrUnknown(data['is_hidden']!, _isHiddenMeta),
+      );
+    }
+    if (data.containsKey('hidden_at')) {
+      context.handle(
+        _hiddenAtMeta,
+        hiddenAt.isAcceptableOrUnknown(data['hidden_at']!, _hiddenAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {viewerPrincipalId, eventId};
+  @override
+  SosHistoryEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SosHistoryEntry(
+      viewerPrincipalId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}viewer_principal_id'],
+      )!,
+      eventId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}event_id'],
+      )!,
+      requesterDeviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}requester_device_id'],
+      )!,
+      requesterDisplayName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}requester_display_name'],
+      )!,
+      eventStartedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}event_started_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      isHidden: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_hidden'],
+      )!,
+      hiddenAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}hidden_at'],
+      ),
+    );
+  }
+
+  @override
+  $SosHistoryEntriesTable createAlias(String alias) {
+    return $SosHistoryEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class SosHistoryEntry extends DataClass implements Insertable<SosHistoryEntry> {
+  final String viewerPrincipalId;
+  final String eventId;
+  final String requesterDeviceId;
+  final String requesterDisplayName;
+  final DateTime eventStartedAt;
+  final DateTime updatedAt;
+  final bool isHidden;
+  final DateTime? hiddenAt;
+  const SosHistoryEntry({
+    required this.viewerPrincipalId,
+    required this.eventId,
+    required this.requesterDeviceId,
+    required this.requesterDisplayName,
+    required this.eventStartedAt,
+    required this.updatedAt,
+    required this.isHidden,
+    this.hiddenAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['viewer_principal_id'] = Variable<String>(viewerPrincipalId);
+    map['event_id'] = Variable<String>(eventId);
+    map['requester_device_id'] = Variable<String>(requesterDeviceId);
+    map['requester_display_name'] = Variable<String>(requesterDisplayName);
+    map['event_started_at'] = Variable<DateTime>(eventStartedAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    map['is_hidden'] = Variable<bool>(isHidden);
+    if (!nullToAbsent || hiddenAt != null) {
+      map['hidden_at'] = Variable<DateTime>(hiddenAt);
+    }
+    return map;
+  }
+
+  SosHistoryEntriesCompanion toCompanion(bool nullToAbsent) {
+    return SosHistoryEntriesCompanion(
+      viewerPrincipalId: Value(viewerPrincipalId),
+      eventId: Value(eventId),
+      requesterDeviceId: Value(requesterDeviceId),
+      requesterDisplayName: Value(requesterDisplayName),
+      eventStartedAt: Value(eventStartedAt),
+      updatedAt: Value(updatedAt),
+      isHidden: Value(isHidden),
+      hiddenAt: hiddenAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(hiddenAt),
+    );
+  }
+
+  factory SosHistoryEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SosHistoryEntry(
+      viewerPrincipalId: serializer.fromJson<String>(json['viewerPrincipalId']),
+      eventId: serializer.fromJson<String>(json['eventId']),
+      requesterDeviceId: serializer.fromJson<String>(json['requesterDeviceId']),
+      requesterDisplayName: serializer.fromJson<String>(
+        json['requesterDisplayName'],
+      ),
+      eventStartedAt: serializer.fromJson<DateTime>(json['eventStartedAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      isHidden: serializer.fromJson<bool>(json['isHidden']),
+      hiddenAt: serializer.fromJson<DateTime?>(json['hiddenAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'viewerPrincipalId': serializer.toJson<String>(viewerPrincipalId),
+      'eventId': serializer.toJson<String>(eventId),
+      'requesterDeviceId': serializer.toJson<String>(requesterDeviceId),
+      'requesterDisplayName': serializer.toJson<String>(requesterDisplayName),
+      'eventStartedAt': serializer.toJson<DateTime>(eventStartedAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'isHidden': serializer.toJson<bool>(isHidden),
+      'hiddenAt': serializer.toJson<DateTime?>(hiddenAt),
+    };
+  }
+
+  SosHistoryEntry copyWith({
+    String? viewerPrincipalId,
+    String? eventId,
+    String? requesterDeviceId,
+    String? requesterDisplayName,
+    DateTime? eventStartedAt,
+    DateTime? updatedAt,
+    bool? isHidden,
+    Value<DateTime?> hiddenAt = const Value.absent(),
+  }) => SosHistoryEntry(
+    viewerPrincipalId: viewerPrincipalId ?? this.viewerPrincipalId,
+    eventId: eventId ?? this.eventId,
+    requesterDeviceId: requesterDeviceId ?? this.requesterDeviceId,
+    requesterDisplayName: requesterDisplayName ?? this.requesterDisplayName,
+    eventStartedAt: eventStartedAt ?? this.eventStartedAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    isHidden: isHidden ?? this.isHidden,
+    hiddenAt: hiddenAt.present ? hiddenAt.value : this.hiddenAt,
+  );
+  SosHistoryEntry copyWithCompanion(SosHistoryEntriesCompanion data) {
+    return SosHistoryEntry(
+      viewerPrincipalId: data.viewerPrincipalId.present
+          ? data.viewerPrincipalId.value
+          : this.viewerPrincipalId,
+      eventId: data.eventId.present ? data.eventId.value : this.eventId,
+      requesterDeviceId: data.requesterDeviceId.present
+          ? data.requesterDeviceId.value
+          : this.requesterDeviceId,
+      requesterDisplayName: data.requesterDisplayName.present
+          ? data.requesterDisplayName.value
+          : this.requesterDisplayName,
+      eventStartedAt: data.eventStartedAt.present
+          ? data.eventStartedAt.value
+          : this.eventStartedAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      isHidden: data.isHidden.present ? data.isHidden.value : this.isHidden,
+      hiddenAt: data.hiddenAt.present ? data.hiddenAt.value : this.hiddenAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SosHistoryEntry(')
+          ..write('viewerPrincipalId: $viewerPrincipalId, ')
+          ..write('eventId: $eventId, ')
+          ..write('requesterDeviceId: $requesterDeviceId, ')
+          ..write('requesterDisplayName: $requesterDisplayName, ')
+          ..write('eventStartedAt: $eventStartedAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('isHidden: $isHidden, ')
+          ..write('hiddenAt: $hiddenAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    viewerPrincipalId,
+    eventId,
+    requesterDeviceId,
+    requesterDisplayName,
+    eventStartedAt,
+    updatedAt,
+    isHidden,
+    hiddenAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SosHistoryEntry &&
+          other.viewerPrincipalId == this.viewerPrincipalId &&
+          other.eventId == this.eventId &&
+          other.requesterDeviceId == this.requesterDeviceId &&
+          other.requesterDisplayName == this.requesterDisplayName &&
+          other.eventStartedAt == this.eventStartedAt &&
+          other.updatedAt == this.updatedAt &&
+          other.isHidden == this.isHidden &&
+          other.hiddenAt == this.hiddenAt);
+}
+
+class SosHistoryEntriesCompanion extends UpdateCompanion<SosHistoryEntry> {
+  final Value<String> viewerPrincipalId;
+  final Value<String> eventId;
+  final Value<String> requesterDeviceId;
+  final Value<String> requesterDisplayName;
+  final Value<DateTime> eventStartedAt;
+  final Value<DateTime> updatedAt;
+  final Value<bool> isHidden;
+  final Value<DateTime?> hiddenAt;
+  final Value<int> rowid;
+  const SosHistoryEntriesCompanion({
+    this.viewerPrincipalId = const Value.absent(),
+    this.eventId = const Value.absent(),
+    this.requesterDeviceId = const Value.absent(),
+    this.requesterDisplayName = const Value.absent(),
+    this.eventStartedAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.isHidden = const Value.absent(),
+    this.hiddenAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SosHistoryEntriesCompanion.insert({
+    required String viewerPrincipalId,
+    required String eventId,
+    required String requesterDeviceId,
+    required String requesterDisplayName,
+    required DateTime eventStartedAt,
+    required DateTime updatedAt,
+    this.isHidden = const Value.absent(),
+    this.hiddenAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : viewerPrincipalId = Value(viewerPrincipalId),
+       eventId = Value(eventId),
+       requesterDeviceId = Value(requesterDeviceId),
+       requesterDisplayName = Value(requesterDisplayName),
+       eventStartedAt = Value(eventStartedAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<SosHistoryEntry> custom({
+    Expression<String>? viewerPrincipalId,
+    Expression<String>? eventId,
+    Expression<String>? requesterDeviceId,
+    Expression<String>? requesterDisplayName,
+    Expression<DateTime>? eventStartedAt,
+    Expression<DateTime>? updatedAt,
+    Expression<bool>? isHidden,
+    Expression<DateTime>? hiddenAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (viewerPrincipalId != null) 'viewer_principal_id': viewerPrincipalId,
+      if (eventId != null) 'event_id': eventId,
+      if (requesterDeviceId != null) 'requester_device_id': requesterDeviceId,
+      if (requesterDisplayName != null)
+        'requester_display_name': requesterDisplayName,
+      if (eventStartedAt != null) 'event_started_at': eventStartedAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (isHidden != null) 'is_hidden': isHidden,
+      if (hiddenAt != null) 'hidden_at': hiddenAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SosHistoryEntriesCompanion copyWith({
+    Value<String>? viewerPrincipalId,
+    Value<String>? eventId,
+    Value<String>? requesterDeviceId,
+    Value<String>? requesterDisplayName,
+    Value<DateTime>? eventStartedAt,
+    Value<DateTime>? updatedAt,
+    Value<bool>? isHidden,
+    Value<DateTime?>? hiddenAt,
+    Value<int>? rowid,
+  }) {
+    return SosHistoryEntriesCompanion(
+      viewerPrincipalId: viewerPrincipalId ?? this.viewerPrincipalId,
+      eventId: eventId ?? this.eventId,
+      requesterDeviceId: requesterDeviceId ?? this.requesterDeviceId,
+      requesterDisplayName: requesterDisplayName ?? this.requesterDisplayName,
+      eventStartedAt: eventStartedAt ?? this.eventStartedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      isHidden: isHidden ?? this.isHidden,
+      hiddenAt: hiddenAt ?? this.hiddenAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (viewerPrincipalId.present) {
+      map['viewer_principal_id'] = Variable<String>(viewerPrincipalId.value);
+    }
+    if (eventId.present) {
+      map['event_id'] = Variable<String>(eventId.value);
+    }
+    if (requesterDeviceId.present) {
+      map['requester_device_id'] = Variable<String>(requesterDeviceId.value);
+    }
+    if (requesterDisplayName.present) {
+      map['requester_display_name'] = Variable<String>(
+        requesterDisplayName.value,
+      );
+    }
+    if (eventStartedAt.present) {
+      map['event_started_at'] = Variable<DateTime>(eventStartedAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (isHidden.present) {
+      map['is_hidden'] = Variable<bool>(isHidden.value);
+    }
+    if (hiddenAt.present) {
+      map['hidden_at'] = Variable<DateTime>(hiddenAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SosHistoryEntriesCompanion(')
+          ..write('viewerPrincipalId: $viewerPrincipalId, ')
+          ..write('eventId: $eventId, ')
+          ..write('requesterDeviceId: $requesterDeviceId, ')
+          ..write('requesterDisplayName: $requesterDisplayName, ')
+          ..write('eventStartedAt: $eventStartedAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('isHidden: $isHidden, ')
+          ..write('hiddenAt: $hiddenAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -8167,6 +9268,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $RelayForwardHistoryTable(this);
   late final $EmergencyContactsTable emergencyContacts =
       $EmergencyContactsTable(this);
+  late final $EmergencyProfilesTable emergencyProfiles =
+      $EmergencyProfilesTable(this);
+  late final $SosHistoryEntriesTable sosHistoryEntries =
+      $SosHistoryEntriesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -8183,6 +9288,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     relayPackets,
     relayForwardHistory,
     emergencyContacts,
+    emergencyProfiles,
+    sosHistoryEntries,
   ];
 }
 
@@ -12084,6 +13191,578 @@ typedef $$EmergencyContactsTableProcessedTableManager =
       EmergencyContact,
       PrefetchHooks Function()
     >;
+typedef $$EmergencyProfilesTableCreateCompanionBuilder =
+    EmergencyProfilesCompanion Function({
+      required String principalId,
+      Value<String?> medicalConditions,
+      Value<String?> allergies,
+      Value<String?> medications,
+      Value<String?> careNotes,
+      Value<bool> shareContactsOnSos,
+      Value<bool> shareHealthOnSos,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$EmergencyProfilesTableUpdateCompanionBuilder =
+    EmergencyProfilesCompanion Function({
+      Value<String> principalId,
+      Value<String?> medicalConditions,
+      Value<String?> allergies,
+      Value<String?> medications,
+      Value<String?> careNotes,
+      Value<bool> shareContactsOnSos,
+      Value<bool> shareHealthOnSos,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$EmergencyProfilesTableFilterComposer
+    extends Composer<_$AppDatabase, $EmergencyProfilesTable> {
+  $$EmergencyProfilesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get medicalConditions => $composableBuilder(
+    column: $table.medicalConditions,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get allergies => $composableBuilder(
+    column: $table.allergies,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get medications => $composableBuilder(
+    column: $table.medications,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get careNotes => $composableBuilder(
+    column: $table.careNotes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get shareContactsOnSos => $composableBuilder(
+    column: $table.shareContactsOnSos,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get shareHealthOnSos => $composableBuilder(
+    column: $table.shareHealthOnSos,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EmergencyProfilesTableOrderingComposer
+    extends Composer<_$AppDatabase, $EmergencyProfilesTable> {
+  $$EmergencyProfilesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get medicalConditions => $composableBuilder(
+    column: $table.medicalConditions,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get allergies => $composableBuilder(
+    column: $table.allergies,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get medications => $composableBuilder(
+    column: $table.medications,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get careNotes => $composableBuilder(
+    column: $table.careNotes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get shareContactsOnSos => $composableBuilder(
+    column: $table.shareContactsOnSos,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get shareHealthOnSos => $composableBuilder(
+    column: $table.shareHealthOnSos,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EmergencyProfilesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $EmergencyProfilesTable> {
+  $$EmergencyProfilesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get principalId => $composableBuilder(
+    column: $table.principalId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get medicalConditions => $composableBuilder(
+    column: $table.medicalConditions,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get allergies =>
+      $composableBuilder(column: $table.allergies, builder: (column) => column);
+
+  GeneratedColumn<String> get medications => $composableBuilder(
+    column: $table.medications,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get careNotes =>
+      $composableBuilder(column: $table.careNotes, builder: (column) => column);
+
+  GeneratedColumn<bool> get shareContactsOnSos => $composableBuilder(
+    column: $table.shareContactsOnSos,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get shareHealthOnSos => $composableBuilder(
+    column: $table.shareHealthOnSos,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$EmergencyProfilesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $EmergencyProfilesTable,
+          EmergencyProfile,
+          $$EmergencyProfilesTableFilterComposer,
+          $$EmergencyProfilesTableOrderingComposer,
+          $$EmergencyProfilesTableAnnotationComposer,
+          $$EmergencyProfilesTableCreateCompanionBuilder,
+          $$EmergencyProfilesTableUpdateCompanionBuilder,
+          (
+            EmergencyProfile,
+            BaseReferences<
+              _$AppDatabase,
+              $EmergencyProfilesTable,
+              EmergencyProfile
+            >,
+          ),
+          EmergencyProfile,
+          PrefetchHooks Function()
+        > {
+  $$EmergencyProfilesTableTableManager(
+    _$AppDatabase db,
+    $EmergencyProfilesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EmergencyProfilesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EmergencyProfilesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EmergencyProfilesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> principalId = const Value.absent(),
+                Value<String?> medicalConditions = const Value.absent(),
+                Value<String?> allergies = const Value.absent(),
+                Value<String?> medications = const Value.absent(),
+                Value<String?> careNotes = const Value.absent(),
+                Value<bool> shareContactsOnSos = const Value.absent(),
+                Value<bool> shareHealthOnSos = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => EmergencyProfilesCompanion(
+                principalId: principalId,
+                medicalConditions: medicalConditions,
+                allergies: allergies,
+                medications: medications,
+                careNotes: careNotes,
+                shareContactsOnSos: shareContactsOnSos,
+                shareHealthOnSos: shareHealthOnSos,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String principalId,
+                Value<String?> medicalConditions = const Value.absent(),
+                Value<String?> allergies = const Value.absent(),
+                Value<String?> medications = const Value.absent(),
+                Value<String?> careNotes = const Value.absent(),
+                Value<bool> shareContactsOnSos = const Value.absent(),
+                Value<bool> shareHealthOnSos = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => EmergencyProfilesCompanion.insert(
+                principalId: principalId,
+                medicalConditions: medicalConditions,
+                allergies: allergies,
+                medications: medications,
+                careNotes: careNotes,
+                shareContactsOnSos: shareContactsOnSos,
+                shareHealthOnSos: shareHealthOnSos,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$EmergencyProfilesTable, EmergencyProfile>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $EmergencyProfilesTable,
+                    EmergencyProfile
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EmergencyProfilesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $EmergencyProfilesTable,
+      EmergencyProfile,
+      $$EmergencyProfilesTableFilterComposer,
+      $$EmergencyProfilesTableOrderingComposer,
+      $$EmergencyProfilesTableAnnotationComposer,
+      $$EmergencyProfilesTableCreateCompanionBuilder,
+      $$EmergencyProfilesTableUpdateCompanionBuilder,
+      (
+        EmergencyProfile,
+        BaseReferences<
+          _$AppDatabase,
+          $EmergencyProfilesTable,
+          EmergencyProfile
+        >,
+      ),
+      EmergencyProfile,
+      PrefetchHooks Function()
+    >;
+typedef $$SosHistoryEntriesTableCreateCompanionBuilder =
+    SosHistoryEntriesCompanion Function({
+      required String viewerPrincipalId,
+      required String eventId,
+      required String requesterDeviceId,
+      required String requesterDisplayName,
+      required DateTime eventStartedAt,
+      required DateTime updatedAt,
+      Value<bool> isHidden,
+      Value<DateTime?> hiddenAt,
+      Value<int> rowid,
+    });
+typedef $$SosHistoryEntriesTableUpdateCompanionBuilder =
+    SosHistoryEntriesCompanion Function({
+      Value<String> viewerPrincipalId,
+      Value<String> eventId,
+      Value<String> requesterDeviceId,
+      Value<String> requesterDisplayName,
+      Value<DateTime> eventStartedAt,
+      Value<DateTime> updatedAt,
+      Value<bool> isHidden,
+      Value<DateTime?> hiddenAt,
+      Value<int> rowid,
+    });
+
+class $$SosHistoryEntriesTableFilterComposer
+    extends Composer<_$AppDatabase, $SosHistoryEntriesTable> {
+  $$SosHistoryEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get viewerPrincipalId => $composableBuilder(
+    column: $table.viewerPrincipalId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get eventId => $composableBuilder(
+    column: $table.eventId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requesterDeviceId => $composableBuilder(
+    column: $table.requesterDeviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requesterDisplayName => $composableBuilder(
+    column: $table.requesterDisplayName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get eventStartedAt => $composableBuilder(
+    column: $table.eventStartedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isHidden => $composableBuilder(
+    column: $table.isHidden,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get hiddenAt => $composableBuilder(
+    column: $table.hiddenAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SosHistoryEntriesTableOrderingComposer
+    extends Composer<_$AppDatabase, $SosHistoryEntriesTable> {
+  $$SosHistoryEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get viewerPrincipalId => $composableBuilder(
+    column: $table.viewerPrincipalId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get eventId => $composableBuilder(
+    column: $table.eventId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requesterDeviceId => $composableBuilder(
+    column: $table.requesterDeviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requesterDisplayName => $composableBuilder(
+    column: $table.requesterDisplayName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get eventStartedAt => $composableBuilder(
+    column: $table.eventStartedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isHidden => $composableBuilder(
+    column: $table.isHidden,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get hiddenAt => $composableBuilder(
+    column: $table.hiddenAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SosHistoryEntriesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SosHistoryEntriesTable> {
+  $$SosHistoryEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get viewerPrincipalId => $composableBuilder(
+    column: $table.viewerPrincipalId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get eventId =>
+      $composableBuilder(column: $table.eventId, builder: (column) => column);
+
+  GeneratedColumn<String> get requesterDeviceId => $composableBuilder(
+    column: $table.requesterDeviceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requesterDisplayName => $composableBuilder(
+    column: $table.requesterDisplayName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get eventStartedAt => $composableBuilder(
+    column: $table.eventStartedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<bool> get isHidden =>
+      $composableBuilder(column: $table.isHidden, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get hiddenAt =>
+      $composableBuilder(column: $table.hiddenAt, builder: (column) => column);
+}
+
+class $$SosHistoryEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SosHistoryEntriesTable,
+          SosHistoryEntry,
+          $$SosHistoryEntriesTableFilterComposer,
+          $$SosHistoryEntriesTableOrderingComposer,
+          $$SosHistoryEntriesTableAnnotationComposer,
+          $$SosHistoryEntriesTableCreateCompanionBuilder,
+          $$SosHistoryEntriesTableUpdateCompanionBuilder,
+          (
+            SosHistoryEntry,
+            BaseReferences<
+              _$AppDatabase,
+              $SosHistoryEntriesTable,
+              SosHistoryEntry
+            >,
+          ),
+          SosHistoryEntry,
+          PrefetchHooks Function()
+        > {
+  $$SosHistoryEntriesTableTableManager(
+    _$AppDatabase db,
+    $SosHistoryEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SosHistoryEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SosHistoryEntriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SosHistoryEntriesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> viewerPrincipalId = const Value.absent(),
+                Value<String> eventId = const Value.absent(),
+                Value<String> requesterDeviceId = const Value.absent(),
+                Value<String> requesterDisplayName = const Value.absent(),
+                Value<DateTime> eventStartedAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<bool> isHidden = const Value.absent(),
+                Value<DateTime?> hiddenAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SosHistoryEntriesCompanion(
+                viewerPrincipalId: viewerPrincipalId,
+                eventId: eventId,
+                requesterDeviceId: requesterDeviceId,
+                requesterDisplayName: requesterDisplayName,
+                eventStartedAt: eventStartedAt,
+                updatedAt: updatedAt,
+                isHidden: isHidden,
+                hiddenAt: hiddenAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String viewerPrincipalId,
+                required String eventId,
+                required String requesterDeviceId,
+                required String requesterDisplayName,
+                required DateTime eventStartedAt,
+                required DateTime updatedAt,
+                Value<bool> isHidden = const Value.absent(),
+                Value<DateTime?> hiddenAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SosHistoryEntriesCompanion.insert(
+                viewerPrincipalId: viewerPrincipalId,
+                eventId: eventId,
+                requesterDeviceId: requesterDeviceId,
+                requesterDisplayName: requesterDisplayName,
+                eventStartedAt: eventStartedAt,
+                updatedAt: updatedAt,
+                isHidden: isHidden,
+                hiddenAt: hiddenAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SosHistoryEntriesTable, SosHistoryEntry>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $SosHistoryEntriesTable,
+                    SosHistoryEntry
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SosHistoryEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SosHistoryEntriesTable,
+      SosHistoryEntry,
+      $$SosHistoryEntriesTableFilterComposer,
+      $$SosHistoryEntriesTableOrderingComposer,
+      $$SosHistoryEntriesTableAnnotationComposer,
+      $$SosHistoryEntriesTableCreateCompanionBuilder,
+      $$SosHistoryEntriesTableUpdateCompanionBuilder,
+      (
+        SosHistoryEntry,
+        BaseReferences<_$AppDatabase, $SosHistoryEntriesTable, SosHistoryEntry>,
+      ),
+      SosHistoryEntry,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -12113,4 +13792,8 @@ class $AppDatabaseManager {
       $$RelayForwardHistoryTableTableManager(_db, _db.relayForwardHistory);
   $$EmergencyContactsTableTableManager get emergencyContacts =>
       $$EmergencyContactsTableTableManager(_db, _db.emergencyContacts);
+  $$EmergencyProfilesTableTableManager get emergencyProfiles =>
+      $$EmergencyProfilesTableTableManager(_db, _db.emergencyProfiles);
+  $$SosHistoryEntriesTableTableManager get sosHistoryEntries =>
+      $$SosHistoryEntriesTableTableManager(_db, _db.sosHistoryEntries);
 }

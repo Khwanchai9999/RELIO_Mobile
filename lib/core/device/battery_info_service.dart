@@ -81,11 +81,17 @@ class FakeBatteryInfoService implements BatteryInfoService {
 class BatteryPublishPolicy {
   const BatteryPublishPolicy({
     this.meaningfulLevelDelta = 5,
-    this.refreshInterval = const Duration(minutes: 10),
+    this.refreshInterval = defaultRefreshInterval,
   });
+
+  static const defaultRefreshInterval = Duration(minutes: 10);
+  static const displayFreshnessGrace = Duration(minutes: 2);
 
   final int meaningfulLevelDelta;
   final Duration refreshInterval;
+
+  // ให้ UI แสดง battery reading ต่อได้ตลอดรอบ refresh พร้อม grace สั้น ๆ
+  Duration get maxDisplayAge => refreshInterval + displayFreshnessGrace;
 
   bool shouldPublish({
     required BatterySnapshot? previous,

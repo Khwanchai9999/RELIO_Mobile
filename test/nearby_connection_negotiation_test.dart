@@ -24,6 +24,12 @@ void main() {
   tearDown(() => rig.close());
 
   test('soft timeout does not disconnect a later native success', () async {
+    await rig.close();
+    rig = await _Rig.create(
+      softTimeout: const Duration(milliseconds: 20),
+      // เผื่อเวลาให้ full suite กลับมาประมวลผล native success หลัง wait สั้น ๆ
+      hardTimeout: const Duration(seconds: 1),
+    );
     rig.transport.holdConnectionRequests = true;
     rig.transport.simulatePeer(id: 'peer-b', name: 'Peer B');
     await Future<void>.delayed(Duration.zero);
@@ -178,6 +184,8 @@ void main() {
       await rig.service.startSession();
       expect(rig.transport.isAdvertising, isTrue);
       expect(rig.transport.isDiscovering, isFalse);
+      await rig.service.startDiscovery();
+      expect(rig.transport.isDiscovering, isFalse);
 
       await rig.service.configureDiagnosticRole(
         NearbyDiagnosticRole.discovererOnly,
@@ -194,6 +202,8 @@ void main() {
       expect(rig.transport.isDiscovering, isFalse);
       await rig.service.startSession();
       expect(rig.transport.isAdvertising, isFalse);
+      expect(rig.transport.isDiscovering, isFalse);
+      await rig.service.startDiscovery();
       expect(rig.transport.isDiscovering, isFalse);
 
       await rig.service.configureDiagnosticRole(NearbyDiagnosticRole.auto);
@@ -352,6 +362,23 @@ void main() {
       expect(events, contains(DiagnosticsLogService.peerAlias(endpointId)));
     },
   );
+
+  test('native connection attempt correlation id is preserved', () async {
+    const traceId = 'qa-session-connection-42';
+    rig.transport.simulateIncomingConnection(
+      id: 'correlated-endpoint',
+      name: 'Peer',
+      connectionTraceId: traceId,
+      callbackOperation: 'dis.onConnectionInitiated',
+      strategy: 'P2P_CLUSTER',
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    final log = await rig.logText();
+    expect(log, contains(traceId));
+    expect(log, contains('native_connection_initiated_received'));
+    expect(log, contains('callbackRole'));
+  });
 
   test('duplicate endpoint aliases share one stable-peer flight', () async {
     rig.transport.holdConnectionRequests = true;

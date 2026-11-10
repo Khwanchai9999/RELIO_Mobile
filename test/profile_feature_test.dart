@@ -10,8 +10,10 @@ import 'package:image_picker/image_picker.dart';
 
 import 'package:relio_mobile/core/cloud/fake_cloud_data_source.dart';
 import 'package:relio_mobile/core/database/app_database.dart';
+import 'package:relio_mobile/core/identity/owner_context.dart';
 import 'package:relio_mobile/core/nearby/nearby_transport.dart';
 import 'package:relio_mobile/core/relio_dependencies.dart';
+import 'package:relio_mobile/core/repositories/principal_profile_repository.dart';
 import 'package:relio_mobile/core/repositories/profile_avatar_repository.dart';
 import 'package:relio_mobile/features/profile/profile_screen.dart';
 
@@ -56,6 +58,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('เข้าสู่ระบบ'), findsNothing);
+      expect(find.text('ออกจากโหมดออฟไลน์'), findsNothing);
+      expect(find.text('ออกจากระบบ'), findsOneWidget);
 
       await tester.tap(find.byTooltip('แก้ไขชื่อ'));
       await tester.pumpAndSettle();
@@ -76,6 +80,84 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Profile verifies a Member email change without changing owner ID',
+    (tester) async {
+      final cloud = FakeCloudDataSource();
+      final original = await cloud.register(
+        email: 'profile-before@example.test',
+        password: 'RelioDemo123!',
+      );
+      cloud.backend.requireBothEmailConfirmations = true;
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: MockNearbyTransport(autoAcknowledge: false),
+        cloudDataSource: cloud,
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await dependencies.dispose();
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RelioDependencyScope(
+            dependencies: dependencies,
+            child: const ProfileScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('รายละเอียดบัญชี'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('เปลี่ยนอีเมลบัญชี'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('เปลี่ยนอีเมลบัญชี'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField).first,
+        'profile-after@example.test',
+      );
+      await tester.tap(find.text('ส่งรหัสยืนยัน'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).at(0), '111111');
+      await tester.enterText(find.byType(TextField).at(1), '222222');
+      await tester.tap(find.widgetWithText(FilledButton, 'ยืนยันอีเมล'));
+      await tester.pumpAndSettle();
+
+      expect(cloud.currentIdentity?.userId, original.userId);
+      expect(cloud.currentIdentity?.email, 'profile-after@example.test');
+      expect(cloud.currentIdentity?.isAnonymous, isFalse);
+    },
+  );
+
+  testWidgets(
+    'Guest Profile no longer offers the canceled email recovery menu',
+    (tester) async {
+      final dependencies = RelioDependencies(
+        database: AppDatabase.memory(),
+        transport: MockNearbyTransport(autoAcknowledge: false),
+      );
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await dependencies.dispose();
+      });
+      await dependencies.resumeGuestMode();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RelioDependencyScope(
+            dependencies: dependencies,
+            child: const ProfileScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('เพิ่มอีเมลกู้คืนบัญชี Guest'), findsNothing);
+      expect(find.text('เปลี่ยนอีเมลบัญชี'), findsNothing);
+      expect(find.text('ข้อมูลฉุกเฉิน'), findsOneWidget);
+      expect(find.text('ออกจากโหมดออฟไลน์'), findsOneWidget);
+    },
+  );
   testWidgets('blank name and cancelled edit preserve the current profile', (
     tester,
   ) async {
@@ -229,6 +311,118 @@ void main() {
           '${appFiles.path}/relio_profile/avatars',
         ).list(recursive: true).where((entry) => entry is File).isEmpty,
         isTrue,
+      );
+    },
+  );
+
+  test(
+    'Nearby avatar derivative is bounded, hash validated and cached by peer',
+    () async {
+      final database = AppDatabase.memory();
+      final root = await Directory.systemTemp.createTemp('relio-avatar-cache-');
+      String? activeUserId;
+      final owners = OwnerContext(() => activeUserId);
+      addTearDown(() async {
+        await database.close();
+        await owners.dispose();
+        await root.delete(recursive: true);
+      });
+      final source = File('${root.path}/source.png');
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder, const Rect.fromLTWH(0, 0, 8, 8));
+      canvas.drawRect(
+        const Rect.fromLTWH(0, 0, 8, 8),
+        Paint()..color = Colors.teal,
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(8, 8);
+      final png = await image.toByteData(format: ui.ImageByteFormat.png);
+      await source.writeAsBytes(png!.buffer.asUint8List());
+      image.dispose();
+      picture.dispose();
+
+      final repository = ProfileAvatarRepository(
+        database,
+        rootDirectory: root,
+        profiles: PrincipalProfileRepository(database, owners),
+      );
+      await repository.storePickedImage(XFile(source.path));
+      final first = await repository.shareArtifact();
+      final second = await repository.shareArtifact();
+      expect(first, isNotNull);
+      expect(first!.revision, second!.revision);
+      expect(await File(first.path).length(), lessThanOrEqualTo(64 * 1024));
+      final cachedPath = await repository.storeRemoteAvatar(
+        deviceId: 'verified-device-a',
+        remotePrincipal: 'guest:peer-owner',
+        revision: first.revision,
+        sourcePath: first.path,
+      );
+      expect(cachedPath, isNotNull);
+      expect(
+        await repository.cachedRemoteRevision(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        first.revision,
+      );
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-b',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        isNull,
+      );
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'account:peer-member-a',
+        ),
+        isNull,
+      );
+      activeUserId = 'qa-member-a';
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        isNull,
+      );
+      activeUserId = 'qa-member-b';
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        isNull,
+      );
+      activeUserId = null;
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        cachedPath,
+      );
+      expect(
+        await repository.storeRemoteAvatar(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+          revision: '0' * 64,
+          sourcePath: first.path,
+        ),
+        isNull,
+      );
+      await repository.removeRemoteAvatar(
+        deviceId: 'verified-device-a',
+        remotePrincipal: 'guest:peer-owner',
+      );
+      expect(
+        await repository.remoteAvatarPath(
+          deviceId: 'verified-device-a',
+          remotePrincipal: 'guest:peer-owner',
+        ),
+        isNull,
       );
     },
   );

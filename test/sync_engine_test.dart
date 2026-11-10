@@ -215,6 +215,142 @@ void main() {
     },
   );
 
+  test(
+    'private backup uploads without a shared binding and restores by owner',
+    () async {
+      final cloud = FakeCloudDataSource();
+      final owner = await cloud.register(
+        email: 'private-backup@example.com',
+        password: 'password',
+      );
+      final source = await SyncHarness.create(cloud: cloud);
+      addTearDown(source.dispose);
+      final conversation = await source.repositories.conversations
+          .ensureConversation(
+            id: 'private-local-conversation',
+            participantId: 'nearby-only-peer',
+            displayName: 'Nearby peer',
+            participantStatus: DeviceStatus.offline,
+          );
+      final message = await source.repositories.messages.createOutgoingText(
+        conversationId: conversation.id,
+        senderId: 'local-device-principal',
+        senderDeviceId: 'stable-device-id',
+        text: 'private history copy',
+      );
+      final mediaInputs = <(MessageType, String, List<int>)>[
+        (MessageType.image, 'backup-photo.jpg', [0xff, 0xd8, 0xff]),
+        (
+          MessageType.video,
+          'backup-clip.mp4',
+          [0, 0, 0, 0, 102, 116, 121, 112, 105, 115, 111, 109],
+        ),
+      ];
+      final mediaMessages = <RelioMessage>[];
+      for (var i = 0; i < mediaInputs.length; i++) {
+        final (type, name, bytes) = mediaInputs[i];
+        final path = '${source.tempDirectory.path}/$name';
+        await File(path).writeAsBytes(bytes);
+        final mediaMessage = await source.repositories.messages
+            .createOutgoingMedia(
+              conversationId: conversation.id,
+              senderId: 'local-device-principal',
+              senderDeviceId: 'stable-device-id',
+              type: type,
+              fileName: name,
+              localPath: path,
+              attachmentId: 'backup-attachment-$i',
+              messageId: 'backup-media-message-$i',
+            );
+        mediaMessages.add(mediaMessage);
+        await source.repositories.attachments.createPending(
+          id: 'backup-attachment-$i',
+          conversationId: conversation.id,
+          messageId: mediaMessage.id,
+          transferId: 'backup-transfer-$i',
+          mediaType: type == MessageType.video
+              ? MediaType.video
+              : MediaType.image,
+          fileName: name,
+          mimeType: type == MessageType.video ? 'video/mp4' : 'image/jpeg',
+          localPath: path,
+          byteSize: bytes.length,
+        );
+      }
+
+      await source.engine.initialize();
+      await source.engine.run();
+
+      expect(cloud.privateBackupRecords, hasLength(4));
+      expect(
+        cloud.privateBackupRecords.keys,
+        everyElement(startsWith(owner.userId)),
+      );
+      expect(cloud.messages, isEmpty);
+      final queue = await source.repositories.syncQueue.listAll();
+      expect(
+        queue
+            .where((row) => row.operation == SyncOperation.messageUpsert.value)
+            .every((row) => row.status == SyncQueueStatus.pending.value),
+        isTrue,
+      );
+      expect(
+        queue
+            .where(
+              (row) => row.operation == SyncOperation.privateBackupUpsert.value,
+            )
+            .every((row) => row.status == SyncQueueStatus.completed.value),
+        isTrue,
+      );
+      expect(
+        cloud.files.keys.where((key) => key.contains('/private-backups/')),
+        hasLength(2),
+      );
+
+      await cloud.signOut();
+      final other = cloud.createTestIdentity(email: 'other@example.com');
+      await cloud.signIn(email: other.email, password: 'password');
+      expect(
+        await cloud.fetchPrivateBackupRecords(recordType: 'message'),
+        isEmpty,
+      );
+      await cloud.signOut();
+      await cloud.signIn(email: owner.email, password: 'password');
+
+      final restore = await SyncHarness.create(cloud: cloud);
+      addTearDown(restore.dispose);
+      final restoredCount = await restore.engine.restorePrivateBackup();
+      expect(restoredCount, 3);
+      final restoredConversation =
+          (await restore.repositories.conversations.listConversations()).single;
+      final restoredMessages = await restore.repositories.messages.listMessages(
+        restoredConversation.id,
+      );
+      final restored = restoredMessages.singleWhere(
+        (item) => item.id == message.id,
+      );
+      expect(restored.text, message.text);
+      expect(restored.senderId, message.senderId);
+      expect(restored.senderDeviceId, message.senderDeviceId);
+      expect(restored.outgoing, isTrue);
+      for (var i = 0; i < mediaMessages.length; i++) {
+        final media = restoredMessages.singleWhere(
+          (item) => item.id == mediaMessages[i].id,
+        );
+        expect(media.type, mediaMessages[i].type);
+        expect(media.localFilePath, isNotNull);
+        expect(
+          await File(media.localFilePath!).readAsBytes(),
+          mediaInputs[i].$3,
+        );
+        final attachment = await restore.repositories.attachments.getById(
+          'backup-attachment-$i',
+        );
+        expect(attachment?.transferStatus, MediaTransferState.completed);
+      }
+    },
+  );
+
   test('Fake Cloud denies nonmembers and supports keyset pagination', () async {
     final backend = FakeCloudBackend();
     final owner = FakeCloudDataSource(backend: backend);
@@ -350,7 +486,11 @@ void main() {
       await harness.engine.run();
 
       final messageQueue = (await harness.repositories.syncQueue.listAll())
-          .singleWhere((item) => item.entityId == message.id);
+          .singleWhere(
+            (item) =>
+                item.entityId == message.id &&
+                item.operation == SyncOperation.messageUpsert.value,
+          );
       expect(messageQueue.ownerUserId, accountA.userId);
       expect(messageQueue.status, SyncQueueStatus.completed.value);
       expect(harness.cloud.messages[message.id]?.senderId, accountA.userId);
@@ -592,7 +732,8 @@ void main() {
       );
       final message = await harness.createMessage(senderId: 'account-a');
       final file = File('${harness.tempDirectory.path}/photo.jpg');
-      await file.writeAsBytes([1, 2, 3]);
+      const imageBytes = [0xff, 0xd8, 0xff];
+      await file.writeAsBytes(imageBytes);
       final attachment = await harness.repositories.attachments.createPending(
         id: 'attachment-a',
         conversationId: message.conversationId!,
@@ -602,7 +743,7 @@ void main() {
         fileName: 'photo.jpg',
         mimeType: 'image/jpeg',
         localPath: file.path,
-        byteSize: 3,
+        byteSize: imageBytes.length,
       );
       await harness.repositories.syncQueue.enqueue(
         entityType: SyncEntityType.attachment.value,
@@ -634,7 +775,11 @@ void main() {
     await harness.engine.initialize();
     await harness.engine.run();
     final failedAttempt = (await harness.repositories.syncQueue.listAll())
-        .singleWhere((item) => item.entityId == message.id);
+        .singleWhere(
+          (item) =>
+              item.entityId == message.id &&
+              item.operation == SyncOperation.messageUpsert.value,
+        );
 
     harness.cloud.failureMode = FakeCloudFailure.none;
     await harness.cloud.signOut();
@@ -656,13 +801,17 @@ void main() {
       email: 'retry@example.com',
       password: 'password',
     );
-    await harness.createMessage(senderId: 'retry-owner');
+    final message = await harness.createMessage(senderId: 'retry-owner');
     harness.cloud.failureMode = FakeCloudFailure.temporaryServer;
 
     await harness.engine.initialize();
     await harness.engine.run();
 
-    final first = (await harness.repositories.syncQueue.listAll()).first;
+    final first = (await harness.repositories.syncQueue.listAll()).singleWhere(
+      (item) =>
+          item.entityId == message.conversationId &&
+          item.operation == SyncOperation.conversationUpsert.value,
+    );
     expect(first.status, SyncQueueStatus.pending.value);
     expect(first.attemptCount, 1);
     expect(
@@ -671,12 +820,15 @@ void main() {
     );
 
     await harness.engine.run();
-    final beforeDue = (await harness.repositories.syncQueue.listAll()).first;
+    final beforeDue = (await harness.repositories.syncQueue.listAll())
+        .singleWhere((item) => item.id == first.id);
     expect(beforeDue.attemptCount, 1);
 
     clock.current = first.nextAttemptAt!;
     await harness.engine.run();
-    final second = (await harness.repositories.syncQueue.listAll()).first;
+    final second = (await harness.repositories.syncQueue.listAll()).singleWhere(
+      (item) => item.id == first.id,
+    );
     expect(second.attemptCount, 2);
   });
 
@@ -717,7 +869,11 @@ void main() {
       await harness.engine.run();
 
       final queued = (await harness.repositories.syncQueue.listAll())
-          .singleWhere((item) => item.entityId == message.id);
+          .singleWhere(
+            (item) =>
+                item.entityId == message.id &&
+                item.operation == SyncOperation.messageUpsert.value,
+          );
       expect(queued.ownerUserId, owner.userId);
       expect(queued.status, SyncQueueStatus.pending.value);
       expect(
@@ -738,6 +894,9 @@ void main() {
 
       harness.cloud.offline = false;
       final retryAt = (await harness.repositories.syncQueue.listAll())
+          .where(
+            (item) => item.operation == SyncOperation.conversationUpsert.value,
+          )
           .map((item) => item.nextAttemptAt)
           .whereType<DateTime>()
           .first;
@@ -750,7 +909,11 @@ void main() {
         message.id,
       ]);
       final completed = (await harness.repositories.syncQueue.listAll())
-          .singleWhere((item) => item.entityId == message.id);
+          .singleWhere(
+            (item) =>
+                item.entityId == message.id &&
+                item.operation == SyncOperation.messageUpsert.value,
+          );
       expect(completed.status, SyncQueueStatus.completed.value);
 
       await harness.engine.run();
@@ -774,7 +937,11 @@ void main() {
     await harness.engine.initialize();
     await harness.engine.run();
     final messageQueue = (await harness.repositories.syncQueue.listAll())
-        .singleWhere((item) => item.entityId == message.id);
+        .singleWhere(
+          (item) =>
+              item.entityId == message.id &&
+              item.operation == SyncOperation.messageUpsert.value,
+        );
     await harness.repositories.syncQueue.retry(messageQueue.id);
     await harness.engine.run();
 
@@ -793,7 +960,8 @@ void main() {
       );
       final message = await harness.createMessage(senderId: 'local-label');
       final file = File('${harness.tempDirectory.path}/photo.jpg');
-      await file.writeAsBytes([1, 2, 3]);
+      const imageBytes = [0xff, 0xd8, 0xff];
+      await file.writeAsBytes(imageBytes);
       final attachment = await harness.repositories.attachments.createPending(
         id: 'attachment-a',
         conversationId: message.conversationId!,
@@ -803,7 +971,7 @@ void main() {
         fileName: 'photo.jpg',
         mimeType: 'image/jpeg',
         localPath: file.path,
-        byteSize: 3,
+        byteSize: imageBytes.length,
       );
       await harness.repositories.syncQueue.enqueue(
         entityType: SyncEntityType.attachment.value,
@@ -822,7 +990,7 @@ void main() {
       final path =
           'users/${identity.userId}/messages/${message.id}/attachment-a-photo.jpg';
       expect(harness.cloud.attachments[attachment.id]?.storagePath, path);
-      expect(harness.cloud.files[path], [1, 2, 3]);
+      expect(harness.cloud.files[path], imageBytes);
     },
   );
 
@@ -935,8 +1103,13 @@ void main() {
 
       await harness.engine.initialize();
       await harness.engine.run();
+      expect(harness.engine.snapshot.state, SyncEngineState.waitingForBinding);
       var messageRow = (await harness.repositories.syncQueue.listAll())
-          .singleWhere((item) => item.entityId == message.id);
+          .singleWhere(
+            (item) =>
+                item.entityId == message.id &&
+                item.operation == SyncOperation.messageUpsert.value,
+          );
       expect(messageRow.status, SyncQueueStatus.pending.value);
       expect(messageRow.lastError, isNull);
 
@@ -948,7 +1121,9 @@ void main() {
         peerUserId: peer.userId,
       );
       messageRow = (await harness.repositories.syncQueue.listAll()).singleWhere(
-        (item) => item.entityId == message.id,
+        (item) =>
+            item.entityId == message.id &&
+            item.operation == SyncOperation.messageUpsert.value,
       );
       expect(messageRow.status, SyncQueueStatus.completed.value);
       expect(harness.cloud.messages[message.id]?.senderId, owner.userId);
@@ -985,7 +1160,10 @@ void main() {
             ? 'photo.jpg'
             : 'clip.mp4';
         final file = File('${harness.tempDirectory.path}/$fileName');
-        await file.writeAsBytes([0, 1, 2, 3]);
+        final fileBytes = mediaType == MessageType.image
+            ? [0xff, 0xd8, 0xff]
+            : [0, 0, 0, 0, 102, 116, 121, 112, 105, 115, 111, 109];
+        await file.writeAsBytes(fileBytes);
         await harness.repositories.attachments.createPending(
           id: attachmentId,
           conversationId: conversation.id,
@@ -997,7 +1175,7 @@ void main() {
           fileName: fileName,
           mimeType: mediaType == MessageType.image ? 'image/jpeg' : 'video/mp4',
           localPath: file.path,
-          byteSize: 4,
+          byteSize: fileBytes.length,
         );
         final message = await harness.repositories.messages.createOutgoingMedia(
           conversationId: conversation.id,
@@ -1018,10 +1196,17 @@ void main() {
         expect(cloudMessage?.messageType, mediaType.name);
         expect(cloudMessage?.senderId, owner.userId);
         expect(cloudAttachment?.messageId, message.id);
-        expect(harness.cloud.files[cloudAttachment!.storagePath], [0, 1, 2, 3]);
+        expect(harness.cloud.files[cloudAttachment!.storagePath], fileBytes);
         final queue = await harness.repositories.syncQueue.listAll();
         expect(
-          queue.where((row) => row.entityId == message.id).single.status,
+          queue
+              .where(
+                (row) =>
+                    row.entityId == message.id &&
+                    row.operation == SyncOperation.messageUpsert.value,
+              )
+              .single
+              .status,
           SyncQueueStatus.completed.value,
         );
         expect(
@@ -1033,10 +1218,127 @@ void main() {
         await harness.engine.run();
         expect(harness.cloud.messages, hasLength(1));
         expect(harness.cloud.attachments, hasLength(1));
-        expect(harness.cloud.files, hasLength(1));
+        expect(harness.cloud.files, hasLength(2));
       },
     );
   }
+
+  test(
+    'authorized Cloud media is pulled, verified, and stored locally',
+    () async {
+      final backend = FakeCloudBackend();
+      final cloudA = FakeCloudDataSource(backend: backend);
+      final cloudB = FakeCloudDataSource(backend: backend);
+      addTearDown(cloudA.dispose);
+      addTearDown(cloudB.dispose);
+      final accountA = await cloudA.register(
+        email: 'media-sender@example.com',
+        password: 'password',
+      );
+      final accountB = cloudA.createTestIdentity(
+        email: 'media-recipient@example.com',
+      );
+      final harnessA = await SyncHarness.create(cloud: cloudA);
+      final retryClock = TestSyncClock(DateTime.utc(2026, 11, 2));
+      final harnessB = await SyncHarness.create(
+        cloud: cloudB,
+        clock: retryClock,
+      );
+      addTearDown(harnessA.dispose);
+      addTearDown(harnessB.dispose);
+
+      final conversation = await harnessA.repositories.conversations
+          .ensureConversation(
+            id: 'media-sender-conversation',
+            participantId: 'recipient-device',
+            displayName: 'Recipient',
+            participantStatus: DeviceStatus.offline,
+          );
+      final linkA = await harnessA.engine.linkConversationToCloud(
+        localConversationId: conversation.id,
+        peerUserId: accountB.userId,
+      );
+      const attachmentId = 'shared-cloud-image';
+      const messageId = 'shared-cloud-image-message';
+      const bytes = [137, 80, 78, 71, 13, 10, 26, 10];
+      final source = File('${harnessA.tempDirectory.path}/shared.png');
+      await source.writeAsBytes(bytes);
+      await harnessA.repositories.attachments.createPending(
+        id: attachmentId,
+        conversationId: conversation.id,
+        messageId: messageId,
+        transferId: 'shared-cloud-image-transfer',
+        mediaType: MediaType.image,
+        fileName: 'shared.png',
+        mimeType: 'image/png',
+        localPath: source.path,
+        byteSize: bytes.length,
+      );
+      await harnessA.repositories.messages.createOutgoingMedia(
+        conversationId: conversation.id,
+        senderId: accountA.userId,
+        senderDeviceId: 'sender-device',
+        type: MessageType.image,
+        fileName: 'shared.png',
+        localPath: source.path,
+        attachmentId: attachmentId,
+        messageId: messageId,
+      );
+      await harnessA.engine.initialize();
+      await harnessA.engine.run();
+      final remoteAttachment = cloudA.attachments[attachmentId]!;
+      expect(remoteAttachment.storagePath, contains(accountA.userId));
+      expect(remoteAttachment.sha256, isNotNull);
+      expect(cloudA.files[remoteAttachment.storagePath], bytes);
+
+      await cloudB.signIn(email: accountB.email, password: 'password');
+      cloudB.failureMode = FakeCloudFailure.downloadFailure;
+      await harnessB.engine.initialize();
+      await harnessB.engine.run();
+      final linkB = (await harnessB.repositories.cloudLinks.listForOwner(
+        accountB.userId,
+      )).single;
+      expect(linkB.cloudConversationId, linkA.cloudConversationId);
+      var downloadQueue = (await harnessB.repositories.syncQueue.listAll())
+          .singleWhere(
+            (row) =>
+                row.entityId == attachmentId &&
+                row.operation == SyncOperation.attachmentDownload.value,
+          );
+      expect(downloadQueue.status, SyncQueueStatus.pending.value);
+      expect(downloadQueue.nextAttemptAt, isNotNull);
+      expect(
+        (await harnessB.repositories.attachments.getById(
+          attachmentId,
+        ))?.cloudFileStatus,
+        'downloadPending',
+      );
+      cloudB.failureMode = FakeCloudFailure.none;
+      retryClock.current = downloadQueue.nextAttemptAt!.add(
+        const Duration(seconds: 1),
+      );
+      await harnessB.engine.run();
+
+      final receivedMessage = await harnessB.repositories.messages.getMessage(
+        messageId,
+      );
+      final receivedAttachment = await harnessB.repositories.attachments
+          .getById(attachmentId);
+      expect(receivedMessage?.type, MessageType.image);
+      expect(receivedMessage?.localFilePath, isNotEmpty);
+      expect(receivedAttachment?.cloudFileStatus, 'synced');
+      expect(receivedAttachment?.transferStatus, MediaTransferState.completed);
+      expect(receivedAttachment?.checksumSha256, remoteAttachment.sha256);
+      expect(await File(receivedMessage!.localFilePath!).readAsBytes(), bytes);
+      downloadQueue = (await harnessB.repositories.syncQueue.listAll())
+          .singleWhere(
+            (row) =>
+                row.entityId == attachmentId &&
+                row.operation == SyncOperation.attachmentDownload.value,
+          );
+      expect(downloadQueue.status, SyncQueueStatus.completed.value);
+    },
+  );
 }
 
 class SyncHarness {
@@ -1159,6 +1461,8 @@ class RecordingNotificationSink implements LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   }) async {
     showCount++;
   }

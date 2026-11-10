@@ -37,6 +37,92 @@ void main() {
     await cloud.dispose();
   });
 
+  test(
+    'guest email upgrade preserves the Cloud identity and adds recovery',
+    () async {
+      final cloud = FakeCloudDataSource();
+      final guest = await cloud.signInAnonymously();
+      final pending = await cloud.requestEmailChange(
+        email: 'guest-owner@example.com',
+      );
+      expect(pending.userId, guest.userId);
+      expect(pending.pendingEmail, 'guest-owner@example.com');
+
+      final verified = await cloud.verifyEmailChange(
+        email: 'guest-owner@example.com',
+        token: '123456',
+      );
+      expect(verified.verified, isTrue);
+      expect(verified.identity.userId, guest.userId);
+      expect(verified.identity.isAnonymous, isTrue);
+
+      final upgraded = await cloud.setAccountPassword(
+        password: 'recovery-password',
+      );
+      expect(upgraded.userId, guest.userId);
+      expect(upgraded.email, 'guest-owner@example.com');
+      expect(upgraded.isAnonymous, isFalse);
+
+      await cloud.signOut();
+      final restoredAccount = FakeCloudDataSource(backend: cloud.backend);
+      expect(
+        (await restoredAccount.signIn(
+          email: 'guest-owner@example.com',
+          password: 'recovery-password',
+        )).userId,
+        guest.userId,
+      );
+      await restoredAccount.dispose();
+      await cloud.dispose();
+    },
+  );
+
+  test(
+    'member email change preserves identity and rejects another owner email',
+    () async {
+      final cloud = FakeCloudDataSource();
+      final member = await cloud.register(
+        email: 'member-before@example.com',
+        password: 'member-password',
+      );
+      await cloud.register(
+        email: 'already-owned@example.com',
+        password: 'other-password',
+      );
+      await cloud.signIn(
+        email: 'member-before@example.com',
+        password: 'member-password',
+      );
+
+      await expectLater(
+        cloud.requestEmailChange(email: 'already-owned@example.com'),
+        throwsA(
+          isA<CloudException>().having(
+            (error) => error.code,
+            'code',
+            'emailAlreadyUsed',
+          ),
+        ),
+      );
+      await cloud.requestEmailChange(email: 'member-after@example.com');
+      final result = await cloud.verifyEmailChange(
+        email: 'member-after@example.com',
+        token: '654321',
+      );
+      expect(result.verified, isTrue);
+      expect(result.identity.userId, member.userId);
+      expect(result.identity.isAnonymous, isFalse);
+
+      await cloud.signOut();
+      final restored = await cloud.signIn(
+        email: 'member-after@example.com',
+        password: 'member-password',
+      );
+      expect(restored.userId, member.userId);
+      await cloud.dispose();
+    },
+  );
+
   test('fake cloud rejects access while unconfigured or signed out', () async {
     final unconfigured = FakeCloudDataSource(configured: false);
     await expectLater(
@@ -190,9 +276,12 @@ void main() {
       await expectLater(
         cloud.downloadAttachment(
           storagePath: 'users/fake-1/messages/missing/attachment',
+          ownerUserId: 'fake-1',
           mediaStorage: MediaStorageService(),
           fileName: 'missing.jpg',
           mimeType: 'image/jpeg',
+          expectedByteSize: 128,
+          expectedSha256: null,
         ),
         throwsA(isA<CloudException>()),
       );

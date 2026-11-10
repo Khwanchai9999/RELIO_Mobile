@@ -1,3 +1,4 @@
+// สถานะงานในคิว Cloud Sync แยกจากสถานะส่ง Nearby และ ACK ของผู้รับ
 enum SyncQueueStatus {
   pending('pending'),
   processing('processing'),
@@ -20,7 +21,9 @@ enum SyncOperation {
   sosUpsert('sosUpsert'),
   attachmentMetadataUpsert('attachmentMetadataUpsert'),
   attachmentUpload('attachmentUpload'),
-  readReceiptUpsert('readReceiptUpsert');
+  attachmentDownload('attachmentDownload'),
+  readReceiptUpsert('readReceiptUpsert'),
+  privateBackupUpsert('privateBackupUpsert');
 
   const SyncOperation(this.value);
 

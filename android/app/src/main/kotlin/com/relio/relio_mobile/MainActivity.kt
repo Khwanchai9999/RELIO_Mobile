@@ -1,6 +1,7 @@
 package com.relio.relio_mobile
 
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -8,7 +9,13 @@ import android.app.PendingIntent
 import android.util.Base64
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.database.sqlite.SQLiteDatabase
 import android.provider.Settings
+import android.media.RingtoneManager
+import android.media.MediaMetadataRetriever
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -23,21 +30,94 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (packageName == QA_APPLICATION_ID) {
+            Thread({ auditDuplicateConversationsReadOnly() }, "relio-qa-chat-audit").start()
+        }
+    }
+
+    private fun auditDuplicateConversationsReadOnly() {
+        val file = File(applicationInfo.dataDir, "app_flutter/relio_local.sqlite")
+        if (!file.isFile) {
+            Log.i("RELIO_QA_CHAT_AUDIT", "database_unavailable")
+            return
+        }
+        fun alias(value: String?): String = if (value.isNullOrEmpty()) "none" else
+            MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }.take(12)
+        try {
+            SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+                Log.i("RELIO_QA_CHAT_AUDIT", "schema=${db.version}")
+                if (db.version >= 14) {
+                    db.rawQuery("SELECT COUNT(*) FROM conversation_aliases", null).use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            Log.i("RELIO_QA_CHAT_AUDIT", "logical_aliases=${cursor.getInt(0)}")
+                        }
+                    }
+                }
+                db.rawQuery(
+                    """SELECT c.id, c.display_name, c.participant_id,
+                        cp.local_principal, cp.remote_principal, cp.remote_device_id,
+                        cp.state, cs.owner_user_id,
+                        (SELECT COUNT(*) FROM messages m WHERE m.conversation_id=c.id)
+                    FROM conversations c
+                    LEFT JOIN conversation_principals cp ON cp.conversation_id=c.id
+                    LEFT JOIN conversation_scopes cs ON cs.conversation_id=c.id
+                    WHERE c.display_name IN
+                      (SELECT display_name FROM conversations GROUP BY display_name HAVING COUNT(*)>1)
+                    ORDER BY c.display_name, c.created_at LIMIT 30""",
+                    null,
+                ).use { cursor ->
+                    Log.i("RELIO_QA_CHAT_AUDIT", "duplicate_rows=${cursor.count}")
+                    while (cursor.moveToNext()) {
+                        Log.i(
+                            "RELIO_QA_CHAT_AUDIT",
+                            "name=${alias(cursor.getString(1))} conversation=${alias(cursor.getString(0))} " +
+                                "device=${alias(cursor.getString(2))} local=${alias(cursor.getString(3))} " +
+                                "remote=${alias(cursor.getString(4))} remoteDevice=${alias(cursor.getString(5))} " +
+                                "state=${cursor.getString(6) ?: "none"} scope=${alias(cursor.getString(7))} " +
+                                "messages=${cursor.getInt(8)}",
+                        )
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            Log.i("RELIO_QA_CHAT_AUDIT", "audit_failed=${error.javaClass.simpleName}")
+        }
+    }
+
     private val updateChannel = "relio/app_update"
     private val notificationChannel = "relio/notifications"
     private val identityChannel = "relio/device_identity"
     private val diagnosticsChannel = "relio/diagnostics"
     private val mediaChannel = "relio/media"
     private val emergencyDialerChannel = "relio/emergency_dialer"
+    private val emergencyRuntimeChannel = "relio/emergency_runtime"
+    private val screenFlashlightChannel = "relio/screen_flashlight"
     private val identityKeyStore = RelioIdentityKeyStore()
     private val identityExecutor = Executors.newSingleThreadExecutor()
+    private val mediaThumbnailExecutor: ExecutorService = ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(8),
+    )
     private var runtimeConnectivityChannels: RuntimeConnectivityChannels? = null
     private var bluetoothClassicChannels: BluetoothClassicChannels? = null
     private var notificationPermissionResult: MethodChannel.Result? = null
     private var notificationsMethodChannel: MethodChannel? = null
+
+    // เก็บ FlutterEngine ไว้ใน process เพื่อให้ isolate และ Nearby event stream
+    // อยู่ต่อเมื่อ Activity ถูกย่อหรือ task ถูกปัดออก ขณะ Foreground Service ทำงาน
+    override fun provideFlutterEngine(context: Context): FlutterEngine? = retainedEngine
+
+    override fun shouldDestroyEngineWithHost(): Boolean = false
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -51,12 +131,165 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        retainedEngine = flutterEngine
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, screenFlashlightChannel)
+            .setMethodCallHandler { call, result ->
+                if (call.method != "keepAwake") {
+                    result.notImplemented()
+                } else {
+                    val enabled = call.arguments as? Boolean ?: false
+                    if (enabled) {
+                        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(null)
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "relio/offline_map")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "prepare") {
+                    result.notImplemented()
+                } else {
+                    val worker = Executors.newSingleThreadExecutor()
+                    worker.execute {
+                        try {
+                            val root = File(filesDir, "relio_offline_map/20261101-z15-v4")
+                            val ready = File(root, "ready")
+                            if (!ready.exists() || ready.readText() != "resources-v5" || File(root, "thailand.pmtiles").length() != 601215311L) {
+                                // คัดลอก asset ทีละ chunk บน worker; ready เกิดหลังไฟล์ครบเท่านั้น
+                                fun copyAsset(relative: String) {
+                                    val asset = "flutter_assets/assets/maps" + if (relative.isEmpty()) "" else "/$relative"
+                                    val children = assets.list(asset) ?: emptyArray()
+                                    if (children.isNotEmpty()) {
+                                        children.forEach { copyAsset(if (relative.isEmpty()) it else "$relative/$it") }
+                                    } else {
+                                        val target = File(root, relative)
+                                        if (relative == "thailand.pmtiles" && target.length() == 601215311L) return
+                                        target.parentFile?.mkdirs()
+                                        val temporary = File(target.path + ".tmp")
+                                        assets.open(asset).use { input ->
+                                            java.io.FileOutputStream(temporary).use { output ->
+                                                input.copyTo(output, 65536)
+                                                output.fd.sync()
+                                            }
+                                        }
+                                        java.nio.file.Files.move(temporary.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                                    }
+                                }
+                                copyAsset("")
+                                ready.writeText("resources-v5")
+                            }
+                            runOnUiThread { result.success(root.absolutePath) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.error("offline_map_prepare_failed", "Local map preparation failed", null) }
+                        } finally { worker.shutdown() }
+                    }
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, updateChannel)
             .setMethodCallHandler(::handleUpdateCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, identityChannel)
             .setMethodCallHandler(::handleIdentityCall)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, mediaChannel)
             .setMethodCallHandler { call, result ->
+                if (call.method == "videoThumbnail") {
+                    val requestedPath = call.argument<String>("path")
+                    val cacheKey = call.argument<String>("cacheKey")
+                    if (requestedPath == null || cacheKey == null || cacheKey.length > 1024) {
+                        result.error("invalid_thumbnail_request", "Invalid video thumbnail request", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        mediaThumbnailExecutor.execute {
+                        var retriever: MediaMetadataRetriever? = null
+                        try {
+                            val mediaRoot = File(filesDir, "relio_media").canonicalPath + File.separator
+                            val video = File(requestedPath).canonicalFile
+                            require(video.isFile && video.path.startsWith(mediaRoot) && video.length() > 0L)
+                            val sourceKey = "$cacheKey:${video.length()}:${video.lastModified()}"
+                            val digest = MessageDigest.getInstance("SHA-256")
+                                .digest(sourceKey.toByteArray(Charsets.UTF_8))
+                                .joinToString("") { "%02x".format(it) }
+                            val cache = File(cacheDir, "video_thumbnails").apply { mkdirs() }
+                            val output = File(cache, "$digest.jpg")
+                            val cacheHit = output.isFile && output.length() > 0L
+                            var bitmap: Bitmap? = null
+                            if (!cacheHit) {
+                                retriever = MediaMetadataRetriever().apply { setDataSource(video.path) }
+                                val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                                    ?.toLongOrNull() ?: 0L
+                                val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                                    ?.toFloatOrNull() ?: 0f
+                                val sourceWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                                    ?.toIntOrNull() ?: 0
+                                val sourceHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                                    ?.toIntOrNull() ?: 0
+                                val swapsAxes = rotation % 180f != 0f
+                                val displayWidth = if (swapsAxes) sourceHeight else sourceWidth
+                                val displayHeight = if (swapsAxes) sourceWidth else sourceHeight
+                                val scale = if (displayWidth > 0 && displayHeight > 0)
+                                    minOf(1f, 360f / displayWidth, 360f / displayHeight)
+                                else 1f
+                                val targetDisplayWidth = (displayWidth * scale).toInt().coerceAtLeast(1)
+                                val targetDisplayHeight = (displayHeight * scale).toInt().coerceAtLeast(1)
+                                val decodeWidth = if (swapsAxes) targetDisplayHeight else targetDisplayWidth
+                                val decodeHeight = if (swapsAxes) targetDisplayWidth else targetDisplayHeight
+                                val moments = listOf(1000L, 3000L, 5000L, 0L)
+                                    .map { it.coerceAtMost((duration - 1L).coerceAtLeast(0L)) }.distinct()
+                                for (moment in moments) {
+                                    val candidate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 &&
+                                        sourceWidth > 0 && sourceHeight > 0) {
+                                        retriever.getScaledFrameAtTime(
+                                            moment * 1000L,
+                                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                                            decodeWidth,
+                                            decodeHeight,
+                                        )
+                                    } else {
+                                        retriever.getFrameAtTime(moment * 1000L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                    }
+                                        ?: continue
+                                    val oriented = if (rotation % 360f == 0f) candidate else {
+                                        Bitmap.createBitmap(candidate, 0, 0, candidate.width, candidate.height,
+                                            Matrix().apply { postRotate(rotation) }, true).also { if (it !== candidate) candidate.recycle() }
+                                    }
+                                    val scaled = if (oriented.width > 360 || oriented.height > 360) {
+                                        val factor = minOf(360f / oriented.width, 360f / oriented.height)
+                                        Bitmap.createScaledBitmap(oriented, (oriented.width * factor).toInt().coerceAtLeast(1),
+                                            (oriented.height * factor).toInt().coerceAtLeast(1), true).also { if (it !== oriented) oriented.recycle() }
+                                    } else oriented
+                                    val sample = scaled.getPixel(scaled.width / 2, scaled.height / 2)
+                                    val brightness = (android.graphics.Color.red(sample) + android.graphics.Color.green(sample) + android.graphics.Color.blue(sample)) / 3
+                                    if (bitmap == null || brightness > 14) {
+                                        bitmap?.recycle()
+                                        bitmap = scaled
+                                    }
+                                    else scaled.recycle()
+                                    if (brightness > 14) break
+                                }
+                                val frame = bitmap ?: throw IllegalStateException("No video frame")
+                                val temporary = File(cache, "$digest.tmp")
+                                temporary.outputStream().use { stream ->
+                                    if (!frame.compress(Bitmap.CompressFormat.JPEG, 82, stream)) throw IllegalStateException("Thumbnail encode failed")
+                                }
+                                java.nio.file.Files.move(temporary.toPath(), output.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                                frame.recycle()
+                            }
+                            retriever?.release()
+                            val dims = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            android.graphics.BitmapFactory.decodeFile(output.path, dims)
+                            runOnUiThread { result.success(mapOf("path" to output.path, "width" to dims.outWidth, "height" to dims.outHeight, "cacheHit" to cacheHit)) }
+                        } catch (_: Throwable) {
+                            retriever?.release()
+                            runOnUiThread { result.success(null) }
+                        }
+                    }
+                    } catch (_: RejectedExecutionException) {
+                        result.success(null)
+                    }
+                    return@setMethodCallHandler
+                }
                 if (call.method != "playLocalVideo") {
                     result.notImplemented()
                     return@setMethodCallHandler
@@ -96,6 +329,42 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 } catch (_: Throwable) {
                     result.error("dialer_unavailable", "ไม่สามารถเปิดแอปโทรศัพท์ได้", null)
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, emergencyRuntimeChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> {
+                        val mode = call.argument<String>("mode")
+                        if (mode != "sos" && mode != "rescue" && mode != "nearbyRelay") {
+                            result.error("invalid_mode", "Emergency mode is unavailable", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            val serviceIntent = Intent(this, EmergencyModeForegroundService::class.java)
+                                .setAction(EmergencyModeForegroundService.ACTION_START)
+                                .putExtra(EmergencyModeForegroundService.EXTRA_MODE, mode)
+                            ContextCompat.startForegroundService(this, serviceIntent)
+                            result.success(true)
+                        } catch (error: Throwable) {
+                            result.error("foreground_service_unavailable", "ไม่สามารถเริ่มการแจ้งเตือนโหมดฉุกเฉินได้", null)
+                        }
+                    }
+                    "stop" -> {
+                        val mode = call.argument<String>("mode")
+                        if (mode == null || EmergencyModeForegroundService.activeMode == mode) {
+                            stopService(Intent(this, EmergencyModeForegroundService::class.java))
+                        }
+                        result.success(null)
+                    }
+                    "isRunning" -> {
+                        val mode = call.argument<String>("mode")
+                        result.success(
+                            EmergencyModeForegroundService.running &&
+                                (mode == null || EmergencyModeForegroundService.activeMode == mode),
+                        )
+                    }
+                    else -> result.notImplemented()
                 }
             }
         if (packageName != PROD_APPLICATION_ID) {
@@ -186,12 +455,21 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onPause() {
+        window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         (intent.getStringExtra(EXTRA_NOTIFICATION_ROUTE)
             ?: intent.getStringExtra("route"))?.let { route ->
-            notificationsMethodChannel?.invokeMethod("notificationTapped", route)
+            notificationsMethodChannel?.let { channel ->
+                channel.invokeMethod("notificationTapped", route)
+                intent.removeExtra(EXTRA_NOTIFICATION_ROUTE)
+                intent.removeExtra("route")
+            }
         }
     }
 
@@ -308,7 +586,13 @@ class MainActivity : FlutterActivity() {
         val body = arguments["body"] as? String ?: "มีการแจ้งเตือนใหม่"
         val route = arguments["route"] as? String ?: return result.error("invalid_route", "Notification route is unavailable", null)
         val urgent = arguments["urgent"] as? Boolean ?: false
-        if (route != "/sos" && !route.matches(Regex("^/chat/[A-Za-z0-9._:-]{1,128}$"))) {
+        val soundEnabled = arguments["soundEnabled"] as? Boolean ?: true
+        val vibrationEnabled = arguments["vibrationEnabled"] as? Boolean ?: true
+        val exactSosRoute = route.matches(
+            Regex("^/rescue/request/[A-Za-z0-9._:-]{1,128}\\?eventId=[0-9a-fA-F-]{36}$")
+        )
+        if (route != "/sos" && !exactSosRoute &&
+            !route.matches(Regex("^/chat/[A-Za-z0-9._:-]{1,128}$"))) {
             return result.error("invalid_route", "Notification route is not allowed", null)
         }
         if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) {
@@ -325,8 +609,12 @@ class MainActivity : FlutterActivity() {
             openApp,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val channel = if (urgent) CHANNEL_SAFETY else CHANNEL_MESSAGES
-        val notification = NotificationCompat.Builder(this, channel)
+        val channel = notificationChannelFor(
+            urgent = urgent,
+            soundEnabled = soundEnabled,
+            vibrationEnabled = vibrationEnabled,
+        )
+        val builder = NotificationCompat.Builder(this, channel)
             .setSmallIcon(applicationInfo.icon)
             .setContentTitle(title)
             .setContentText(body)
@@ -336,9 +624,45 @@ class MainActivity : FlutterActivity() {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .build()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            builder
+                .setSound(
+                    if (soundEnabled) RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) else null,
+                )
+                .setVibrate(if (vibrationEnabled) longArrayOf(0, 250, 120, 250) else longArrayOf(0))
+        }
+        val notification = builder.build()
         NotificationManagerCompat.from(this).notify(id.hashCode() and 0x7fffffff, notification)
         result.success(true)
+    }
+
+    private fun notificationChannelFor(
+        urgent: Boolean,
+        soundEnabled: Boolean,
+        vibrationEnabled: Boolean,
+    ): String {
+        val base = if (urgent) CHANNEL_SAFETY else CHANNEL_MESSAGES
+        if (soundEnabled && vibrationEnabled) return base
+        val channelId = "${base}_s${if (soundEnabled) 1 else 0}_v${if (vibrationEnabled) 1 else 0}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (manager.getNotificationChannel(channelId) == null) {
+                val channel = NotificationChannel(
+                    channelId,
+                    if (urgent) "RELIO safety alerts" else "RELIO messages",
+                    if (urgent) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT,
+                )
+                channel.description = "กำหนดเสียงและการสั่นจากการตั้งค่า RELIO; Android ยังควบคุมการแจ้งเตือนได้"
+                channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PRIVATE)
+                channel.enableVibration(vibrationEnabled)
+                channel.setSound(
+                    if (soundEnabled) RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION) else null,
+                    null,
+                )
+                manager.createNotificationChannel(channel)
+            }
+        }
+        return channelId
     }
 
     private fun handleUpdateCall(call: MethodCall, result: MethodChannel.Result) {
@@ -460,6 +784,7 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        @Volatile private var retainedEngine: FlutterEngine? = null
         private const val REQUEST_NOTIFICATIONS = 9024
         private const val CHANNEL_MESSAGES = "relio_messages"
         private const val CHANNEL_SAFETY = "relio_safety"

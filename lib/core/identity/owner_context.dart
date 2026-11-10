@@ -47,6 +47,7 @@ class OwnerContext {
     return snapshot.generation == _generation && snapshot.userId == _userId;
   }
 
+  // ตรวจ owner ก่อนและหลังงาน async เพื่อไม่ให้ผลลัพธ์ของบัญชีเดิมถูกใช้หลังสลับบัญชี
   Future<T> run<T>(Future<T> Function() action) async {
     final snapshot = capture();
     requireCurrent(snapshot);

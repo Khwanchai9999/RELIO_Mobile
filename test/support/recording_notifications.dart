@@ -3,7 +3,17 @@ import 'dart:async';
 import 'package:relio_mobile/core/notifications/local_notification_service.dart';
 
 class RecordingNotifications implements LocalNotificationSink {
-  final shown = <({String id, String title, String body, String route})>[];
+  final shown =
+      <
+        ({
+          String id,
+          String title,
+          String body,
+          String route,
+          bool soundEnabled,
+          bool vibrationEnabled,
+        })
+      >[];
   final taps = StreamController<String>.broadcast();
   Future<void> Function(String id)? beforeShow;
   String? initialRoute;
@@ -24,8 +34,17 @@ class RecordingNotifications implements LocalNotificationSink {
     required String body,
     required String route,
     required bool urgent,
+    required bool soundEnabled,
+    required bool vibrationEnabled,
   }) async {
     await beforeShow?.call(id);
-    shown.add((id: id, title: title, body: body, route: route));
+    shown.add((
+      id: id,
+      title: title,
+      body: body,
+      route: route,
+      soundEnabled: soundEnabled,
+      vibrationEnabled: vibrationEnabled,
+    ));
   }
 }

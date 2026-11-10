@@ -18,7 +18,8 @@ abstract final class CloudErrorMapper {
       return CloudException(_message(code), code: code);
     }
     if (error is AuthException) {
-      // GoTrue wraps transport failures in this AuthException subtype, so
+      // GoTrue ห่อความล้มเหลวของเครือข่ายไว้ใน AuthException ชนิดย่อยนี้ได้
+      // หากเหมารวมเป็นข้อมูลรับรองผิด จะซ่อนเหตุ Cloud ขัดข้องจากผู้ใช้      // GoTrue wraps transport failures in this AuthException subtype, so
       // treating every AuthException as bad credentials hides Cloud outages.
       if (error is AuthRetryableFetchException) {
         return const CloudException('Cloud ไม่พร้อมใช้งาน', code: 'offline');
@@ -30,11 +31,16 @@ abstract final class CloudErrorMapper {
         'email_not_confirmed' => 'emailConfirmationRequired',
         'weak_password' => 'weakPassword',
         'signup_disabled' || 'email_provider_disabled' => 'signupDisabled',
+        'anonymous_provider_disabled' => 'anonymousProviderDisabled',
         'email_address_invalid' => 'invalidEmail',
         'email_address_not_authorized' => 'emailDeliveryUnavailable',
         'validation_failed' => 'invalidInput',
         'over_email_send_rate_limit' => 'emailRateLimit',
         'over_request_rate_limit' => 'rateLimit',
+        'expired_refresh_token' ||
+        'refresh_token_not_found' ||
+        'invalid_refresh_token' ||
+        'session_expired' => 'sessionExpired',
         'otp_expired' ||
         'flow_state_expired' ||
         'flow_state_not_found' => 'recoveryRequired',
@@ -81,6 +87,8 @@ abstract final class CloudErrorMapper {
     'emailAlreadyUsed' => 'อีเมลนี้ถูกใช้งานแล้ว',
     'weakPassword' => 'รหัสผ่านไม่ผ่านข้อกำหนดของระบบ',
     'signupDisabled' => 'ขณะนี้ระบบปิดรับสมัครบัญชีใหม่',
+    'anonymousProviderDisabled' =>
+      'ระบบบัญชี Guest บน Cloud ยังไม่เปิดใช้งาน ข้อมูลออฟไลน์ในเครื่องยังคงอยู่',
     'invalidEmail' => 'อีเมลนี้ใช้สมัครไม่ได้ กรุณาใช้อีเมลที่ใช้งานได้จริง',
     'emailDeliveryUnavailable' => 'ขณะนี้ระบบส่งอีเมลยืนยันไปยังอีเมลนี้ไม่ได้',
     'emailRateLimit' => 'ส่งอีเมลยืนยันถี่เกินไป กรุณารอสักครู่แล้วลองใหม่',
